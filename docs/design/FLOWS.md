@@ -158,7 +158,7 @@ After a decision, update the original Slack notification and all live review pag
 | Response already open | Download | 1 |
 | Action completed | Read result and follow its PR, repository, or other result link | 1 to open a visible result link |
 
-An unauthenticated browser adds its sign-in flow. Browser recipients need no installation. “Available” means accessible, “received” means retrieval was acknowledged, and “downloaded” means transfer completed. None proves a person read it.
+An unauthenticated browser adds its sign-in flow. Browser recipients need no installation. A browser download is one click; acknowledging it with **Mark received** is one additional click. CLI/MCP downloads verify and acknowledge the file automatically. “Available” means accessible, “received” means retrieval was acknowledged, and “downloaded” means transfer completed. None proves a person read it.
 
 An action’s approved receipt can include status and the resulting URL. New private messages/files outside the approved scope return to review. Stopping a Litecom download link does not undo a completed deployment, PR, or GitHub permission change.
 

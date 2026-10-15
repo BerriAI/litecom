@@ -1,6 +1,454 @@
 //! Failure and race cases exercised through independent database connections and HTTP.
 use super::*;
 
+#[tokio::test]
+async fn multipart_uploads_validate_metadata_and_commit_only_complete_files() {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let f = Fixture::new();
+    f.advance(61);
+    let (_, session) = user(&f.store, "Moe", "+14155550102");
+    let task = f.request("multipart");
+    let state = crate::api::AppState::new(
+        f.store,
+        "http://localhost".into(),
+        crate::providers::Providers::from_env(true).unwrap(),
+    );
+    let router = crate::api::router(state.clone());
+    let metadata =
+        serde_json::json!({"name":"notes.txt", "media_type":"text/plain; charset=utf-8"})
+            .to_string();
+    let part = |name: &str, data: &str| {
+        format!("--boundary\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{data}\r\n")
+    };
+    let valid = format!(
+        "{}{}--boundary--\r\n",
+        part("metadata", &metadata),
+        part("file", "")
+    );
+    let cases = [
+        (false, valid.clone(), StatusCode::UNAUTHORIZED),
+        (
+            true,
+            format!(
+                "{}{}--boundary--\r\n",
+                part("metadata", "not JSON"),
+                part("file", "data")
+            ),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            true,
+            format!(
+                "{}{}--boundary--\r\n",
+                part("file", "data"),
+                part("metadata", &metadata)
+            ),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            true,
+            format!(
+                "{}{}{}--boundary--\r\n",
+                part("metadata", &metadata),
+                part("file", "data"),
+                part("extra", "more")
+            ),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            true,
+            format!(
+                "{}--boundary\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\nunfinished",
+                part("metadata", &metadata)
+            ),
+            StatusCode::BAD_REQUEST,
+        ),
+        (true, valid, StatusCode::OK),
+    ];
+    for (authenticated, body, expected) in cases {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/tasks/{}/files", task.id))
+            .header("Content-Type", "multipart/form-data; boundary=boundary");
+        if authenticated {
+            request = request
+                .header("Cookie", format!("litecom_session={}", session.token))
+                .header("Origin", "http://localhost")
+                .header("X-CSRF-Token", &session.csrf);
+        }
+        let response = router
+            .clone()
+            .oneshot(request.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        if expected == StatusCode::OK {
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let file: Artifact = serde_json::from_slice(&body).unwrap();
+            assert_eq!(file.size, 0);
+            assert_eq!(file.sha256, hash(b""));
+            assert_eq!(file.media_type, "text/plain; charset=utf-8");
+            assert!(
+                state
+                    .db()
+                    .unwrap()
+                    .download(&f.b, &file.id)
+                    .unwrap()
+                    .1
+                    .is_empty()
+            );
+        }
+        let count: i64 = state
+            .db()
+            .unwrap()
+            .db
+            .query_row("SELECT COUNT(*) FROM artifacts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, if expected == StatusCode::OK { 1 } else { 0 });
+    }
+}
+
+#[tokio::test]
+#[ignore = "Uses a real 64-second HTTP upload; run explicitly for transfer validation"]
+async fn progressing_upload_outlives_response_header_timeout() {
+    use futures_util::StreamExt;
+    use std::time::{Duration, Instant};
+    let f = Fixture::new();
+    let task = f.request("slow-upload");
+    let device = f.store.begin_device("Slow upload fixture").unwrap();
+    f.store
+        .authorize_device(&f.b, &device.user_code, &f.agent)
+        .unwrap();
+    let connection = f.store.poll_device(&device.device_code).unwrap().unwrap();
+    let principal = f
+        .store
+        .authenticate(&connection.token, Role::Agent)
+        .unwrap();
+    let work = f.store.claim(&principal, &f.agent).unwrap().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let state = crate::api::AppState::new(
+        f.store,
+        origin.clone(),
+        crate::providers::Providers::from_env(true).unwrap(),
+    );
+    let router = crate::api::router(state.clone()).layer(axum::middleware::from_fn(
+        |request: axum::extract::Request, next: axum::middleware::Next| async move {
+            let (parts, body) = request.into_parts();
+            let body = if parts.uri.path().ends_with("/files") {
+                let stream = body.into_data_stream().then(|chunk| async move {
+                    if let Ok(bytes) = &chunk {
+                        tokio::time::sleep(Duration::from_secs_f64(
+                            bytes.len() as f64 * 64.0 / (1024.0 * 1024.0),
+                        ))
+                        .await;
+                    }
+                    chunk
+                });
+                axum::body::Body::from_stream(stream)
+            } else {
+                body
+            };
+            next.run(axum::extract::Request::from_parts(parts, body))
+                .await
+        },
+    ));
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let client = crate::client::Client::new(crate::config::ClientConfig {
+        relay: origin,
+        token: connection.token,
+        user_id: f.b.user_id.clone(),
+        agent_id: f.agent,
+        workspace: None,
+        runner: None,
+        approval_channel: None,
+    })
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("slow.bin");
+    let payload = vec![0x5a; 1024 * 1024];
+    std::fs::write(&path, &payload).unwrap();
+    let started = Instant::now();
+    let uploaded = client
+        .upload(&task.id, Some(&work.lease), &path)
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= Duration::from_secs(64));
+    assert_eq!(uploaded.sha256, hash(&payload));
+    assert_eq!(
+        state.db().unwrap().download(&f.b, &uploaded.id).unwrap().1,
+        payload
+    );
+    assert!(state.db().unwrap().download(&f.a, &uploaded.id).is_err());
+    server.abort();
+}
+
+#[test]
+fn notification_retries_survive_long_provider_outages() {
+    let f = Fixture::new();
+    f.store.enable_phone(&f.b).unwrap();
+    f.draft("retry-through-outage", None);
+    for attempt in 1..=40 {
+        let delivery = f
+            .store
+            .next_delivery()
+            .unwrap()
+            .expect("Notification must remain recoverable");
+        assert_eq!(delivery.attempts, attempt);
+        f.store
+            .delivery_result(
+                &delivery,
+                &Err(crate::error::Error::Unavailable(
+                    "Temporary provider outage".into(),
+                )),
+            )
+            .unwrap();
+        f.advance(3601);
+    }
+    let delivery = f.store.next_delivery().unwrap().unwrap();
+    f.store
+        .delivery_result(&delivery, &Ok("accepted-after-recovery".into()))
+        .unwrap();
+    assert_eq!(
+        f.store.channels(&f.b).unwrap()[0]
+            .delivery_status
+            .as_deref(),
+        Some("accepted_by_provider")
+    );
+}
+
+#[test]
+fn old_content_limits_do_not_restrict_requests_replies_or_approvals() {
+    let f = Fixture::new();
+    let task = f
+        .store
+        .create_task(
+            &f.a,
+            NewTask {
+                owner_id: f.b.user_id.clone(),
+                agent_id: None,
+                request: "Request context. ".repeat(10_000),
+                idempotency_key: "long-request".into(),
+            },
+        )
+        .unwrap();
+    let mut files = vec![];
+    for index in 0..105 {
+        files.push(
+            f.store
+                .upload(
+                    &f.b,
+                    &task.id,
+                    None,
+                    &format!("file-{index}.txt"),
+                    "text/plain",
+                    b"fixture",
+                )
+                .unwrap()
+                .id,
+        );
+    }
+    let text = "Full response. ".repeat(230_000);
+    let prepared = f
+        .store
+        .prepare(
+            &f.b,
+            &task.id,
+            None,
+            DraftInput {
+                text: text.clone(),
+                attachment_ids: files,
+                action: None,
+            },
+        )
+        .unwrap();
+    f.approve(&prepared);
+    f.advance(40 * 24 * 60 * 60);
+    let response = f.store.get_task(&f.a, &task.id).unwrap();
+    assert_eq!(response.expires_at, None);
+    assert_eq!(response.response.as_ref().unwrap().text, text);
+    assert_eq!(response.response.unwrap().attachments.len(), 105);
+
+    let launch = f.draft("more-permissions", Some(action()));
+    f.approve(&launch);
+    let work = f.store.claim(&f.bw, &f.agent).unwrap().unwrap();
+    for index in 0..105 {
+        let details = if index == 0 {
+            "context".repeat(20_000)
+        } else {
+            "one operation".into()
+        };
+        f.store
+            .request_permission(
+                &f.bw,
+                &launch.id,
+                &work.lease,
+                ToolPermissionInput {
+                    id: id(),
+                    title: format!("Operation {index}"),
+                    details: serde_json::json!({"scope":details}),
+                },
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        f.store
+            .get_task(&f.b, &launch.id)
+            .unwrap()
+            .permissions
+            .len(),
+        105
+    );
+}
+
+#[test]
+fn chunked_files_reject_corruption_and_cancelled_uploads() {
+    let f = Fixture::new();
+    let task = f.request("chunks");
+    let payload = vec![0x5a; 3 * 1024 * 1024 + 17];
+    let file = f
+        .store
+        .upload(
+            &f.b,
+            &task.id,
+            None,
+            "large.bin",
+            "application/octet-stream",
+            &payload,
+        )
+        .unwrap();
+    let prepared = f
+        .store
+        .prepare(
+            &f.b,
+            &task.id,
+            None,
+            DraftInput {
+                text: String::new(),
+                attachment_ids: vec![file.id.clone()],
+                action: None,
+            },
+        )
+        .unwrap();
+    f.approve(&prepared);
+    assert_eq!(f.store.download(&f.a, &file.id).unwrap().1, payload);
+    f.store.db.execute("UPDATE artifact_chunks SET data=(SELECT data FROM artifact_chunks WHERE artifact_id=? AND sequence=0) WHERE artifact_id=? AND sequence=1",rusqlite::params![file.id,file.id]).unwrap();
+    assert!(
+        f.store.download(&f.a, &file.id).is_err(),
+        "Chunks are authenticated against their position"
+    );
+    let pending = f.request("aborted-upload");
+    let mut upload = f
+        .store
+        .begin_upload(
+            &f.b,
+            &pending.id,
+            None,
+            "not-committed.bin",
+            "application/octet-stream",
+        )
+        .unwrap();
+    upload.write(&payload).unwrap();
+    f.store.cancel(&f.b, &pending.id).unwrap();
+    assert!(f.store.finish_upload(&f.b, None, upload).is_err());
+    let count: i64 = f
+        .store
+        .db
+        .query_row(
+            "SELECT COUNT(*) FROM artifacts WHERE task_id=?",
+            [pending.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn schema_upgrade_preserves_existing_encrypted_files() {
+    let (directory, f) = disk_fixture();
+    let task = f.request("legacy-file");
+    let expired = f.request("already-expired");
+    for (task_id, expiry) in [(&task.id, 2000), (&expired.id, 999)] {
+        let encrypted: Vec<u8> = f
+            .store
+            .db
+            .query_row("SELECT data FROM tasks WHERE id=?", [task_id], |r| r.get(0))
+            .unwrap();
+        let mut old: serde_json::Value = f
+            .store
+            .vault
+            .open(&encrypted, &format!("task:{task_id}"))
+            .unwrap();
+        old["view"]["expires_at"] = serde_json::json!(expiry);
+        f.store
+            .db
+            .execute(
+                "UPDATE tasks SET expires_at=?,data=? WHERE id=?",
+                rusqlite::params![
+                    expiry,
+                    f.store
+                        .vault
+                        .seal(&old, &format!("task:{task_id}"))
+                        .unwrap(),
+                    task_id
+                ],
+            )
+            .unwrap();
+    }
+    let file = f
+        .store
+        .upload(
+            &f.b,
+            &task.id,
+            None,
+            "legacy.txt",
+            "text/plain",
+            b"existing file",
+        )
+        .unwrap();
+    f.store
+        .db
+        .execute(
+            "DELETE FROM artifact_chunks WHERE artifact_id=?",
+            [&file.id],
+        )
+        .unwrap();
+    f.store
+        .db
+        .execute(
+            "UPDATE artifacts SET data=? WHERE id=?",
+            rusqlite::params![
+                f.store
+                    .vault
+                    .encrypt(b"existing file", &format!("artifact:{}", file.id))
+                    .unwrap(),
+                file.id
+            ],
+        )
+        .unwrap();
+    f.store.db.execute_batch("PRAGMA user_version=1;").unwrap();
+    let upgraded = Store::with_clock(
+        directory.path().join("litecom.db"),
+        [7; 32],
+        Arc::new(|| 1000),
+    )
+    .unwrap();
+    assert_eq!(upgraded.get_task(&f.b, &task.id).unwrap().expires_at, None);
+    assert_eq!(
+        upgraded.get_task(&f.b, &expired.id).unwrap().status,
+        Status::Expired
+    );
+    assert_eq!(
+        upgraded.download(&f.b, &file.id).unwrap().1,
+        b"existing file"
+    );
+}
+
 fn disk_fixture() -> (tempfile::TempDir, Fixture) {
     let directory = tempfile::tempdir().unwrap();
     let clock = Arc::new(AtomicI64::new(1000));
@@ -305,7 +753,7 @@ async fn downloads_publish_only_verified_bytes_with_portable_filenames() {
         .unwrap();
     let disposition = response.headers()["content-disposition"].to_str().unwrap();
     assert!(
-        disposition.ends_with("filename*=UTF-8''report%3A%20Q4%20%2B%20%3Cdraft%3E%3F%2A.txt"),
+        disposition.ends_with("report_%20Q4%20%2B%20_draft___.txt"),
         "{disposition}"
     );
     for file in files {

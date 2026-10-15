@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS artifacts (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), size INTEGER NOT NULL,
   metadata BLOB NOT NULL, data BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS artifact_chunks (
+  artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY(artifact_id,sequence)
+);
 CREATE TABLE IF NOT EXISTS approvals (
   task_id TEXT NOT NULL REFERENCES tasks(id), version INTEGER NOT NULL, digest TEXT NOT NULL,
   user_id TEXT NOT NULL REFERENCES profiles(id), decision TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -70,7 +75,6 @@ CREATE TABLE IF NOT EXISTS oauth_links (
   credential_id TEXT NOT NULL REFERENCES credentials(id), data BLOB NOT NULL,
   expires_at INTEGER NOT NULL, phase TEXT NOT NULL DEFAULT 'pending'
 );
-PRAGMA user_version = 1;
 CREATE TABLE IF NOT EXISTS cloud_jobs (
   task_id TEXT PRIMARY KEY REFERENCES tasks(id), phase TEXT NOT NULL,
   data BLOB NOT NULL, claim_hash TEXT, claim_until INTEGER NOT NULL DEFAULT 0,

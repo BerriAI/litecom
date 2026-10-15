@@ -385,9 +385,6 @@ async fn native_reply(
     };
     let reply: AgentReply = serde_json::from_slice(&output)
         .context("The agent's reply did not match the expected format.")?;
-    if reply.text.len() > 2_000_000 || reply.files.len() > 100 {
-        bail!("The agent returned more than Litecom can transfer in one request.");
-    }
     Ok(reply)
 }
 
@@ -395,14 +392,11 @@ fn decode_claude_reply(output: &[u8]) -> Result<Vec<u8>> {
     let envelope: Value = serde_json::from_slice(output)
         .context("Claude Code did not return its expected JSON envelope.")?;
     if envelope["is_error"] == true {
-        // Bound the diagnostic stored in the owner's receipt, not model output.
         // The requester only receives Store's generic failure projection.
         let detail: String = envelope["result"]
             .as_str()
             .unwrap_or("No error detail was returned.")
-            .chars()
-            .take(2_000)
-            .collect();
+            .to_owned();
         bail!("Claude Code reported an error: {detail}");
     }
     if let Some(reply) = envelope.get("structured_output") {
@@ -426,8 +420,8 @@ pub fn attachment_path(workspace: &Path, path: &Path) -> Result<PathBuf> {
         bail!("The agent requested a file outside the approved folder.");
     }
     let metadata = resolved.metadata()?;
-    if !metadata.is_file() || metadata.len() > crate::store::MAX_FILE_BYTES as u64 {
-        bail!("Attachments must be regular files no larger than 25 MiB.");
+    if !metadata.is_file() {
+        bail!("Attachments must be regular files.");
     }
     Ok(resolved)
 }

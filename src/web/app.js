@@ -56,7 +56,7 @@ function error(err) {
   app.prepend(el);
 }
 const badge = (s, t) =>
-  `<span class="badge">${esc(s === "completed" && t?.revoked_at ? "Access revoked" : s === "completed" && t?.expires_at <= Date.now() / 1000 ? "Expired" : { queued: "Waiting for agent", preparing: "Preparing", awaiting_approval: "Ready for review", approved: "Approved · waiting for agent", executing: "Running", cancel_requested: "Cancellation requested", completed: "Available", declined: "Declined", cancelled: "Cancelled", failed: "Needs attention", expired: "Expired" }[s] || s)}</span>`;
+  `<span class="badge">${esc(s === "completed" && t?.revoked_at ? "Access revoked" : s === "completed" && t?.expires_at != null && t.expires_at <= Date.now() / 1000 ? "Expired" : { queued: "Waiting for agent", preparing: "Preparing", awaiting_approval: "Ready for review", approved: "Approved · waiting for agent", executing: "Running", cancel_requested: "Cancellation requested", completed: "Available", declined: "Declined", cancelled: "Cancelled", failed: "Needs attention", expired: "Expired" }[s] || s)}</span>`;
 const files = (items) =>
   items.length
     ? `<ul class="files">${items.map((f) => `<li><a href="/api/files/${encodeURIComponent(f.id)}" data-download="${esc(f.id)}" data-name="${esc(f.name)}" data-sha256="${esc(f.sha256)}" download>${esc(f.name)}</a><small>${(f.size / 1024).toFixed(1)} KB</small></li>`).join("")}</ul>`
@@ -157,7 +157,7 @@ function login() {
     ? requested
     : null;
   if (chosen) sessionStorage.setItem("approval-channel", chosen);
-  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Review what leaves your account. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${chosen ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>` : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${["Phone", "Slack", "Email"].map((c, i) => `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`).join("")}</div></fieldset>`}<label>Your name<input name="name" autocomplete="name" required maxlength="100"></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone connects all your agents to one account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Review what leaves your account. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${chosen ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>` : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${["Phone", "Slack", "Email"].map((c, i) => `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`).join("")}</div></fieldset>`}<label>Your name<input name="name" autocomplete="name" required></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone connects all your agents to one account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
 }
 
 function slackSetup() {
@@ -205,8 +205,17 @@ async function render() {
   return inbox();
 }
 async function inbox() {
+  const cursor = new URLSearchParams(location.search);
+  const query =
+    cursor.has("before_time") && cursor.has("before_id")
+      ? "?" +
+        new URLSearchParams({
+          before_time: cursor.get("before_time"),
+          before_id: cursor.get("before_id"),
+        })
+      : "";
   const [tasks, contacts, agents] = await Promise.all([
-    api("/api/tasks"),
+    api("/api/tasks" + query),
     api("/api/contacts"),
     api("/api/agents"),
   ]);
@@ -217,7 +226,26 @@ async function inbox() {
     .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
     .join(
       "",
-    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details>${tasks.length ? tasks.map((t) => `<article class="card"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : '<div class="card empty"><h2>Start with a request.</h2><p>Ask one of your own agents above, or <a href="/contacts">connect with someone</a>.</p></div>'}`;
+    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details>${tasks.length ? tasks.map((t) => `<article class="card"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="card empty"><h2>No older requests.</h2></div>' : '<div class="card empty"><h2>Start with a request.</h2><p>Ask one of your own agents above, or <a href="/contacts">connect with someone</a>.</p></div>'}`;
+  const last = tasks.at(-1);
+  if (query || tasks.length === 100) {
+    const paging = document.createElement("nav");
+    paging.className = "actions";
+    paging.setAttribute("aria-label", "Inbox pages");
+    if (query) paging.innerHTML = '<a href="/">Latest requests</a>';
+    if (tasks.length === 100) {
+      const link = document.createElement("a");
+      link.textContent = "Older requests";
+      link.href =
+        "/?" +
+        new URLSearchParams({
+          before_time: last.created_at,
+          before_id: last.id,
+        });
+      paging.append(link);
+    }
+    app.append(paging);
+  }
 }
 function editingTask() {
   return (
@@ -242,7 +270,7 @@ async function taskPage(id, update, previous) {
   const editable =
     owner && ["queued", "preparing", "awaiting_approval"].includes(t.status);
   const d = owner ? t.draft : null;
-  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner ? "Review request" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="card"><h2>Requested</h2><div class="prose">${esc(t.request)}</div></div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">This request is saved. The selected agent will pick it up when it connects.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="card"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Up to 25 MiB per file. Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
+  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner ? "Review request" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="card"><h2>Requested</h2><div class="prose">${esc(t.request)}</div></div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">This request is saved. The selected agent will pick it up when it connects.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="card"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
 }
 async function contactsPage() {
   const contacts = await api("/api/contacts");
@@ -250,7 +278,7 @@ async function contactsPage() {
 }
 async function agentsPage() {
   const agents = await api("/api/agents");
-  app.innerHTML = `<h1>Your agents</h1><p class="muted">One account. A separate connection for every agent.</p>${agents.map((a) => `<section class="card"><div class="row"><h2>${esc(a.name)}</h2><span class="badge">${a.is_default ? "Default" : esc(a.kind)}</span></div><p class="muted">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : a.kind === "devin" ? "Connect Devin below to enable cloud requests" : "Waiting for a runner to connect"}</p><div class="actions">${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></div></section>`).join("")}<details class="card"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" maxlength="64" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Adding a name creates a destination. It becomes available after you connect its runner.</p><button>Create agent</button></form></details><details class="card" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use Devin even when your computer is off. Get a personal access token or service-user key from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings → Devin API</a>. Your existing Devin plan is required.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" maxlength="64" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">To reconnect, use the same agent name. The organization ID is at the top of Devin Settings → Devin API.</p></details><p class="muted subtitle">The server stores this token encrypted. Connecting checks access without starting a session. Each run needs your approval and uses your normal Devin billing.</p><button class="primary">Connect Devin</button></form></details>`;
+  app.innerHTML = `<h1>Your agents</h1><p class="muted">One account. A separate connection for every agent.</p>${agents.map((a) => `<section class="card"><div class="row"><h2>${esc(a.name)}</h2><span class="badge">${a.is_default ? "Default" : esc(a.kind)}</span></div><p class="muted">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : a.kind === "devin" ? "Connect Devin below to enable cloud requests" : "Waiting for a runner to connect"}</p><div class="actions">${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></div></section>`).join("")}<details class="card"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Adding a name creates a destination. It becomes available after you connect its runner.</p><button>Create agent</button></form></details><details class="card" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use Devin even when your computer is off. Get a personal access token or service-user key from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings → Devin API</a>. Your existing Devin plan is required.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">To reconnect, use the same agent name. The organization ID is at the top of Devin Settings → Devin API.</p></details><p class="muted subtitle">The server stores this token encrypted. Connecting checks access without starting a session. Each run needs your approval and uses your normal Devin billing.</p><button class="primary">Connect Devin</button></form></details>`;
 }
 async function connectPage(code) {
   const [device, agents] = await Promise.all([
@@ -346,17 +374,25 @@ document.addEventListener("submit", async (e) => {
         ...(currentTask.draft?.attachments || []).map((a) => a.id),
       ];
       for (const f of form.elements.files.files) {
-        if (f.size > 25 * 1024 * 1024)
-          throw new Error("Files can be up to 25 MiB each.");
-        const bytes = new Uint8Array(await f.arrayBuffer());
-        let binary = "";
-        for (let i = 0; i < bytes.length; i += 8192)
-          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-        const a = await api(`/api/tasks/${currentTask.id}/files`, {
-          name: f.name,
-          media_type: f.type || "application/octet-stream",
-          data: btoa(binary),
+        const upload = new FormData();
+        upload.append(
+          "metadata",
+          JSON.stringify({
+            name: f.name,
+            media_type: f.type || "application/octet-stream",
+          }),
+        );
+        upload.append("file", f);
+        const response = await fetch(`/api/tasks/${currentTask.id}/files`, {
+          method: "POST",
+          headers: { "X-CSRF-Token": csrf() },
+          body: upload,
         });
+        const a = await response.json();
+        if (!response.ok)
+          throw new Error(
+            a.error?.message || "The file could not be uploaded. Please retry.",
+          );
         attachment_ids.push(a.id);
       }
       await api(`/api/tasks/${currentTask.id}/draft`, {
@@ -444,40 +480,21 @@ document.addEventListener("click", async (e) => {
     if (busy) return;
     busy = true;
     try {
-      const response = await fetch(fileLink.href);
+      const response = await fetch(fileLink.href, { method: "HEAD" });
       if (!response.ok) throw new Error("This file is no longer available.");
-      const bytes = await response.arrayBuffer();
-      const digest = [
-        ...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-      ]
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-      if (digest !== fileLink.dataset.sha256)
+      if (response.headers.get("x-content-sha256") !== fileLink.dataset.sha256)
         throw new Error(
-          "The file did not match the approved snapshot. Please retry.",
+          "The file did not match the approved snapshot. Please refresh the request.",
         );
-      const url = URL.createObjectURL(new Blob([bytes]));
+      // The browser streams directly to its download destination. JavaScript
+      // cannot reliably observe its completion, so receipt remains explicit.
       const a = document.createElement("a");
-      a.href = url;
+      a.href = fileLink.href;
       a.download = fileLink.dataset.name;
       a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-      if (
-        currentTask?.requester_id === profile.id &&
-        currentTask.status === "completed"
-      ) {
-        try {
-          await api(`/api/files/${fileLink.dataset.download}/received`, {
-            sha256: digest,
-          });
-        } catch {
-          notice(
-            "Download verified; receipt could not be confirmed. You can mark the response received when reconnected.",
-          );
-          return;
-        }
-      }
-      notice("Download verified.");
+      notice(
+        "Download started. Mark the response received when your download finishes.",
+      );
     } catch (err) {
       error(err);
     } finally {

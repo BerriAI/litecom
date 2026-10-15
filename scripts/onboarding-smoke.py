@@ -1,5 +1,6 @@
 """Real terminal/browser/worker flow. Uses a fake native agent and a --dev relay."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ parser.add_argument('--url', default='http://127.0.0.1:4141')
 parser.add_argument('--dev-log', type=Path, required=True)
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
 parser.add_argument('--with-service', action='store_true')
+parser.add_argument('--file-mib', type=int, default=0, help='Exercise a streamed attachment of this size')
 parser.add_argument('--approval', choices=['phone','email'], default='phone')
 args = parser.parse_args()
 binary = args.binary.resolve()
@@ -72,7 +74,12 @@ done
 ''')
     fake.chmod(0o700)
     attachment = work/'notes.txt'
-    attachment.write_bytes(b'Prepared by the deterministic test agent.\n')
+    if args.file_mib:
+        with attachment.open('wb') as output:
+            block = bytes(range(256))*4096
+            for _ in range(args.file_mib): output.write(block)
+    else:
+        attachment.write_bytes(b'Prepared by the deterministic test agent.\n')
     (work/'reply.fixture').write_text(json.dumps({'text':'The requested notes are attached.', 'files':[str(attachment)]}))
     env = dict(os.environ, LITECOM_HOME=str(root/'config'), PATH=str(programs)+os.pathsep+os.environ['PATH'])
     prefix = [str(binary), '--connection', connection]
@@ -157,15 +164,24 @@ done
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Run approval overflow'
             page.screenshot(path=str(screenshots/'approve-run-mobile.png'),full_page=True)
             page.get_by_role('button',name='Approve run',exact=True).click()
-            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=20000)
+            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=120000 if args.file_mib else 20000)
             expect(page.locator('main')).to_contain_text('The requested notes are attached.')
             page.screenshot(path=str(screenshots/'approve-result-mobile.png'),full_page=True)
             page.get_by_role('button',name='Approve',exact=True).click()
             expect(page.get_by_role('button',name='Revoke access')).to_be_visible()
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()
-            assert Path(download.value.path()).read_bytes()==attachment.read_bytes()
-            expect(page.locator('main')).to_contain_text('1 file download verified',timeout=10000)
+            def digest(path):
+                with Path(path).open('rb') as stream: return hashlib.file_digest(stream,'sha256').hexdigest()
+            assert digest(download.value.path()) == digest(attachment)
+            view = page.request.get(args.url+'/api/tasks/'+request_url.rsplit('/',1)[1]).json()
+            assert not view['downloads'], 'A browser download does not claim completion automatically'
+            page.get_by_role('button',name='Mark received',exact=True).click()
+            expect(page.locator('main')).to_contain_text('Received.')
+            cli = subprocess.run(prefix+['download',view['id'],view['response']['attachments'][0]['id'],'--to',str(root/'download')],env=env,capture_output=True,text=True,timeout=120)
+            assert cli.returncode == 0, cli.stderr
+            assert digest(next((root/'download').iterdir())) == digest(attachment)
+            if args.file_mib: print(f'PASS: {args.file_mib} MiB streamed through native upload, browser download and verified CLI download.',flush=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.goto(args.url+'/settings')
             page.get_by_role('button',name='Disconnect',exact=True).click()

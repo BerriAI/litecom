@@ -3,10 +3,19 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
-import { mkdtemp, open, readFile, rm } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -247,6 +256,111 @@ try {
   await assert.rejects(
     client.getTask(GetTaskRequest.fromJSON({ id: randomUUID() })),
   );
+  if (process.env.LITECOM_SLOW_DOWNLOAD_TEST === "1") {
+    const slowTask = await client.sendMessage(
+      message("A slow but progressing download."),
+    );
+    const slowBytes = Buffer.alloc(1024 * 1024, 0x5a);
+    const slowFile = await b.call(`/api/tasks/${slowTask.id}/files`, {
+      name: "slow.bin",
+      media_type: "application/octet-stream",
+      data: slowBytes.toString("base64"),
+    });
+    const review = await b.call(`/api/tasks/${slowTask.id}/draft`, {
+      draft: {
+        text: "Slow transfer fixture",
+        attachment_ids: [slowFile.id],
+        action: null,
+      },
+    });
+    await b.call(`/api/tasks/${slowTask.id}/decision`, {
+      version: review.draft.version,
+      digest: review.draft.digest,
+      decision: "approve",
+    });
+    const proxy = createHttpServer(async (request, response) => {
+      try {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const data = Buffer.concat(chunks);
+        const upstream = await fetch(origin + request.url, {
+          method: request.method,
+          headers: {
+            Authorization: request.headers.authorization || "",
+            "Content-Type": "application/json",
+          },
+          body: data.length ? data : undefined,
+        });
+        const body = Buffer.from(await upstream.arrayBuffer());
+        response.writeHead(upstream.status, {
+          "Content-Type": upstream.headers.get("content-type"),
+          "Content-Length": body.length,
+        });
+        if (request.url === `/api/files/${slowFile.id}`) {
+          for (let offset = 0; offset < body.length; offset += 65536) {
+            await sleep(4000);
+            if (response.destroyed) break;
+            response.write(body.subarray(offset, offset + 65536));
+          }
+          response.end();
+        } else response.end(body);
+      } catch (error) {
+        response.destroy(error);
+      }
+    });
+    await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    try {
+      const home = join(root, "slow-client");
+      await mkdir(join(home, "connections"), { recursive: true });
+      await writeFile(
+        join(home, "connections", "default.json"),
+        JSON.stringify({
+          relay: `http://127.0.0.1:${proxy.address().port}`,
+          token,
+          user_id: a.profile.id,
+          agent_id: requesterAgent,
+        }),
+        { mode: 0o600 },
+      );
+      const started = Date.now();
+      const command = spawn(
+        resolve(process.argv[3] || "target/debug/litecom"),
+        [
+          "--home",
+          home,
+          "download",
+          slowTask.id,
+          slowFile.id,
+          "--to",
+          join(root, "slow-output"),
+        ],
+        { stdio: "pipe" },
+      );
+      let error = "";
+      command.stderr.on("data", (data) => {
+        error += data;
+      });
+      const code = await new Promise((resolve) =>
+        command.once("exit", resolve),
+      );
+      assert.equal(code, 0, error);
+      assert(Date.now() - started > 60000);
+      const names = await readdir(join(root, "slow-output"));
+      assert.equal(names.length, 1);
+      assert.deepEqual(
+        await readFile(join(root, "slow-output", names[0])),
+        slowBytes,
+      );
+      const after = await a.call(`/api/tasks/${slowTask.id}`);
+      assert.equal(after.downloads.length, 1);
+      console.log(
+        "PASS: progressing 64-second CLI download exceeds the former total timeout, verifies exact bytes, and records one receipt.",
+      );
+    } finally {
+      proxy.closeAllConnections();
+      await new Promise((resolve) => proxy.close(resolve));
+    }
+  }
   console.log(
     `PASS: official @a2a-js/sdk ${version}; authenticated discovery, SendMessage retry, private GetTask, exact artifacts/download, cancellation, and missing-task errors.`,
   );

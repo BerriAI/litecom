@@ -1,13 +1,10 @@
-use crate::{
-    config::ClientConfig,
-    crypto::{hash, id},
-    model::*,
-};
+use crate::{config::ClientConfig, crypto::id, model::*};
 use anyhow::{Context, Result, bail};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use futures_util::StreamExt;
 use reqwest::Method;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +18,7 @@ pub struct ApiError {
 pub struct Client {
     pub config: ClientConfig,
     http: reqwest::Client,
+    uploads: reqwest::Client,
 }
 impl Client {
     pub fn new(config: ClientConfig) -> Result<Self> {
@@ -28,7 +26,14 @@ impl Client {
         Ok(Self {
             config,
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(45))
+                .connect_timeout(std::time::Duration::from_secs(20))
+                .read_timeout(std::time::Duration::from_secs(45))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+            // Reqwest's read timeout also runs while sending the request body.
+            // File uploads use their work heartbeat and cancellation instead.
+            uploads: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(20))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
         })
@@ -135,13 +140,74 @@ impl Client {
         uuid::Uuid::parse_str(task)?;
         self.get(&format!("/api/tasks/{task}")).await
     }
+    pub async fn inbox(
+        &self,
+        before_time: Option<i64>,
+        before_id: Option<String>,
+    ) -> Result<Vec<TaskView>> {
+        let query = match (before_time, before_id) {
+            (None, None) => String::new(),
+            (Some(time), Some(id)) => {
+                uuid::Uuid::parse_str(&id)
+                    .context("Use the inbox cursor returned with the previous page.")?;
+                format!("?before_time={time}&before_id={id}")
+            }
+            _ => bail!("Use both before_time and before_id to read older requests."),
+        };
+        self.get(&format!("/api/tasks{query}")).await
+    }
     pub async fn upload(&self, task: &str, lease: Option<&str>, path: &Path) -> Result<Artifact> {
-        let metadata = tokio::fs::metadata(path).await?;
-        if !metadata.is_file() || metadata.len() > crate::store::MAX_FILE_BYTES as u64 {
-            bail!("Choose a regular file no larger than 25 MiB.");
+        let file = tokio::fs::File::open(path).await?;
+        if !file.metadata().await?.is_file() {
+            bail!("Choose a regular file.");
         }
-        let bytes = tokio::fs::read(path).await?;
-        self.post(&format!("/api/tasks/{task}/files"),json!({"lease":lease,"name":path.file_name().context("The file needs a name.")?.to_string_lossy(),"media_type":"application/octet-stream","data":STANDARD.encode(bytes)})).await
+        let name = path
+            .file_name()
+            .context("The file needs a name.")?
+            .to_string_lossy()
+            .into_owned();
+        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+        let form = reqwest::multipart::Form::new()
+            .text(
+                "metadata",
+                json!({"lease":lease,"name":name,"media_type":"application/octet-stream"})
+                    .to_string(),
+            )
+            .part(
+                "file",
+                reqwest::multipart::Part::stream(body).file_name(name),
+            );
+        let response = self
+            .uploads
+            .post(format!(
+                "{}/api/tasks/{task}/files",
+                self.config.relay.trim_end_matches('/')
+            ))
+            .bearer_auth(&self.config.token)
+            .multipart(form)
+            .send();
+        tokio::pin!(response);
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+        let response = loop {
+            tokio::select! {
+                response = &mut response => break response?,
+                _ = heartbeat.tick(), if lease.is_some() => {
+                    let status: Status = self.post(&format!("/api/tasks/{task}/heartbeat"),json!({"lease":lease})).await?;
+                    if !matches!(status,Status::Preparing|Status::Executing) { bail!("The upload was cancelled."); }
+                }
+            }
+        };
+        let status = response.status();
+        let value: Value = response.json().await?;
+        if !status.is_success() {
+            bail!(
+                "{}",
+                value["error"]["message"]
+                    .as_str()
+                    .unwrap_or("The file could not be uploaded.")
+            );
+        }
+        Ok(serde_json::from_value(value)?)
     }
     pub async fn download(
         &self,
@@ -172,23 +238,33 @@ impl Client {
         if !response.status().is_success() {
             bail!("This download is unavailable. Check the request for expiry or revocation.");
         }
-        let bytes = response.bytes().await?;
-        if bytes.len() as u64 != file.size || hash(&bytes) != file.sha256 {
-            bail!("Download integrity check failed. Retry the download.");
-        }
         if !directory.exists() {
             crate::config::private_dir(directory)?;
         }
         if !directory.is_dir() {
             bail!("Choose a download folder.");
         }
+        // On Windows canonicalization also supplies the extended-length path prefix.
+        let directory = directory.canonicalize()?;
         let name = download_name(file);
         let path = directory.join(name);
         use std::io::Write;
-        // Publish only the complete verified file, without replacing an existing file.
-        let mut output = tempfile::NamedTempFile::new_in(directory)
+        let mut output = tempfile::NamedTempFile::new_in(&directory)
             .context("Cannot create a file in this download folder.")?;
-        output.write_all(&bytes)?;
+        let mut stream = response.bytes_stream();
+        let mut digest = Sha256::new();
+        let mut size = 0u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            output.write_all(&chunk)?;
+            digest.update(&chunk);
+            size = size
+                .checked_add(chunk.len() as u64)
+                .context("File size cannot be represented on this platform.")?;
+        }
+        if size != file.size || hex::encode(digest.finalize()) != file.sha256 {
+            bail!("Download integrity check failed. Retry the download.");
+        }
         output.as_file().sync_all()?;
         output.persist_noclobber(&path).map_err(|error| {
             let message = if error.error.kind() == std::io::ErrorKind::AlreadyExists {
@@ -219,7 +295,7 @@ impl Client {
     }
 }
 
-fn download_name(file: &Artifact) -> String {
+pub(crate) fn download_name(file: &Artifact) -> String {
     // Sender filenames may come from a different OS. Keep the original in the
     // response metadata, but save a portable name within a 255-byte component.
     let clean: String = file

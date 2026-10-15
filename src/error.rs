@@ -27,6 +27,12 @@ pub enum Error {
     Internal(#[from] anyhow::Error),
 }
 
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Internal(error.into())
+    }
+}
+
 impl From<rusqlite::Error> for Error {
     fn from(value: rusqlite::Error) -> Self {
         Self::Internal(value.into())

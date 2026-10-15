@@ -1339,12 +1339,12 @@ fn notification_retries_follow_current_state_and_cannot_undo_disabled_channels()
         )
         .unwrap();
     assert_eq!(state, "cancelled");
-    f.advance(TASK_TTL + 1);
+    f.advance(8 * 24 * 60 * 60);
     assert!(
         f.store
             .delivery_title(&delivery)
             .unwrap()
-            .contains("expired")
+            .contains("revoked")
     );
 }
 

@@ -73,7 +73,7 @@ impl Store {
     pub fn next_delivery(&self) -> Result<Option<Delivery>> {
         self.transaction(|| {
             self.db.execute("UPDATE deliveries SET state='superseded' WHERE state='pending' AND EXISTS(SELECT 1 FROM deliveries newer JOIN events ne ON ne.sequence=newer.event_id JOIN events old ON old.sequence=deliveries.event_id WHERE newer.channel_id=deliveries.channel_id AND newer.event_id>deliveries.event_id AND ne.task_id=old.task_id)",[])?;
-            let row=self.db.query_row("SELECT d.event_id,d.channel_id,c.destination,e.task_id,e.kind,d.attempts,c.kind FROM deliveries d JOIN channels c ON c.id=d.channel_id JOIN events e ON e.sequence=d.event_id WHERE c.verified=1 AND c.kind IN ('phone','email','slack') AND d.state IN ('pending','sending') AND d.next_attempt<=? AND d.attempts<8 ORDER BY e.sequence,c.id LIMIT 1",[self.time()],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,Vec<u8>>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,i64>(5)?,r.get::<_,String>(6)?))).optional()?;
+            let row=self.db.query_row("SELECT d.event_id,d.channel_id,c.destination,e.task_id,e.kind,d.attempts,c.kind FROM deliveries d JOIN channels c ON c.id=d.channel_id JOIN events e ON e.sequence=d.event_id WHERE c.verified=1 AND c.kind IN ('phone','email','slack') AND d.state IN ('pending','sending') AND d.next_attempt<=? ORDER BY e.sequence,c.id LIMIT 1",[self.time()],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,Vec<u8>>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,i64>(5)?,r.get::<_,String>(6)?))).optional()?;
             let Some((event_id,channel_id,data,task_id,kind,attempts,channel_kind))=row else{return Ok(None)};
             self.db.execute("UPDATE deliveries SET state='sending',attempts=attempts+1,next_attempt=? WHERE event_id=? AND channel_id=?",params![self.time()+60,event_id,channel_id])?;
             let previous:Option<String>=self.db.query_row("SELECT d.remote_id FROM deliveries d JOIN events e ON e.sequence=d.event_id WHERE d.channel_id=? AND e.task_id=? AND d.state='accepted_by_provider' AND d.remote_id IS NOT NULL ORDER BY d.event_id DESC LIMIT 1",params![channel_id,task_id],|r|r.get(0)).optional()?;
@@ -90,7 +90,7 @@ impl Store {
                 self.db.execute("UPDATE deliveries SET state='accepted_by_provider',remote_id=?,error=NULL WHERE event_id=? AND channel_id=? AND state='sending' AND attempts=?",params![remote_id,d.event_id,d.channel_id,d.attempts])?;
             }
             Err(_) => {
-                self.db.execute("UPDATE deliveries SET state=?,error='Provider did not accept the notification.',next_attempt=? WHERE event_id=? AND channel_id=? AND state='sending' AND attempts=?",params![if d.attempts>=8{"failed"}else{"pending"},self.time()+(2_i64.pow(d.attempts as u32)*30).min(3600),d.event_id,d.channel_id,d.attempts])?;
+                self.db.execute("UPDATE deliveries SET state=?,error='Provider did not accept the notification.',next_attempt=? WHERE event_id=? AND channel_id=? AND state='sending' AND attempts=?",params!["pending",self.time()+(2_i64.pow(d.attempts.min(7) as u32)*30).min(3600),d.event_id,d.channel_id,d.attempts])?;
             }
         }
         Ok(())

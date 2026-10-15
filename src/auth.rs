@@ -54,14 +54,11 @@ impl Store {
         phone: &str,
         browser: &str,
     ) -> Result<(OtpChallenge, String)> {
-        validate(
-            !name.trim().is_empty() && name.len() <= 100,
-            "Enter your name.",
-        )?;
+        validate(!name.trim().is_empty(), "Enter your name.")?;
         validate(
             phone.starts_with('+')
                 && !phone.starts_with("+0")
-                && (9..=16).contains(&phone.len())
+                && (2..=16).contains(&phone.len())
                 && phone[1..].bytes().all(|b| b.is_ascii_digit()),
             "Use your phone number with country code.",
         )?;
@@ -69,7 +66,7 @@ impl Store {
             let key = self.vault.fingerprint("phone", phone.as_bytes());
             let count: i64 = self.db.query_row(
                 "SELECT COUNT(*) FROM otp WHERE phone_key=? AND expires_at>?",
-                params![key, self.time() - 3600],
+                params![key, self.time() - 3000],
                 |r| r.get(0),
             )?;
             if count >= 5 {
@@ -196,10 +193,7 @@ impl Store {
         )
     }
     pub fn begin_device(&self, label: &str) -> Result<DeviceCode> {
-        validate(
-            !label.trim().is_empty() && label.len() <= 100,
-            "Name this connection.",
-        )?;
+        validate(!label.trim().is_empty(), "Name this connection.")?;
         let device_code = secret();
         // Eight base32 characters: 40 bits. Device requests are additionally rate limited by the relay.
         let alphabet = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

@@ -57,7 +57,7 @@ Open the review link from your chosen Phone, Slack, or Email channel. The termin
 
 1. **Approve run** authorizes this native agent to work on this request.
 2. **Approve** authorizes the resulting reply and file snapshots to be shared.
-3. Click the file to download it. Litecom verifies its hash and reports the download.
+3. Click the file to download it. Your browser streams it to its download folder. Click **Mark received** after it finishes if you want to acknowledge receipt. CLI and MCP downloads verify the complete hash and report receipt automatically.
 
 The first two controls are separate because a native agent can use existing hooks and tools with access beyond a file search. Codex uses its workspace-write shell sandbox; Claude uses its saved permissions. Existing hooks and connected tools retain their own access. A denied tool is not automatically granted more access. A prepared manual reply needs only the sharing decision.
 

@@ -45,9 +45,7 @@ impl Store {
             "Provide an ID for this tool operation.",
         )?;
         validate(
-            !input.title.trim().is_empty()
-                && input.title.len() <= 200
-                && serde_json::to_vec(&input.details)?.len() <= 100_000,
+            !input.title.trim().is_empty(),
             "Describe the tool operation and its scope.",
         )?;
         self.transaction(|| {
@@ -76,15 +74,6 @@ impl Store {
                 )?;
                 return Ok(old.permission);
             }
-            let count: i64 = self.db.query_row(
-                "SELECT COUNT(*) FROM tool_permissions WHERE task_id=? AND decision IS NULL",
-                [task_id],
-                |r| r.get(0),
-            )?;
-            validate(
-                count < 100,
-                "Wait for the pending tool decisions before requesting more.",
-            )?;
             let record = Record {
                 permission: ToolPermission {
                     id: input.id,
@@ -136,7 +125,7 @@ impl Store {
             self.owner(p, &task)?;
             conflict(
                 task.view.status == Status::Executing
-                    && task.view.expires_at > self.time()
+                    && !task.view.expired(self.time())
                     && task.lease_until.is_some_and(|until| until > self.time()),
                 "The agent is no longer waiting on this run. Check the request status.",
             )?;

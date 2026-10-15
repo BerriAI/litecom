@@ -95,7 +95,8 @@ output.write_text(json.dumps({'text':'Here is the sample file you requested.', '
             with page.expect_download() as download:
                 page.get_by_role('link',name='welcome.txt',exact=True).click()
             assert Path(download.value.path()).read_bytes()==(workspace/'welcome.txt').read_bytes()
-            expect(page.locator('main')).to_contain_text('1 file download verified',timeout=10000)
+            page.get_by_role('button',name='Mark received',exact=True).click()
+            expect(page.locator('main')).to_contain_text('Received.')
             page.screenshot(path=str(screenshots/'result-mobile.png'),full_page=True)
             page.goto(origin+'/agents')
             page.locator('#devin-connect summary').first.click()

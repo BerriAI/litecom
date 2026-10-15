@@ -49,7 +49,7 @@ impl Store {
         let email = email_address(email)?;
         self.transaction(||{
             let destination_key=self.vault.fingerprint("email",email.as_bytes());
-            let count:i64=self.db.query_row("SELECT COUNT(*) FROM channel_challenges WHERE (user_id=? OR destination_key=?) AND expires_at>?",params![p.user_id,destination_key,self.time()-3600],|r|r.get(0))?;
+            let count:i64=self.db.query_row("SELECT COUNT(*) FROM channel_challenges WHERE (user_id=? OR destination_key=?) AND expires_at>?",params![p.user_id,destination_key,self.time()-3000],|r|r.get(0))?;
             if count>=5{return Err(Error::RateLimited);}
             let recent:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM channel_challenges WHERE user_id=? AND expires_at>?)",params![p.user_id,self.time()+540],|r|r.get(0))?;
             if recent{return Err(Error::RateLimited);}

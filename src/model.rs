@@ -124,9 +124,7 @@ impl Action {
                 acting_account,
             } => {
                 validate(
-                    !argv.is_empty()
-                        && argv.len() <= 256
-                        && argv.iter().all(|v| !v.contains('\0') && v.len() <= 100_000),
+                    !argv.is_empty() && argv.iter().all(|v| !v.contains('\0')),
                     "Provide a valid command and arguments.",
                 )?;
                 validate(
@@ -164,10 +162,7 @@ impl Action {
                     "Choose an installed agent executable.",
                 )?;
                 validate(
-                    arguments.len() <= 256
-                        && arguments
-                            .iter()
-                            .all(|a| a.len() <= 100_000 && !a.contains('\0')),
+                    arguments.iter().all(|a| !a.contains('\0')),
                     "Provide valid agent arguments.",
                 )?;
                 if let Some(mcp) = mcp {
@@ -175,7 +170,6 @@ impl Action {
                         absolute_agent_path(&mcp.executable)
                             && absolute_agent_path(&mcp.home)
                             && !mcp.connection.is_empty()
-                            && mcp.connection.len() <= 64
                             && mcp
                                 .connection
                                 .bytes()
@@ -184,13 +178,11 @@ impl Action {
                     )?;
                 }
                 validate(
-                    !instruction.trim().is_empty() && instruction.len() <= 100_000,
+                    !instruction.trim().is_empty(),
                     "Describe the requested work.",
                 )?;
                 validate(
-                    absolute_agent_path(workspace)
-                        && !permissions.is_empty()
-                        && permissions.len() <= 100,
+                    absolute_agent_path(workspace) && !permissions.is_empty(),
                     "Provide the working folder and enforceable permissions.",
                 )?;
                 (title, description, acting_account)
@@ -208,9 +200,7 @@ impl Action {
                     "Connect the cloud agent before requesting a run.",
                 )?;
                 validate(
-                    !instruction.trim().is_empty()
-                        && instruction.len() <= 100_000
-                        && *provider != AgentKind::Local,
+                    !instruction.trim().is_empty() && *provider != AgentKind::Local,
                     "Provide a cloud provider and instruction.",
                 )?;
                 (title, description, acting_account)
@@ -218,11 +208,8 @@ impl Action {
         };
         validate(
             !title.trim().is_empty()
-                && title.len() <= 200
                 && !description.trim().is_empty()
-                && description.len() <= 10_000
-                && !account.trim().is_empty()
-                && account.len() <= 200,
+                && !account.trim().is_empty(),
             "Describe the action, its effects, and the acting account.",
         )
     }
@@ -254,10 +241,6 @@ impl DraftInput {
                 || !self.attachment_ids.is_empty()
                 || self.action.is_some(),
             "Prepare a reply, file, or action first.",
-        )?;
-        validate(
-            self.text.len() <= 2_000_000 && self.attachment_ids.len() <= 100,
-            "The reply is too large.",
         )?;
         if let Some(action) = &self.action {
             action.validate()?;
@@ -354,7 +337,7 @@ pub struct TaskView {
     pub request: String,
     pub created_at: i64,
     pub updated_at: i64,
-    pub expires_at: i64,
+    pub expires_at: Option<i64>,
     pub received_at: Option<i64>,
     #[serde(default)]
     pub downloads: Vec<DownloadReceipt>,
@@ -429,4 +412,10 @@ pub struct Event {
     pub task_id: String,
     pub kind: String,
     pub created_at: i64,
+}
+
+impl TaskView {
+    pub fn expired(&self, now: i64) -> bool {
+        self.expires_at.is_some_and(|expiry| expiry <= now)
+    }
 }

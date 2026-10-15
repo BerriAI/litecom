@@ -56,6 +56,14 @@ pub struct AgentList {
     pub owner_id: Option<String>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InboxPage {
+    /// Use both cursor values returned in next_page to read older requests.
+    pub before_time: Option<i64>,
+    pub before_id: Option<String>,
+}
+
 #[tool_router]
 impl LitecomMcp {
     #[tool(
@@ -115,8 +123,22 @@ impl LitecomMcp {
         description = "Read shared requests and responses across all agents on your account. Unapproved content from other people is never included.",
         annotations(read_only_hint = true)
     )]
-    async fn inbox(&self) -> CallToolResult {
-        result(self.client.get("/api/tasks").await)
+    async fn inbox(&self, Parameters(args): Parameters<InboxPage>) -> CallToolResult {
+        result(
+            async {
+                let tasks: Vec<TaskView> =
+                    self.client.inbox(args.before_time, args.before_id).await?;
+                let next = if tasks.len() == 100 {
+                    tasks
+                        .last()
+                        .map(|task| json!({"before_time":task.created_at,"before_id":task.id}))
+                } else {
+                    None
+                };
+                Ok(json!({"tasks":tasks,"next_page":next}))
+            }
+            .await,
+        )
     }
     #[tool(
         name = "litecom_status",

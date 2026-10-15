@@ -37,7 +37,7 @@ relay_pid=$!
 kill "$relay_pid"
 ```
 
-On macOS, add `--with-service` to the onboarding test to exercise a temporary per-user LaunchAgent; the test removes it during cleanup. Native execution uses a deterministic fixture and does not call a model.
+On macOS, add `--with-service` to the onboarding test to exercise a temporary per-user LaunchAgent; the test removes it during cleanup. Native execution uses a deterministic fixture and does not call a model. Add `--file-mib 160` to test a large streamed attachment through the worker, browser and CLI.
 
 The transfer test uses two isolated browser accounts, checks privacy before approval, downloads and hashes a real file, acknowledges receipt, revokes access, and inspects desktop/mobile layout. Test delivery does not establish that an SMS provider works.
 
@@ -59,7 +59,7 @@ For browser recovery and a timed core-protocol stress test:
 python3 scripts/soak.py --seconds 3600
 ```
 
-Both start isolated development relays and clean them up. The browser test covers stale decisions, interrupted/corrupt downloads, lost receipts, edits during background updates, and out-of-order contact lookups. The seeded soak test varies binary payloads, self/contact requests, approvals, cancellation, permission decisions, and relay restarts. Runs longer than 125 seconds also check real lease expiry. Agent operations and delivery are fixtures; neither test calls a model or sends messages. The soak report is saved locally in `.preview/soak.json`. Add `--large-files` to exercise file-size, total-size, attachment-count, and idempotent-upload boundaries.
+Both start isolated development relays and clean them up. The browser test covers stale decisions, interrupted/corrupt downloads, lost receipts, edits during background updates, and out-of-order contact lookups. The seeded soak test varies binary payloads, self/contact requests, approvals, cancellation, permission decisions, and relay restarts. Runs longer than 125 seconds also check real lease expiry. Agent operations and delivery are fixtures; neither test calls a model or sends messages. The soak report is saved locally in `.preview/soak.json`. Add `--large-files` to exceed the removed file-size, total-size and attachment-count caps, while checking idempotent uploads.
 
 To check interoperability with the official A2A JavaScript SDK:
 
@@ -68,7 +68,7 @@ npm install --prefix .litecom/a2a-sdk --ignore-scripts --no-audit --no-fund @a2a
 node scripts/a2a-smoke.mjs .litecom/a2a-sdk/node_modules/@a2a-js/sdk
 ```
 
-This starts a local relay and checks authenticated discovery, immediate and blocking requests, retries, private artifacts, exact downloads, and cancellation. It uses fixture accounts and sends no external messages.
+This starts a local relay and checks authenticated discovery, immediate and blocking requests, retries, private artifacts, exact downloads, and cancellation. Set `LITECOM_SLOW_DOWNLOAD_TEST=1` to include a progressing 64-second CLI download. Run `cargo test progressing_upload_outlives_response_header_timeout -- --ignored` for the corresponding 64-second native upload check. It uses fixture accounts and sends no external messages.
 
 To check the actual released Pi adapter against a simulated Pi backend, install it in an isolated test folder and run:
 

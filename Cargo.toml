@@ -13,7 +13,7 @@ a2a-protocol-types = "0.14.1"
 aes-gcm = "0.10"
 agent-client-protocol = "3.3.0"
 anyhow = "1"
-axum = { version = "0.8", features = ["form", "json", "macros"] }
+axum = { version = "0.8", features = ["form", "json", "macros", "multipart"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 dialoguer = "0.12"
@@ -34,7 +34,7 @@ subtle = "2"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
-tokio-util = { version = "0.7", features = ["compat"] }
+tokio-util = { version = "0.7", features = ["compat", "io"] }
 tower-http = { version = "0.6", features = ["limit", "set-header", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

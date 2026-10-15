@@ -3,9 +3,7 @@ use crate::{
     crypto::id,
     error::{Error, Result, validate},
     model::{Action, AgentKind},
-    store::MAX_FILE_BYTES,
 };
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -124,7 +122,8 @@ async fn signed_download(url: url::Url) -> Result<reqwest::Response> {
         .no_proxy()
         .resolve_to_addrs(host, &addresses)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(45))
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| Error::Internal(e.into()))?;
     http.get(url)
@@ -136,7 +135,8 @@ impl Devin {
     pub fn new() -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(45))
+                .connect_timeout(std::time::Duration::from_secs(20))
+                .read_timeout(std::time::Duration::from_secs(45))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| Error::Internal(e.into()))?,
@@ -180,9 +180,7 @@ impl Devin {
     }
     pub async fn connect(&self, token: &str, org: Option<&str>) -> Result<Connection> {
         validate(
-            token.starts_with("cog_")
-                && token.len() <= 2048
-                && !token.contains(char::is_whitespace),
+            token.starts_with("cog_") && !token.contains(char::is_whitespace),
             "Use a Devin personal access token or service-user key beginning with cog_.",
         )?;
         let mut request = self
@@ -221,7 +219,6 @@ impl Devin {
             })?;
         validate(
             org_id.starts_with("org-")
-                && org_id.len() <= 100
                 && org_id
                     .bytes()
                     .all(|c| c.is_ascii_alphanumeric() || c == b'-'),
@@ -296,9 +293,9 @@ impl Devin {
             .await?,
         )?)
     }
-    pub async fn download(&self, c: &Connection, file: &Attachment) -> Result<Vec<u8>> {
+    pub async fn download(&self, c: &Connection, file: &Attachment) -> Result<reqwest::Response> {
         validate(
-            !file.attachment_id.is_empty() && file.attachment_id.len() <= 200,
+            !file.attachment_id.is_empty(),
             "Devin returned an invalid attachment ID.",
         )?;
         let url = format!(
@@ -318,10 +315,8 @@ impl Devin {
             })?;
         // The documented endpoint redirects to S3 or Devin's IP-enforcing proxy.
         // Signed redirect requests never carry the user's Devin bearer token.
-        for _ in 0..3 {
-            if !response.status().is_redirection() {
-                break;
-            }
+        let mut visited = std::collections::HashSet::new();
+        while response.status().is_redirection() {
             let location = response
                 .headers()
                 .get("location")
@@ -332,6 +327,10 @@ impl Devin {
             let url = url::Url::parse(location).map_err(|_| {
                 Error::Unavailable("Devin returned an invalid download location.".into())
             })?;
+            validate(
+                visited.insert(url.clone()),
+                "Devin returned a redirect loop.",
+            )?;
             response = signed_download(url).await?;
         }
         if !response.status().is_success() {
@@ -339,27 +338,7 @@ impl Devin {
                 "The Devin attachment is unavailable.".into(),
             ));
         }
-        if response
-            .content_length()
-            .is_some_and(|s| s > MAX_FILE_BYTES as u64)
-        {
-            return Err(Error::Invalid(
-                "Devin attachments must be no larger than 25 MiB.".into(),
-            ));
-        }
-        let mut bytes = Vec::new();
-        let mut stream = response.bytes_stream();
-        while let Some(part) = stream.next().await {
-            let part = part.map_err(|_| {
-                Error::Unavailable("The attachment download was interrupted.".into())
-            })?;
-            validate(
-                bytes.len() + part.len() <= MAX_FILE_BYTES,
-                "Devin attachments must be no larger than 25 MiB.",
-            )?;
-            bytes.extend_from_slice(&part);
-        }
-        Ok(bytes)
+        Ok(response)
     }
 }
 

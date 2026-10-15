@@ -1,6 +1,6 @@
 use crate::{
     crypto::secret,
-    error::{Error, Result, require},
+    error::{Error, Result, require, validate},
     model::*,
     providers::Providers,
     store::Store,
@@ -8,7 +8,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, FromRequest, Multipart, Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -17,6 +17,7 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard},
@@ -133,11 +134,23 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
         )
         .route("/api/capabilities", get(capabilities))
-        .route("/auth/start", post(start_login))
-        .route("/auth/verify", post(verify_login))
+        .route(
+            "/auth/start",
+            post(start_login).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/auth/verify",
+            post(verify_login).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/auth/logout", post(logout))
-        .route("/device/start", post(start_device))
-        .route("/device/poll", post(poll_device))
+        .route(
+            "/device/start",
+            post(start_device).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/device/poll",
+            post(poll_device).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route(
             "/api/device/{code}",
             get(device_info).post(authorize_device),
@@ -182,10 +195,7 @@ pub fn router(state: AppState) -> Router {
             "/api/tasks/{id}/permissions/{permission}/decision",
             post(decide_permission),
         )
-        .route(
-            "/api/tasks/{id}/files",
-            post(upload).layer(DefaultBodyLimit::max(36 * 1024 * 1024)),
-        )
+        .route("/api/tasks/{id}/files", post(upload))
         .route("/api/files/{id}", get(download))
         .route("/api/files/{id}/received", post(download_received))
         .route("/api/work/claim", post(claim))
@@ -211,9 +221,30 @@ pub fn router(state: AppState) -> Router {
         .fallback(get(|| async {
             axum::response::Html(include_str!("web/index.html"))
         }))
-        .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
+        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authenticate_api,
+        ))
         .layer(middleware::from_fn(security_headers))
         .with_state(state)
+}
+async fn authenticate_api(
+    State(s): State<AppState>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Result<Response> {
+    let path = request.uri().path();
+    if (path.starts_with("/api/") && path != "/api/capabilities") || path.starts_with("/a2a/") {
+        s.principal(
+            request.headers(),
+            !matches!(
+                *request.method(),
+                axum::http::Method::GET | axum::http::Method::HEAD
+            ),
+        )?;
+    }
+    Ok(next.run(request).await)
 }
 async fn security_headers(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -518,7 +549,6 @@ async fn new_task(
     Json(v): Json<NewTask>,
 ) -> Result<Json<TaskView>> {
     let p = s.principal(&h, true)?;
-    s.limit(&format!("tasks:{}", p.user_id), 30)?;
     Ok(Json(s.db()?.create_task(&p, v)?))
 }
 async fn task(
@@ -684,16 +714,87 @@ struct UploadInput {
 }
 async fn upload(
     State(s): State<AppState>,
-    h: HeaderMap,
     Path(id): Path<String>,
-    Json(v): Json<UploadInput>,
+    request: axum::extract::Request,
 ) -> Result<Json<Artifact>> {
-    let p = s.principal(&h, true)?;
+    let headers = request.headers().clone();
+    let p = s.principal(&headers, true)?;
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("multipart/form-data"))
+    {
+        let mut parts = Multipart::from_request(request, &s)
+            .await
+            .map_err(|_| Error::Invalid("Provide a multipart file upload.".into()))?;
+        let metadata = parts
+            .next_field()
+            .await
+            .map_err(|_| Error::Invalid("The upload was interrupted.".into()))?
+            .ok_or_else(|| Error::Invalid("Provide the file metadata first.".into()))?;
+        validate(
+            metadata.name() == Some("metadata"),
+            "Provide the file metadata first.",
+        )?;
+        #[derive(Deserialize)]
+        struct Metadata {
+            lease: Option<String>,
+            name: String,
+            media_type: String,
+        }
+        let metadata: Metadata = serde_json::from_slice(
+            &metadata
+                .bytes()
+                .await
+                .map_err(|_| Error::Invalid("Invalid file metadata.".into()))?,
+        )
+        .map_err(|_| Error::Invalid("Provide valid JSON file metadata.".into()))?;
+        let mut upload = s.db()?.begin_upload(
+            &p,
+            &id,
+            metadata.lease.as_deref(),
+            &metadata.name,
+            &metadata.media_type,
+        )?;
+        let mut file = parts
+            .next_field()
+            .await
+            .map_err(|_| Error::Invalid("The upload was interrupted.".into()))?
+            .ok_or_else(|| Error::Invalid("Provide a file.".into()))?;
+        validate(file.name() == Some("file"), "Provide a file.")?;
+        while let Some(chunk) = file
+            .chunk()
+            .await
+            .map_err(|_| Error::Invalid("The upload was interrupted.".into()))?
+        {
+            upload.write(&chunk)?;
+        }
+        drop(file);
+        validate(
+            parts
+                .next_field()
+                .await
+                .map_err(|_| Error::Invalid("The upload was interrupted.".into()))?
+                .is_none(),
+            "Send one file per upload.",
+        )?;
+        let current = s.principal(&headers, true)?;
+        return Ok(Json(s.db()?.finish_upload(
+            &current,
+            metadata.lease.as_deref(),
+            upload,
+        )?));
+    }
+    // Compatibility for existing API callers; native and browser clients stream multipart.
+    let Json(v) = Json::<UploadInput>::from_request(request, &s)
+        .await
+        .map_err(|_| Error::Invalid("Provide a valid file upload.".into()))?;
     let data = STANDARD
         .decode(v.data)
         .map_err(|_| Error::Invalid("The file encoding is invalid.".into()))?;
+    let current = s.principal(&headers, true)?;
     Ok(Json(s.db()?.upload(
-        &p,
+        &current,
         &id,
         v.lease.as_deref(),
         &v.name,
@@ -707,9 +808,46 @@ async fn download(
     Path(id): Path<String>,
 ) -> Result<Response> {
     let p = s.principal(&h, false)?;
-    let (file, bytes) = s.db()?.download(&p, &id)?;
-    let safe_name = file
-        .name
+    let file = s.db()?.download_metadata(&p, &id)?;
+    let expected = file.clone();
+    let stream = futures_util::stream::try_unfold(
+        (s, h, id, 0u64, 0u64, Sha256::new()),
+        move |(s, headers, id, sequence, size, mut digest)| {
+            let expected = expected.clone();
+            async move {
+                let p = s.principal(&headers, false)?;
+                let chunk = s.db()?.download_chunk(&p, &id, sequence)?;
+                let Some(chunk) = chunk else {
+                    require(
+                        size == expected.size && hex::encode(digest.finalize()) == expected.sha256,
+                        "The file failed its integrity check.",
+                    )?;
+                    return Ok::<_, Error>(None);
+                };
+                let size = size
+                    .checked_add(chunk.len() as u64)
+                    .ok_or_else(|| Error::Invalid("The file size is invalid.".into()))?;
+                require(
+                    size <= expected.size,
+                    "The file failed its integrity check.",
+                )?;
+                digest.update(&chunk);
+                // Check the complete digest before releasing the final chunk.
+                if size == expected.size {
+                    require(
+                        hex::encode(digest.clone().finalize()) == expected.sha256,
+                        "The file failed its integrity check.",
+                    )?;
+                }
+                Ok(Some((
+                    Bytes::from(chunk),
+                    (s, headers, id, sequence + 1, size, digest),
+                )))
+            }
+        },
+    );
+    let download_name = crate::client::download_name(&file);
+    let safe_name = download_name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || "._- ".contains(c) {
@@ -719,8 +857,9 @@ async fn download(
             }
         })
         .collect::<String>();
-    let mut response = Body::from(Bytes::from(bytes)).into_response();
+    let mut response = Body::from_stream(stream).into_response();
     let headers = response.headers_mut();
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(file.size));
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/octet-stream"),
@@ -729,7 +868,7 @@ async fn download(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!(
             "attachment; filename=\"{safe_name}\"; filename*=UTF-8''{}",
-            url::form_urlencoded::byte_serialize(file.name.as_bytes())
+            url::form_urlencoded::byte_serialize(download_name.as_bytes())
                 .collect::<String>()
                 // Extended header values use percent-encoded spaces and stars,
                 // unlike application/x-www-form-urlencoded bodies.

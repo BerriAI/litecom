@@ -94,7 +94,12 @@ enum Command {
         request_id: Option<String>,
     },
     /// Show your shared request inbox.
-    Inbox,
+    Inbox {
+        #[arg(long, requires = "before_id")]
+        before_time: Option<i64>,
+        #[arg(long, requires = "before_time")]
+        before_id: Option<String>,
+    },
     /// Read one request and its approved result.
     Status { id: String },
     /// Show your contacts or your contact invite link.
@@ -271,10 +276,27 @@ async fn run(cli: Cli) -> Result<()> {
                         client.review_url(&task.id)
                     );
                 }
-                Command::Inbox => {
-                    let tasks: Vec<TaskView> = client.get("/api/tasks").await?;
+                Command::Inbox {
+                    before_time,
+                    before_id,
+                } => {
+                    let tasks = client.inbox(before_time, before_id).await?;
+                    if tasks.len() == 100
+                        && let Some(last) = tasks.last()
+                    {
+                        println!(
+                            "Older requests: repeat this command with --before-time {} --before-id {}\n",
+                            last.created_at, last.id
+                        );
+                    }
                     if tasks.is_empty() {
-                        println!("No requests yet. Try: litecom ask me \"Find my launch notes\"");
+                        if before_time.is_some() {
+                            println!("No older requests.");
+                        } else {
+                            println!(
+                                "No requests yet. Try: litecom ask me \"Find my launch notes\""
+                            );
+                        }
                     }
                     for t in tasks {
                         println!(

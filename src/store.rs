@@ -12,14 +12,12 @@ use std::{
 };
 
 mod cloud;
+mod files;
 mod permissions;
 mod recovery;
 pub(crate) use cloud::CloudClaim;
 
-pub const TASK_TTL: i64 = 7 * 24 * 60 * 60;
 pub const LEASE_TTL: i64 = 120;
-pub const MAX_FILE_BYTES: usize = 25 * 1024 * 1024;
-pub const MAX_TASK_BYTES: u64 = 100 * 1024 * 1024;
 
 pub fn now() -> i64 {
     SystemTime::now()
@@ -59,7 +57,7 @@ impl Store {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;")?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         conflict(
-            version <= 1,
+            version <= 2,
             "This database was created by a newer Litecom version.",
         )?;
         db.execute_batch(include_str!("schema.sql"))?;
@@ -84,6 +82,31 @@ impl Store {
                 [store.vault.encrypt(b"litecom", "key-check")?],
             )?;
         }
+        if version < 2 {
+            // Earlier alpha builds imposed a seven-day lifetime. Remove future
+            // deadlines without restoring access that has already expired.
+            store.transaction(|| {
+                for mut task in store.task_rows("SELECT id,data FROM tasks", [])? {
+                    if task
+                        .view
+                        .expires_at
+                        .is_some_and(|expiry| expiry > store.time())
+                    {
+                        task.view.expires_at = None;
+                        store.db.execute(
+                            "UPDATE tasks SET expires_at=?,data=? WHERE id=?",
+                            params![
+                                i64::MAX,
+                                store.vault.seal(&task, &format!("task:{}", task.view.id))?,
+                                task.view.id
+                            ],
+                        )?;
+                    }
+                }
+                store.db.pragma_update(None, "user_version", 2)?;
+                Ok(())
+            })?;
+        }
         Ok(store)
     }
 
@@ -102,13 +125,10 @@ impl Store {
 
     /// Authentication is the only production caller; the number must have been verified.
     pub(crate) fn verified_profile(&self, name: &str, phone: &str) -> Result<Profile> {
-        validate(
-            !name.trim().is_empty() && name.len() <= 100,
-            "Enter your name.",
-        )?;
+        validate(!name.trim().is_empty(), "Enter your name.")?;
         validate(
             phone.starts_with('+')
-                && (9..=16).contains(&phone.len())
+                && (2..=16).contains(&phone.len())
                 && phone[1..].bytes().all(|b| b.is_ascii_digit())
                 && !phone.starts_with("+0"),
             "Enter your phone number with country code, such as +14155550123.",
@@ -223,10 +243,7 @@ impl Store {
         make_default: bool,
     ) -> Result<Agent> {
         p.human()?;
-        validate(
-            !name.trim().is_empty() && name.len() <= 64,
-            "Give this agent a name.",
-        )?;
+        validate(!name.trim().is_empty(), "Give this agent a name.")?;
         self.transaction(|| {
             let exists: bool = self.db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM agents WHERE owner_id=? AND name=? COLLATE NOCASE)",
@@ -520,7 +537,7 @@ impl Store {
         }
         let released = view.status == Status::Completed
             && view.revoked_at.is_none()
-            && view.expires_at > self.time();
+            && !view.expired(self.time());
         if released && let Some(draft) = &view.draft {
             view.response = Some(Response {
                 text: draft.text.clone(),
@@ -547,12 +564,9 @@ impl Store {
         Ok(view)
     }
     pub fn create_task(&self, p: &Principal, input: NewTask) -> Result<TaskView> {
+        validate(!input.request.trim().is_empty(), "Describe what you need.")?;
         validate(
-            !input.request.trim().is_empty() && input.request.len() <= 100_000,
-            "Describe what you need (up to 100,000 bytes).",
-        )?;
-        validate(
-            !input.idempotency_key.is_empty() && input.idempotency_key.len() <= 200,
+            !input.idempotency_key.is_empty(),
             "Provide a request ID for safe retries.",
         )?;
         self.transaction(|| {
@@ -566,8 +580,8 @@ impl Store {
             }
             let agent=self.agents(p,&input.owner_id)?.into_iter().find(|a|input.agent_id.as_ref().map(|id|id==&a.id).unwrap_or(a.is_default)).ok_or(Error::NotFound)?;
             let time=self.time();
-            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),created_at:time,updated_at:time,expires_at:time+TASK_TTL,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None};
-            self.db.execute("INSERT INTO tasks(id,requester_id,owner_id,agent_id,idempotency_key,status,created_at,updated_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)",params![task.view.id,task.view.requester_id,task.view.owner_id,task.view.agent_id,input.idempotency_key,task.view.status.as_str(),time,time,task.view.expires_at,self.vault.seal(&task,&format!("task:{}",task.view.id))?])?;
+            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),created_at:time,updated_at:time,expires_at:None,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None};
+            self.db.execute("INSERT INTO tasks(id,requester_id,owner_id,agent_id,idempotency_key,status,created_at,updated_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)",params![task.view.id,task.view.requester_id,task.view.owner_id,task.view.agent_id,input.idempotency_key,task.view.status.as_str(),time,time,task.view.expires_at.unwrap_or(i64::MAX),self.vault.seal(&task,&format!("task:{}",task.view.id))?])?;
             self.save(&mut task,"queued")?;
             self.projection(p,task)
         })
@@ -600,7 +614,7 @@ impl Store {
     pub fn recover(&self) -> Result<()> {
         self.transaction(|| {
             for mut task in self.task_rows("SELECT id,data FROM tasks WHERE status NOT IN ('completed','declined','cancelled','failed','expired')",[])? {
-                let expired=task.view.expires_at<=self.time();
+                let expired=task.view.expired(self.time());
                 let lost=task.lease_until.is_some_and(|t|t<=self.time());
                 let cloud: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_jobs WHERE task_id=? AND phase IN ('ready','starting','running'))", [&task.view.id], |r|r.get(0))?;
                 // The relay can resume monitoring a persisted cloud session. It must
@@ -665,7 +679,7 @@ impl Store {
             "This work lease belongs to another connection.",
         )?;
         conflict(
-            task.lease_until.is_some_and(|t| t > self.time()) && task.view.expires_at > self.time(),
+            task.lease_until.is_some_and(|t| t > self.time()) && !task.view.expired(self.time()),
             "This work lease expired. Check the request status.",
         )
     }
@@ -680,102 +694,6 @@ impl Store {
                 params![self.vault.seal(&task, &format!("task:{task_id}"))?, task_id],
             )?;
             Ok(task.view.status)
-        })
-    }
-    pub fn upload(
-        &self,
-        p: &Principal,
-        task_id: &str,
-        lease: Option<&str>,
-        name: &str,
-        media_type: &str,
-        bytes: &[u8],
-    ) -> Result<Artifact> {
-        validate(
-            !name.is_empty()
-                && name.len() <= 255
-                && !name
-                    .chars()
-                    .any(|c| c.is_control() || c == '/' || c == '\\'),
-            "Use a filename without folders or control characters.",
-        )?;
-        validate(
-            !media_type.is_empty()
-                && media_type.len() <= 200
-                && media_type.bytes().all(|c| c.is_ascii_graphic()),
-            "Provide a valid media type.",
-        )?;
-        validate(
-            bytes.len() <= MAX_FILE_BYTES,
-            "Files can be up to 25 MiB each.",
-        )?;
-        self.transaction(|| {
-            let task = self.task(task_id)?;
-            self.owner(p, &task)?;
-            if p.role == Role::Agent {
-                self.lease(p, &task, lease.unwrap_or(""))?;
-                conflict(
-                    matches!(task.view.status, Status::Preparing | Status::Executing),
-                    "Files can only be prepared while this agent holds a work lease.",
-                )?;
-            } else {
-                conflict(
-                    matches!(
-                        task.view.status,
-                        Status::Queued | Status::Preparing | Status::AwaitingApproval
-                    ),
-                    "This response is already decided.",
-                )?;
-            }
-            // Restarted cloud result collection may upload the same snapshot again.
-            // Reuse exact content under this task rather than consuming the quota twice.
-            let digest = hash(bytes);
-            let existing = self
-                .db
-                .prepare("SELECT id,metadata FROM artifacts WHERE task_id=?")?
-                .query_map([task_id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            for (id, data) in existing {
-                let artifact: Artifact = self.vault.open(&data, &format!("artifact-meta:{id}"))?;
-                if artifact.sha256 == digest
-                    && artifact.name == name
-                    && artifact.media_type == media_type
-                {
-                    return Ok(artifact);
-                }
-            }
-            let (size, count): (u64, u64) = self.db.query_row(
-                "SELECT COALESCE(SUM(size),0),COUNT(*) FROM artifacts WHERE task_id=?",
-                [task_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            validate(
-                size + bytes.len() as u64 <= MAX_TASK_BYTES && count < 100,
-                "A request can contain up to 100 files and 100 MiB.",
-            )?;
-            let artifact = Artifact {
-                id: id(),
-                task_id: task_id.into(),
-                name: name.into(),
-                media_type: media_type.into(),
-                size: bytes.len() as u64,
-                sha256: digest,
-            };
-            self.db.execute(
-                "INSERT INTO artifacts(id,task_id,size,metadata,data) VALUES(?,?,?,?,?)",
-                params![
-                    artifact.id,
-                    task_id,
-                    artifact.size,
-                    self.vault
-                        .seal(&artifact, &format!("artifact-meta:{}", artifact.id))?,
-                    self.vault
-                        .encrypt(bytes, &format!("artifact:{}", artifact.id))?
-                ],
-            )?;
-            Ok(artifact)
         })
     }
     fn artifact(&self, artifact_id: &str) -> Result<Artifact> {
@@ -833,7 +751,7 @@ impl Store {
         self.transaction(|| {
             let mut task = self.task(task_id)?;
             self.owner(p, &task)?;
-            conflict(task.view.expires_at > self.time(), "This request expired.")?;
+            conflict(!task.view.expired(self.time()), "This request expired.")?;
             if p.role == Role::Agent {
                 self.lease(p, &task, lease.unwrap_or(""))?;
                 conflict(
@@ -917,7 +835,7 @@ impl Store {
         p.human()?;
         self.transaction(|| {
             let mut task=self.task(task_id)?;self.owner(p,&task)?;
-            conflict(task.view.expires_at>self.time(),"This request expired.")?;
+            conflict(!task.view.expired(self.time()),"This request expired.")?;
             let draft=task.view.draft.as_ref().ok_or_else(||Error::Conflict("The reply is not ready to review.".into()))?;
             conflict(version==draft.version && equal(digest,&draft.digest),"This reply changed. Review the latest version.")?;
             if let Some(existing)=&task.decision {conflict(*existing==decision,"This request was already decided.")?;return self.projection(p,task);}
@@ -946,13 +864,11 @@ impl Store {
         receipt: Receipt,
     ) -> Result<TaskView> {
         validate(
-            receipt.summary.len() <= 20_000
-                && receipt.urls.len() <= 100
-                && receipt.urls.iter().all(|u| {
-                    url::Url::parse(u).is_ok_and(|u| {
-                        u.scheme() == "https" && u.username().is_empty() && u.password().is_none()
-                    })
-                }),
+            receipt.urls.iter().all(|u| {
+                url::Url::parse(u).is_ok_and(|u| {
+                    u.scheme() == "https" && u.username().is_empty() && u.password().is_none()
+                })
+            }),
             "Provide a short result with HTTPS links.",
         )?;
         self.transaction(|| {
@@ -1000,39 +916,6 @@ impl Store {
             self.projection(p, task)
         })
     }
-    pub fn download(&self, p: &Principal, artifact_id: &str) -> Result<(Artifact, Vec<u8>)> {
-        let artifact = self.artifact(artifact_id)?;
-        let task = self.task(&artifact.task_id)?;
-        self.authorized(p, &task)?;
-        require(
-            task.view.revoked_at.is_none() && task.view.expires_at > self.time(),
-            "This download expired or was revoked.",
-        )?;
-        if p.user_id != task.view.owner_id {
-            require(
-                task.view.status == Status::Completed
-                    && task
-                        .view
-                        .draft
-                        .as_ref()
-                        .is_some_and(|d| d.attachments.iter().any(|a| a.id == artifact_id)),
-                "This file has not been shared with you.",
-            )?;
-        }
-        let encrypted: Vec<u8> = self.db.query_row(
-            "SELECT data FROM artifacts WHERE id=?",
-            [artifact_id],
-            |r| r.get(0),
-        )?;
-        let bytes = self
-            .vault
-            .decrypt(&encrypted, &format!("artifact:{artifact_id}"))?;
-        require(
-            hash(&bytes) == artifact.sha256,
-            "The file failed its integrity check.",
-        )?;
-        Ok((artifact, bytes))
-    }
     pub fn acknowledge_download(
         &self,
         p: &Principal,
@@ -1049,7 +932,7 @@ impl Store {
             require(
                 task.view.status == Status::Completed
                     && task.view.revoked_at.is_none()
-                    && task.view.expires_at > self.time()
+                    && !task.view.expired(self.time())
                     && task
                         .view
                         .draft
@@ -1086,7 +969,7 @@ impl Store {
             conflict(
                 task.view.status == Status::Completed
                     && task.view.revoked_at.is_none()
-                    && task.view.expires_at > self.time(),
+                    && !task.view.expired(self.time()),
                 "This response is not available.",
             )?;
             if task.view.received_at.is_none() {
@@ -1104,7 +987,7 @@ impl Store {
         // not tell the user to approve work that is already decided or cancelled.
         let task = self.task(&delivery.task_id)?;
         Ok(
-            if task.view.expires_at <= self.time()
+            if task.view.expired(self.time())
                 && !matches!(
                     task.view.status,
                     Status::Executing | Status::CancelRequested

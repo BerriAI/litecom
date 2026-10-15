@@ -55,7 +55,7 @@ The relay hosts discoverable Agent Cards and authenticated per-account A2A endpo
 | Requester must clarify or accept an invitation | `INPUT_REQUIRED` |
 | Approved response available, or requested action verified complete | `COMPLETED` |
 | Owner declines / requester cancels / execution fails | `REJECTED` / `CANCELED` / `FAILED` |
-| Pending request expires | `FAILED`, with an explicit expiry reason |
+| Previously expired request | Remains unavailable; new requests have no automatic expiry |
 
 Use the SDK’s actual enum names, including its required prefix. Owner approval is application authorization; it is not an instruction for the requesting agent to approve itself. Revoking a completed result changes access, not its historical task state. Receipt acknowledgement is separate from A2A completion: the receiving adapter/page confirms retrieval; an attempted HTTP response alone is insufficient.
 
@@ -113,7 +113,7 @@ Use replaceable SMS delivery, initially Twilio Programmable Messaging, plus Slac
 
 Contact links allow connection requests only. Mutual acceptance enables future task requests, never automatic sharing or execution. Bind grants to verified account IDs and enforce caller access on every A2A/MCP operation. Authenticate account linking; do not merge accounts based on a matching name/address. Offer trusted-device recovery and optional passkeys/recovery codes. Number replacement/recycling must not transfer an existing account’s grants.
 
-The relay stores owner-only immutable draft packages before approval, enabling phone review after the laptop sleeps. Release access to the approved recipient only; validate access on every download. Use TLS, encryption at rest, expiry, and deletion. This design is not end-to-end encrypted. Model providers also receive preparation context.
+The relay stores owner-only immutable draft packages before approval, enabling phone review after the laptop sleeps. Release access to the approved recipient only; validate access on every download. Use TLS, encryption at rest, owner-controlled revocation, and deletion. This design is not end-to-end encrypted. Model providers also receive preparation context.
 
 Email retrieval uses the selected agent's existing email tools and connection. Litecom reviews and delivers the response and attachments through the same generic path. Missing access is resolved through the agent's normal setup. This is independent of Litecom's email approval-notification channel.
 

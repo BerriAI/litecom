@@ -4,12 +4,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OpenFlags, backup::Backup};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    io::Read,
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{fs, io::Read, path::Path, time::Duration};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,7 +45,7 @@ fn read_key(path: &Path) -> Result<[u8; 32]> {
 }
 fn check_database(db: &Connection, key: [u8; 32]) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 1 {
+    if !matches!(version, 1 | 2) {
         bail!("This database format is not supported by this Litecom version.")
     }
     let result: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
@@ -105,13 +100,9 @@ pub fn create(data: &Path, output: &Path) -> Result<Manifest> {
     let mut target = Connection::open(&snapshot)?;
     {
         let backup = Backup::new(&source, &mut target)?;
-        let started = Instant::now();
         loop {
             match backup.step(256)? {
                 rusqlite::backup::StepResult::Done => break,
-                _ if started.elapsed() > Duration::from_secs(300) => bail!(
-                    "The snapshot could not finish within five minutes. Retry to a new folder when the relay is less busy."
-                ),
                 _ => std::thread::sleep(Duration::from_millis(5)),
             }
         }

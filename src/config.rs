@@ -107,7 +107,6 @@ pub fn load_key(dir: &Path) -> Result<[u8; 32]> {
 impl ClientConfig {
     pub fn path(connection: &str) -> Result<PathBuf> {
         if connection.is_empty()
-            || connection.len() > 64
             || !connection
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')

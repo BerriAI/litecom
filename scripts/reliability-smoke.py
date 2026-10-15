@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
-parser.add_argument('--case', choices=['all', 'downloads', 'editing', 'decisions', 'routing'], default='all')
+parser.add_argument('--case', choices=['all', 'downloads', 'editing', 'decisions', 'routing', 'pagination'], default='all')
 args = parser.parse_args()
 binary = args.binary.resolve()
 evidence = Path('.preview/reliability')
@@ -86,6 +86,27 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 d = task['draft']
                 return api(b, '/api/tasks/'+task['id']+'/decision', {
                     'version': d['version'], 'digest': d['digest'], 'decision': decision})
+
+            if args.case in ('all', 'pagination'):
+                expected = set()
+                for index in range(205):
+                    expected.add(request(f'Inbox history {index}')['id'])
+                a.goto(origin)
+                seen = []
+                for index in range(3):
+                    expect(a.get_by_role('heading',name='Your inbox')).to_be_visible()
+                    seen.extend(link.rsplit('/',1)[1] for link in a.locator('a.title-link').evaluate_all('(links) => links.map(link => link.href)'))
+                    if index < 2:
+                        a.get_by_role('link',name='Older requests',exact=True).click()
+                assert len(seen)==205 and set(seen)==expected, 'Pagination skipped or repeated a request'
+                a.get_by_role('link',name='Latest requests',exact=True).click()
+                expect(a.locator('a.title-link')).to_have_count(100)
+                large = draft(request('A request longer than the old cap. '*5000),'Reply beyond the former HTTP and text caps. '*80000)
+                assert len(api(a,'/api/tasks/'+large['id'])['request']) > 100000
+                assert api(a,'/api/tasks/'+large['id'])['response'] is None
+                decide(large,'approve')
+                assert len(api(a,'/api/tasks/'+large['id'])['response']['text']) > 3*1024*1024
+                print('PASS: 205 requests remain reachable without duplicates; large request/reply survives exact approval.',flush=True)
 
             if args.case in ('all', 'routing'):
                 a.goto(origin)
@@ -159,23 +180,26 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 assert api(a, '/api/tasks/'+task['id'])['downloads'] == []
                 a.unroute(download_path)
                 a.reload()
-                receipt_path = download_path+'/received'
+                receipt_path = '**/api/tasks/'+task['id']+'/received'
                 a.route(receipt_path, lambda route: route.abort('connectionreset'))
                 with a.expect_download() as downloaded:
                     a.get_by_role('link', name=file['name'], exact=True).click()
                 assert hashlib.sha256(Path(downloaded.value.path()).read_bytes()).digest() == hashlib.sha256(payload).digest()
-                expect(a.locator('#notice')).to_contain_text('Download verified; receipt could not be confirmed')
+                expect(a.locator('#notice')).to_contain_text('Download started')
+                a.get_by_role('button',name='Mark received',exact=True).click()
+                expect(a.get_by_role('alert')).to_be_visible()
                 assert api(a, '/api/tasks/'+task['id'])['downloads'] == []
                 a.unroute(receipt_path)
                 with a.expect_download() as downloaded:
                     a.get_by_role('link', name=file['name'], exact=True).click()
                 assert Path(downloaded.value.path()).read_bytes() == payload
-                expect(a.locator('#notice')).to_have_text('Download verified.')
-                assert len(api(a, '/api/tasks/'+task['id'])['downloads']) == 1
+                expect(a.locator('#notice')).to_contain_text('Download started')
+                a.get_by_role('button',name='Mark received',exact=True).click()
+                assert api(a, '/api/tasks/'+task['id'])['received_at'] is not None
                 api(b, '/api/tasks/'+task['id']+'/cancel', {})
                 a.reload()
                 expect(a.get_by_role('link', name=file['name'], exact=True)).to_have_count(0)
-                print('PASS: failed/corrupt transfers have no receipt; lost receipt preserves a successful download; retry and revocation work.', flush=True)
+                print('PASS: interrupted access and mismatched snapshot checks have no receipt; streamed downloads, explicit receipt retry and revocation work.', flush=True)
 
             if args.case in ('all', 'editing'):
                 task = draft(request('Preserve an in-progress edit'), 'Old draft')

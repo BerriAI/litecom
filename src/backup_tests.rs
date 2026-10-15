@@ -137,14 +137,16 @@ fn live_backup_restores_data_without_reviving_access_or_running_actions() {
     assert!(restored.claim(&new_worker, &agent).unwrap().is_none());
     let bytes: Vec<u8> = restored
         .db
-        .query_row("SELECT data FROM artifacts WHERE id=?", [&file.id], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT data FROM artifact_chunks WHERE artifact_id=? AND sequence=0",
+            [&file.id],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(
         restored
             .vault
-            .decrypt(&bytes, &format!("artifact:{}", file.id))
+            .decrypt(&bytes, &format!("artifact-chunk:{}:0", file.id))
             .unwrap(),
         b"exact private note"
     );

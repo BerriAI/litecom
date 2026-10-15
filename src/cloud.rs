@@ -6,6 +6,7 @@ use crate::{
     model::{DraftInput, Outcome, Status},
     store::CloudClaim,
 };
+use futures_util::StreamExt;
 use std::time::Duration;
 
 pub async fn run(state: AppState) -> Result<()> {
@@ -79,7 +80,7 @@ async fn process(state: &AppState, devin: &Devin, claim: &mut CloudClaim) -> Res
             )
             .await?;
         validate(
-            !session.session_id.is_empty() && session.session_id.len() <= 200,
+            !session.session_id.is_empty(),
             "Devin did not return a valid session ID.",
         )?;
         state.db()?.cloud_started(claim, session)?;
@@ -143,11 +144,12 @@ async fn collect_result(
     let Some(reply) = reply else {
         return state.db()?.cloud_finish(claim,Outcome::Failed,"Devin stopped without a complete reply for review. Open the session to inspect its work. No output has been shared.");
     };
-    if reply.text.len() > 2_000_000
-        || reply.files.len() > 100
-        || (reply.text.trim().is_empty() && reply.files.is_empty())
-    {
-        return state.db()?.cloud_finish(claim,Outcome::Failed,"Devin's result is empty or exceeds Litecom's reply limits. Open the session to inspect it. No output has been shared.");
+    if reply.text.trim().is_empty() && reply.files.is_empty() {
+        return state.db()?.cloud_finish(
+            claim,
+            Outcome::Failed,
+            "Devin's result is empty. Open the session to inspect it. No output has been shared.",
+        );
     }
     let available = if reply.files.is_empty() {
         vec![]
@@ -178,17 +180,8 @@ async fn collect_result(
         if state.db()?.renew_cloud(claim)? != Status::Executing {
             return state.db()?.release_cloud(claim, false);
         }
-        let bytes = tokio::time::timeout(
-            Duration::from_secs(60),
-            devin.download(&claim.job.connection, file),
-        )
-        .await
-        .map_err(|_| Error::Unavailable("The attachment download timed out.".into()))??;
-        let db = state.db()?;
-        if db.renew_cloud(claim)? != Status::Executing {
-            return db.release_cloud(claim, false);
-        }
-        let artifact = db.upload(
+        let response = devin.download(&claim.job.connection, file).await?;
+        let mut upload = state.db()?.begin_upload(
             &claim.job.principal,
             &claim.job.work.task_id,
             Some(&claim.job.work.lease),
@@ -196,8 +189,26 @@ async fn collect_result(
             file.content_type
                 .as_deref()
                 .unwrap_or("application/octet-stream"),
-            &bytes,
         )?;
+        let mut stream = response.bytes_stream();
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+        loop {
+            tokio::select! {
+                chunk = stream.next() => match chunk {
+                    Some(chunk) => upload.write(&chunk.map_err(|_| Error::Unavailable("The attachment download was interrupted.".into()))?)?,
+                    None => break,
+                },
+                _ = heartbeat.tick() => {
+                    if state.db()?.renew_cloud(claim)? != Status::Executing { return state.db()?.release_cloud(claim,false); }
+                }
+            }
+        }
+        let db = state.db()?;
+        if db.renew_cloud(claim)? != Status::Executing {
+            return db.release_cloud(claim, false);
+        }
+        let artifact =
+            db.finish_upload(&claim.job.principal, Some(&claim.job.work.lease), upload)?;
         ids.push(artifact.id);
     }
     let db = state.db()?;

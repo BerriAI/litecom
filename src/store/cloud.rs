@@ -23,10 +23,7 @@ impl Store {
         mut connection: DevinConnection,
     ) -> Result<Agent> {
         p.human()?;
-        validate(
-            !name.trim().is_empty() && name.len() <= 64,
-            "Give this agent a name.",
-        )?;
+        validate(!name.trim().is_empty(), "Give this agent a name.")?;
         self.transaction(|| {
             let existing = self
                 .db
@@ -171,7 +168,7 @@ impl Store {
             task.view.status,
             Status::Executing | Status::CancelRequested
         ) {
-            if task.view.expires_at <= self.time() {
+            if task.view.expired(self.time()) {
                 task.view.status = Status::CancelRequested;
             }
             task.lease_until = Some(self.time() + LEASE_TTL);

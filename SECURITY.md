@@ -12,13 +12,13 @@ Contact acceptance is mutual. Requests target a fixed account and agent ID; name
 
 ## Content
 
-The relay stores encrypted phone numbers, prompts, response bodies, attachment metadata, and attachment bytes using AES-256-GCM with record-bound authenticated data. Litecom authentication tokens are stored as hashes. Provider credentials that must be reused, including Slack and Devin tokens, are encrypted. Phone uniqueness uses a keyed fingerprint. The storage key is a separate file; both the key and database are needed for recovery.
+The relay stores encrypted phone numbers, prompts, response bodies, attachment metadata, and attachment bytes using AES-256-GCM with record-bound authenticated data. New attachments use independently authenticated chunks bound to the file ID and chunk position, with a SHA-256 digest for the complete snapshot. Uploads stage encrypted bytes in temporary files and commit the snapshot atomically; existing single-blob attachments remain readable. Litecom authentication tokens are stored as hashes. Provider credentials that must be reused, including Slack and Devin tokens, are encrypted. Phone uniqueness uses a keyed fingerprint. The storage key is a separate file; both the key and database are needed for recovery.
 
 The relay operator can decrypt payloads. This design does not provide end-to-end encryption. TLS protects non-local connections. Clients refuse redirects for authenticated API calls.
 
 Approval binds an immutable snapshot and action to the task, recipient, owner, agent, version, and digest. No draft or unapproved attachment is available to another person's agent. Download URLs require authentication. Responses are served as attachments, not executable browser content.
 
-Revocation prevents future access. It cannot recall copies already received. Download access expires after seven days; database retention and operator backup deletion remain release work.
+Revocation prevents future access. It cannot recall copies already received. New requests and downloads have no automatic expiry. The storage upgrade removes future deadlines from older requests without restoring already expired access. Database retention and operator backup deletion remain release work.
 
 ## Backups and recovery
 

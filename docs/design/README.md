@@ -101,7 +101,7 @@ Slack updates its original notification. SMS and email send a completion notice;
 
 One local agent, one open-source relay, and small browser pages for connection, review, and download. Apache-2.0 code, signed installers, safe updates, and Docker Compose self-hosting.
 
-For phone review while the laptop sleeps, the relay stores private draft snapshots. Approval releases sharing access to the named recipient. Use TLS, encryption at rest, and expiry; **this MVP is not end-to-end encrypted**. Model providers process agent context, and hosted inference/SMS have operating costs.
+For phone review while the laptop sleeps, the relay stores private draft snapshots. Approval releases sharing access to the named recipient. Use TLS, encryption at rest, and owner-controlled revocation; **this MVP is not end-to-end encrypted**. Model providers process agent context, and hosted inference/SMS have operating costs.
 
 Ship when two new users can complete a file/email handoff, GitHub access, and a code-change-to-PR task. Include Phone, Slack, Email, contacts, offline recovery, tested connections to the required local and cloud agents.
 

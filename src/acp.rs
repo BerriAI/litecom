@@ -77,7 +77,7 @@ async fn permission(
     }
     let title = scope["title"]
         .as_str()
-        .filter(|title| !title.trim().is_empty() && title.len() <= 200)
+        .filter(|title| !title.trim().is_empty())
         .unwrap_or("Approve agent operation");
     let input = ToolPermissionInput {
         id: crate::crypto::id(),
@@ -242,12 +242,7 @@ pub(crate) async fn converse(
             // execute in the native agent under its existing configuration.
             let initialize = InitializeRequest::new(ProtocolVersion::V1)
                 .client_info(Implementation::new("litecom", env!("CARGO_PKG_VERSION")));
-            let initialized = tokio::time::timeout(
-                Duration::from_secs(30),
-                cx.send_request(initialize).block_task(),
-            )
-            .await
-            .map_err(AcpError::into_internal_error)??;
+            let initialized = cx.send_request(initialize).block_task().await?;
             if initialized.protocol_version != ProtocolVersion::V1 {
                 return Err(AcpError::internal_error().data("This agent did not negotiate ACP v1."));
             }
@@ -263,12 +258,7 @@ pub(crate) async fn converse(
                     ]),
                 ));
             }
-            let created = tokio::time::timeout(
-                Duration::from_secs(30),
-                cx.send_request(new_session).block_task(),
-            )
-            .await
-            .map_err(AcpError::into_internal_error)??;
+            let created = cx.send_request(new_session).block_task().await?;
             {
                 let mut session = session_state.lock().expect("ACP session lock");
                 session.id = Some(created.session_id.clone());
@@ -326,9 +316,6 @@ fn parse_reply(output: &str) -> Result<AgentReply> {
         .trim();
     for (offset, _) in output.match_indices('{') {
         if let Ok(reply) = serde_json::from_str::<AgentReply>(&output[offset..]) {
-            if reply.text.len() > 2_000_000 || reply.files.len() > 100 {
-                bail!("The agent returned more than Litecom can transfer in one request.");
-            }
             return Ok(reply);
         }
     }
