@@ -25,6 +25,9 @@ services:
       SLACK_SIGNING_SECRET: "${SLACK_SIGNING_SECRET:-}"
       SLACK_CLIENT_ID: "${SLACK_CLIENT_ID:-}"
       SLACK_CLIENT_SECRET: "${SLACK_CLIENT_SECRET:-}"
+      SLACK_AGENT_BASE_URL: "${SLACK_AGENT_BASE_URL:-}"
+      SLACK_AGENT_MODEL: "${SLACK_AGENT_MODEL:-}"
+      SLACK_AGENT_API_KEY: "${SLACK_AGENT_API_KEY:-}"
     volumes:
       - relay-data:/data
     restart: unless-stopped

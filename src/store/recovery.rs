@@ -9,7 +9,7 @@ impl Store {
                 DELETE FROM otp; DELETE FROM local_pairings; DELETE FROM devices; DELETE FROM channel_challenges;
                 DELETE FROM login_states;
                 DELETE FROM oauth_links; DELETE FROM channel_actions; DELETE FROM deliveries; DELETE FROM channels;
-                DELETE FROM cloud_jobs; DELETE FROM tool_permissions;
+                DELETE FROM cloud_jobs; DELETE FROM tool_permissions; DELETE FROM slack_jobs;
                 UPDATE agents SET config=NULL,last_seen_at=NULL;
                 DELETE FROM contacts WHERE status!='blocked';")?;
             let profiles=self.db.prepare("SELECT id FROM profiles")?.query_map([],|r|r.get::<_,String>(0))?

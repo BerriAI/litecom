@@ -25,6 +25,7 @@ pub mod runner;
 pub mod runs;
 pub mod service;
 pub mod slack;
+pub mod slack_agent;
 pub mod store;
 #[cfg(test)]
 mod tests;

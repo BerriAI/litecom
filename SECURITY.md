@@ -36,6 +36,14 @@ ACP connections forward new tool-permission requests to the owner. Decisions bin
 
 Devin uses the same single request approval for launch and result delivery. The relay persists a job before starting a session, resumes known sessions after restart, and does not repeat an uncertain launch. Provider session links and unshared output remain private to the owner. Disconnecting requests termination; pending cancellation is not reported as confirmed until the provider accepts it. A running job retains an encrypted credential snapshot for monitoring/termination; that copy is removed when the job ends. Signed attachment redirects never receive the Devin bearer token and use checked, pinned public DNS addresses.
 
+## Optional Slack agent
+
+The optional hosted Slack agent receives signed `app_mention` events through the same app used for approval DMs. It maps the sender's workspace and user IDs to a verified Litecom Slack connection. Its tools can read the source channel, list linked people, and create a request. They cannot approve, execute commands, read local files, or change accounts. The server fixes the sender and reply destination independently of model output, restricts recipients to linked members of that Slack workspace, and rechecks blocks and workspace access.
+
+The host's model provider receives the selected Slack context and directory information. Events and model progress are encrypted in the relay database. The owner sees the proposed work, original message, gathered context, and destination before approving. Approval also authorizes posting the final reply to everyone in that Slack channel; downloads remain restricted to the requester and owner. Final results bypass the hosted model. Already-posted Slack content cannot be recalled by revoking a Litecom download.
+
+The event ID binds retries to one request. Model output cannot supply approval authority, a different sender, or another reply channel. Restoring a backup discards pending Slack jobs so stale events cannot submit work again. See [optional setup](docs/slack-agent.md).
+
 ## Development delivery
 
 `--dev` is allowed only with loopback binding and a loopback public URL. It prints test codes and notifications to the local terminal. It must never be used as an internet-facing authentication service.

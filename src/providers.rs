@@ -10,6 +10,7 @@ pub struct Providers {
     agentphone: Option<crate::agentphone::AgentPhone>,
     email: Option<Email>,
     pub slack: Option<crate::slack::Slack>,
+    pub slack_agent: Option<crate::slack_agent::SlackAgent>,
     pub google: Option<crate::google::Google>,
     pub dev: bool,
     slack_signing: Option<String>,
@@ -32,6 +33,7 @@ impl Providers {
             agentphone: None,
             email: None,
             slack: None,
+            slack_agent: None,
             google: None,
             dev: true,
             slack_signing: None,
@@ -84,7 +86,8 @@ impl Providers {
             }
             _ => return Err(Error::Invalid("Set both SMTP_HOST and SMTP_FROM.".into())),
         };
-        let slack = match (get("SLACK_CLIENT_ID"), get("SLACK_CLIENT_SECRET")) {
+        let slack_agent = crate::slack_agent::SlackAgent::from_env(&get)?;
+        let mut slack = match (get("SLACK_CLIENT_ID"), get("SLACK_CLIENT_SECRET")) {
             (Some(client_id), Some(client_secret)) => {
                 Some(crate::slack::Slack::new(client_id, client_secret))
             }
@@ -95,6 +98,14 @@ impl Providers {
                 ));
             }
         };
+        if slack_agent.is_some() {
+            if slack.is_none() || get("SLACK_SIGNING_SECRET").is_none() {
+                return Err(Error::Invalid("Configure SLACK_CLIENT_ID, SLACK_CLIENT_SECRET and SLACK_SIGNING_SECRET before enabling the optional Slack agent.".into()));
+            }
+            if let Some(slack) = &mut slack {
+                slack.agent_enabled = true;
+            }
+        }
         let google = match (get("GOOGLE_CLIENT_ID"), get("GOOGLE_CLIENT_SECRET")) {
             (Some(id), Some(secret)) => Some(crate::google::Google::new(
                 id,
@@ -117,6 +128,7 @@ impl Providers {
             agentphone,
             email,
             slack,
+            slack_agent,
             google,
             dev,
             slack_signing: get("SLACK_SIGNING_SECRET"),

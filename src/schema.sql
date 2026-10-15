@@ -109,3 +109,12 @@ CREATE TABLE IF NOT EXISTS channel_actions (
 CREATE TABLE IF NOT EXISTS phone_events (
   body_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL
 );
+
+-- Slack's event ID is stable across retries. Payloads and model conversations
+-- use the same encrypted storage as requests; tokens stay in channels.
+CREATE TABLE IF NOT EXISTS slack_jobs (
+  id TEXT PRIMARY KEY, data BLOB NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0,
+  claim TEXT, claim_until INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS slack_intake_queue ON slack_jobs(done,next_attempt,claim_until);

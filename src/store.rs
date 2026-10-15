@@ -17,6 +17,7 @@ mod files;
 mod identities;
 mod permissions;
 mod recovery;
+mod slack_agent;
 pub(crate) use cloud::CloudClaim;
 
 pub const LEASE_TTL: i64 = 120;

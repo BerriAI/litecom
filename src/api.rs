@@ -94,7 +94,7 @@ impl AppState {
         self.check_workspace(&p)?;
         Ok(p)
     }
-    fn check_workspace(&self, p: &Principal) -> Result<()> {
+    pub(crate) fn check_workspace(&self, p: &Principal) -> Result<()> {
         if let Some(google) = &self.providers.google {
             let identity = self.db()?.google_identity_for(&p.user_id)?;
             require(
@@ -152,6 +152,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/capabilities", get(capabilities))
         .route("/setup/slack", get(slack_app_setup))
+        .route("/setup/slack/manifest", get(slack_app_manifest))
         .route(
             "/install.sh",
             get(|| async {
@@ -197,6 +198,7 @@ pub fn router(state: AppState) -> Router {
             post(crate::channel_replies::agentphone),
         )
         .route("/webhooks/slack", post(crate::channel_replies::slack))
+        .route("/webhooks/slack/events", post(crate::slack_agent::events))
         .route(
             "/auth/start",
             post(start_login).layer(DefaultBodyLimit::max(16 * 1024)),
@@ -378,22 +380,42 @@ async fn security_headers(request: axum::extract::Request, next: Next) -> Respon
     }
     response
 }
-async fn slack_app_setup(State(s): State<AppState>) -> axum::response::Redirect {
-    let manifest = json!({
-        "display_information":{"name":"Litecom","description":"Ask someone's agent. They approve. It gets done."},
-        "features":{"bot_user":{"display_name":"Litecom","always_online":false}},
-        "oauth_config":{"redirect_urls":[format!("{}/oauth/slack/callback",s.origin)],"scopes":{"bot":["chat:write","im:write"]}},
-        "settings":{"interactivity":{"is_enabled":true,"request_url":format!("{}/webhooks/slack",s.origin)},"socket_mode_enabled":false}
-    });
+async fn slack_app_setup(
+    State(s): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> axum::response::Redirect {
+    let agent = s.providers.slack_agent.is_some() || query.get("agent").is_some_and(|v| v == "1");
+    let manifest = slack_manifest(&s.origin, agent);
     let mut url = url::Url::parse("https://api.slack.com/apps").expect("constant Slack URL");
     url.query_pairs_mut()
         .append_pair("new_app", "1")
         .append_pair("manifest_json", &manifest.to_string());
     axum::response::Redirect::to(url.as_str())
 }
+async fn slack_app_manifest(
+    State(s): State<AppState>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Json<Value> {
+    Json(slack_manifest(
+        &s.origin,
+        s.providers.slack_agent.is_some() || query.get("agent").is_some_and(|v| v == "1"),
+    ))
+}
+fn slack_manifest(origin: &str, agent: bool) -> Value {
+    let mut manifest = json!({
+        "display_information":{"name":"Litecom","description":"Ask someone's agent. They approve. It gets done."},
+        "features":{"bot_user":{"display_name":"Litecom","always_online":false}},
+        "oauth_config":{"redirect_urls":[format!("{origin}/oauth/slack/callback")],"scopes":{"bot":crate::slack::scopes(agent)}},
+        "settings":{"interactivity":{"is_enabled":true,"request_url":format!("{origin}/webhooks/slack")},"socket_mode_enabled":false}
+    });
+    if agent {
+        manifest["settings"]["event_subscriptions"] = json!({"request_url":format!("{origin}/webhooks/slack/events"),"bot_events":["app_mention"]});
+    }
+    manifest
+}
 async fn capabilities(State(s): State<AppState>) -> Json<Value> {
     Json(
-        json!({"google":s.providers.google.is_some(),"phone_signin":s.providers.phone_available() && !s.providers.google.as_ref().is_some_and(|g|g.restricts_workspace()),"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.phone_provider().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
+        json!({"google":s.providers.google.is_some(),"phone_signin":s.providers.phone_available() && !s.providers.google.as_ref().is_some_and(|g|g.restricts_workspace()),"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"slack_agent":s.providers.slack_agent.is_some() && !s.providers.dev,"development":s.providers.dev,"direct_approvals":{"phone":s.providers.phone_provider().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
     )
 }
 #[derive(serde::Serialize, Deserialize)]

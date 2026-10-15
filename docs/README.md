@@ -7,6 +7,7 @@ Ask someone's agent for a reply, files, or an action. They approve the request, 
 - [Set it up with your agent](setup-with-agent.md): copy a prompt for the full hosting flow.
 - [Set up a server](self-host.md): hosting, Google sign-in, and workspace access.
 - [Configure approval channels](hosting-channels.md): Slack, email, and phone provider setup.
+- [Enable Slack mentions](slack-agent.md): optionally let the same Slack app read context and ask an agent.
 - [Back up and restore](backup.md): protect your data and recover a server.
 
 ## Use Litecom

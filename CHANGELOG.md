@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.15
+
+- Optionally enable a hosted Slack agent on the existing approval app. It reads channel context, resolves the recipient, and submits a request for owner approval.
+- Show sent and approved status in the originating Slack thread, then post the final response as a new reply.
+- Preserve Slack intake across restarts and reuse one request when Slack retries an event.
+- Generate one Slack app configuration for hosts. Model settings are optional and stay on the server.
+
 ## 0.1.0-alpha.14
 
 - Keep local agent runs alive through brief relay outages and retry result delivery without rerunning the agent.

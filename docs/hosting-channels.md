@@ -21,6 +21,8 @@ Do not enable Slack's public-client PKCE option for this server-side app. Token 
 
 Litecom opens a DM with the installing user. It requests no message-history access. Incoming buttons require [Slack's signing secret and timestamp verification](https://docs.slack.dev/authentication/verifying-requests-from-slack/) and the linked workspace, user, and DM channel. The action is bound to the exact proposal. Provider tokens remain encrypted on the relay.
 
+To also start requests with `@Litecom`, [enable the optional Slack agent](slack-agent.md). It uses this same app and adds message-history permissions. Approval DMs work without it.
+
 ## Email
 
 For outgoing notices:

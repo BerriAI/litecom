@@ -22,6 +22,9 @@ mod backup_tests;
 #[path = "reliability_tests.rs"]
 mod reliability_tests;
 
+#[path = "slack_agent_tests.rs"]
+mod slack_agent_tests;
+
 fn user(store: &Store, name: &str, phone: &str) -> (Principal, Session) {
     let (challenge, code) = store.begin_login(name, phone, "browser").unwrap();
     let session = store.verify_login(&challenge.id, &code, "browser").unwrap();

@@ -13,6 +13,14 @@ pub struct Slack {
     pub client_id: String,
     pub client_secret: String,
     api_base: String,
+    pub(crate) agent_enabled: bool,
+}
+pub(crate) fn scopes(agent: bool) -> Vec<&'static str> {
+    let mut scopes = vec!["chat:write", "im:write"];
+    if agent {
+        scopes.extend(["app_mentions:read", "channels:history", "groups:history"]);
+    }
+    scopes
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SlackDestination {
@@ -164,6 +172,7 @@ impl Slack {
             client_id,
             client_secret,
             api_base: "https://slack.com/api".into(),
+            agent_enabled: false,
         }
     }
     #[cfg(test)]
@@ -172,6 +181,7 @@ impl Slack {
             client_id,
             client_secret,
             api_base,
+            agent_enabled: false,
         }
     }
     pub fn authorize_url(&self, origin: &str, start: &SlackStart) -> String {
@@ -179,7 +189,7 @@ impl Slack {
             url::Url::parse("https://slack.com/oauth/v2/authorize").expect("constant URL");
         url.query_pairs_mut().extend_pairs([
             ("client_id", self.client_id.as_str()),
-            ("scope", "chat:write,im:write"),
+            ("scope", &scopes(self.agent_enabled).join(",")),
             ("redirect_uri", &format!("{origin}/oauth/slack/callback")),
             ("state", start.state.as_str()),
         ]);
@@ -299,5 +309,49 @@ impl Slack {
         Ok(serde_json::to_string(
             &json!({"channel":destination.channel,"ts":field(&result,"ts")?}),
         )?)
+    }
+
+    pub(crate) async fn read(
+        &self,
+        http: &reqwest::Client,
+        destination: &SlackDestination,
+        method: &str,
+        query: &[(&str, String)],
+    ) -> Result<Value> {
+        response(
+            http.get(format!("{}/{method}", self.api_base))
+                .bearer_auth(&destination.token)
+                .query(query),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reply(
+        &self,
+        http: &reqwest::Client,
+        destination: &SlackDestination,
+        channel: &str,
+        thread: &str,
+        body: &str,
+        previous: Option<&str>,
+        message_id: &str,
+    ) -> Result<String> {
+        let mut payload = json!({"channel":channel,"text":body,"mrkdwn":false,"parse":"none","link_names":false,"unfurl_links":false,"unfurl_media":false});
+        let method = if let Some(ts) = previous {
+            payload["ts"] = json!(ts);
+            "chat.update"
+        } else {
+            payload["thread_ts"] = json!(thread);
+            payload["client_msg_id"] = json!(message_id);
+            "chat.postMessage"
+        };
+        let value = response(
+            http.post(format!("{}/{method}", self.api_base))
+                .bearer_auth(&destination.token)
+                .json(&payload),
+        )
+        .await?;
+        field(&value, "ts")
     }
 }

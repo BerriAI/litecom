@@ -64,7 +64,7 @@ Read the reply and access files and links from your agent or Litecom. Download w
 3. **Connect [Slack](docs/hosting-channels.md#slack), [phone](docs/hosting-channels.md#phone), or [email](docs/hosting-channels.md#email).** Start with one and add others later.
 4. **Send a first request and approve it from a message.** When the result arrives, share your workspace URL.
 
-The host manages provider credentials. Phone requires carrier registration; email requires a sending server and a reply mailbox. No separate database service or model account is required. [Hosting guide](docs/self-host.md) · [Backups](docs/backup.md).
+The host manages provider credentials. Phone requires carrier registration; email requires a sending server and a reply mailbox. No separate database service or model account is required for the core setup. Optionally, [enable a hosted Slack agent](docs/slack-agent.md) to start requests with `@Litecom` using the same app. [Hosting guide](docs/self-host.md) · [Backups](docs/backup.md).
 
 ## Your team joins in the browser
 

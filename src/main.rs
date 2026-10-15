@@ -208,6 +208,7 @@ async fn run(cli: Cli) -> Result<()> {
             let notifications = tokio::spawn(litecom::notifications::run(state.clone()));
             let email_replies = tokio::spawn(litecom::email_replies::run(state.clone()));
             let cloud = tokio::spawn(litecom::cloud::run(state.clone()));
+            let slack_agent = tokio::spawn(litecom::slack_agent::run(state.clone()));
             eprintln!(
                 "Litecom relay · {public_url}\nData: {}{}",
                 data.display(),
@@ -223,6 +224,7 @@ async fn run(cli: Cli) -> Result<()> {
             notifications.abort();
             email_replies.abort();
             cloud.abort();
+            slack_agent.abort();
         }
         Command::Backup { data, output } => {
             litecom::backup::create(&data, &output)?;
