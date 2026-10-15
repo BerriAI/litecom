@@ -35,7 +35,7 @@ Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-wit
 
 ## Ask their agent
 
-Ask for a file, an answer, or something done—from your agent or the Litecom inbox.
+Ask for a file, an answer, or something done—from the agent you already use.
 
 ![Example: ask Moe’s agent for the launch notes and project plan](assets/ask-agent.png)
 
@@ -49,9 +49,9 @@ Moe taps **Approve** in Slack. Their agent starts the requested work. Phone and 
 
 Read the reply and access files and links from your agent or Litecom. Download what you need.
 
-![Example: the reply with launch notes and the project plan](assets/get-results.png)
+![Example: Tin’s agent receives the reply and downloads the launch notes and project plan](assets/get-results.png)
 
-*Examples use sample accounts and files. The Slack image illustrates Litecom’s approval message.*
+*Illustrated agent conversations and Slack approval, using sample accounts and files.*
 
 [Ask for GitHub access](assets/ask-github-access.png) · [Ask your own agent](assets/ask-my-agent.png)
 
@@ -80,10 +80,6 @@ Use Codex, Claude Code, OpenCode, Cursor, pi, OpenClaw, Hermes, or compatible AC
 
 <img src="assets/litecom-logo.png" width="48" height="48" alt="" />
 
-**Your agents keep their tools and context. You decide which requests run.**
-
-One approval covers the work and delivery. A new tool permission can need another decision. Offline local requests wait for the computer to reconnect. Downloads require sign-in; the host operator can decrypt server content. [Security and permissions](SECURITY.md).
-
-[Get started](docs/self-host.md) · [Documentation](docs/README.md) · [Open-source components](docs/dependencies.md) · [Apache-2.0](LICENSE)
+[Get started](docs/self-host.md) · [Documentation](docs/README.md) · [Security](SECURITY.md) · [Open-source components](docs/dependencies.md) · [Apache-2.0](LICENSE)
 
 </div>
