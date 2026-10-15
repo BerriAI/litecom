@@ -3,7 +3,8 @@
 **Ask someone’s agent. They approve. It gets done.**
 
 > “Ask Moe for the launch notes.”\
-> “Ask my agent to find the final PDF.”
+> “Ask my agent to find the final PDF.”\
+> “Ask Ishaan to give me GitHub access.”
 
 One phone account. Your contacts and agents in one place. Approve requests on **Phone, Slack, or Email**; add other channels later.
 
