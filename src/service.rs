@@ -288,7 +288,7 @@ pub fn remove(connection: &str) -> Result<()> {
         stop(connection)?;
         checked(Command::new("powershell.exe").args([
             "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-            &format!("$ErrorActionPreference = 'Stop'; Get-ScheduledTask -TaskName '{}' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false", label(connection)?),
+            &format!("$ErrorActionPreference = 'Stop'; {} | Unregister-ScheduledTask -Confirm:$false; $null = $true", windows_task_lookup(connection)?),
         ]))?;
     }
     Ok(())
@@ -340,7 +340,7 @@ pub(crate) fn remove_owned(connection: &str) -> Result<()> {
         let executable = binary()?.to_string_lossy().replace('\'', "''");
         checked(Command::new("powershell.exe").args([
             "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-            &format!("$ErrorActionPreference = 'Stop'; $task = Get-ScheduledTask -TaskName '{}' -ErrorAction SilentlyContinue; if ($task -and ($task.Actions.Execute -ne '{}')) {{ throw 'The startup task belongs to another Litecom installation.' }}", label(connection)?, executable),
+            &format!("$ErrorActionPreference = 'Stop'; $task = {}; if ($task -and ($task.Actions.Execute -ne '{}')) {{ throw 'The startup task belongs to another Litecom installation.' }}; $null = $true", windows_task_lookup(connection)?, executable),
         ]))?;
         remove(connection)?;
     }
@@ -429,14 +429,24 @@ fn windows_install_script(connection: &str, executable: &Path, home: &Path) -> R
 }
 
 #[cfg(any(target_os = "windows", test))]
+fn windows_task_lookup(connection: &str) -> Result<String> {
+    // A named lookup emits a CIM error when the task is absent, even with
+    // SilentlyContinue. Filtering a successful enumeration distinguishes absence
+    // from permission/service failures and makes repeated removal succeed.
+    Ok(format!(
+        "Get-ScheduledTask -ErrorAction Stop | Where-Object {{ $_.TaskName -eq '{}' -and $_.TaskPath -eq '\\' }}",
+        label(connection)?
+    ))
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn windows_stop_script(connection: &str) -> Result<String> {
-    let name = label(connection)?;
     // Task Scheduler can report Ready before its process exits. Hold handles to
     // this task's workers before stopping so restart/removal waits for release of
     // the executable and files, without affecting another Litecom connection.
     Ok(format!(
         "$ErrorActionPreference = 'Stop'; \
-         $existing = Get-ScheduledTask -TaskName '{name}' -ErrorAction SilentlyContinue; \
+         $existing = {lookup}; \
          if ($existing) {{ \
              $workers = @(Get-CimInstance Win32_Process -Filter \"Name = 'litecom.exe'\" | \
                  Where-Object {{ $_.ExecutablePath -in $existing.Actions.Execute -and \
@@ -449,7 +459,8 @@ fn windows_stop_script(connection: &str) -> Result<String> {
              foreach ($worker in $workers) {{ \
                  if (-not $worker.WaitForExit(30000)) {{ throw 'The background worker has not stopped. Retry before updating or removing it.'; }} \
              }} \
-         }}"
+         }}; $null = $true;",
+        lookup = windows_task_lookup(connection)?
     ))
 }
 

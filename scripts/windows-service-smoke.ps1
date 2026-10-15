@@ -42,7 +42,9 @@ try {
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
         throw "The test task remains installed."
     }
-    Write-Output "PASS: installed/stopped, running, stop, and removal states."
+    & $binaryPath --home $configPath --connection $connection service remove
+    if ($LASTEXITCODE -ne 0) { throw "Repeating removal must succeed when the task is already absent." }
+    Write-Output "PASS: installed/stopped, running, stop, removal, and repeated removal states."
 } finally {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue

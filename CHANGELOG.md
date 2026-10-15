@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-alpha.11
+## 0.1.0-alpha.12
 
 - Choose from installed agents when connecting your computer. Repeated setup keeps your choice.
 - Copy an uninstall command from Settings and select the connections to remove. Other connections, agents, and working files stay.

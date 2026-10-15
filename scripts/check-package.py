@@ -94,6 +94,8 @@ with tempfile.TemporaryDirectory(prefix='litecom-package-') as directory:
                 process.kill()
                 process.wait(timeout=10)
     print(f'{version}: checksum, standalone CLI, relay, database, and bundled UI passed.')
+    subprocess.run([sys.executable, str(Path(__file__).with_name('uninstall-smoke.py')),
+                    '--binary', str(binary)], check=True)
     if args.background_service:
         subprocess.run([sys.executable, str(Path(__file__).with_name('background-service-smoke.py')),
                         '--binary', str(binary)], check=True)
