@@ -15,7 +15,7 @@ import tomllib
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--agent', choices=['codex', 'claude', 'opencode', 'pi', 'openclaw'], required=True)
+parser.add_argument('--agent', choices=['codex', 'claude', 'opencode', 'pi', 'openclaw', 'hermes'], required=True)
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
 parser.add_argument('--path', action='append', default=[], help='Additional installed agent bin directory')
 parser.add_argument('--empty-config', action='store_true', help='Start with no MCP servers')
@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                XDG_CACHE_HOME=str(root/'cache'), XDG_STATE_HOME=str(root/'state'),
                OPENCODE_CONFIG_DIR=str(root/'opencode'), PI_CODING_AGENT_DIR=str(root/'pi'),
                CODEX_HOME=str(root/'codex'), CLAUDE_CONFIG_DIR=str(root/'claude'),
+               HERMES_HOME=str(root/'hermes'),
                OPENCLAW_CONFIG_PATH=str(root/'openclaw.json'), OPENCLAW_STATE_DIR=str(root/'openclaw'),
                OPENCLAW_HIDE_BANNER='1', OPENCLAW_SUPPRESS_NOTES='1',
                PATH=os.pathsep.join(args.path+[os.environ['PATH']]))
@@ -52,6 +53,10 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
         config = root/'codex/config.toml'
         initial = {'mcp_servers': {'litecom': {'command': 'do-not-run', 'enabled': False}}}
         key = 'mcp_servers'
+    elif args.agent == 'hermes':
+        config = root/'hermes/config.yaml'
+        initial = {'mcp_servers': {'litecom': {'command': 'do-not-run', 'enabled': False}}}
+        key = 'mcp_servers'
     else:
         config = root/'claude/.claude.json'
         initial = {'mcpServers': {'litecom': {'type': 'stdio', 'command': 'do-not-run', 'args': [], 'env': {}}}}
@@ -63,10 +68,18 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
         config.write_text('' if args.empty_config else '[mcp_servers.litecom]\ncommand = "do-not-run"\nenabled = false\n')
     elif args.agent == 'openclaw':
         config.write_text('{}' if args.empty_config else json.dumps({'mcp': initial}))
+    elif args.agent == 'hermes':
+        if not args.empty_config:
+            subprocess.run(['hermes', 'config', 'set', key, json.dumps(initial[key])],
+                           env=env, cwd=work, check=True, capture_output=True, text=True)
     else:
         config.write_text(json.dumps(initial))
 
     def read_config():
+        if args.agent == 'hermes':
+            checked = subprocess.run(['hermes', 'config', 'get', key, '--json'],
+                                     env=env, cwd=work, check=True, capture_output=True, text=True)
+            return {key: json.loads(checked.stdout)}
         value = tomllib.loads(config.read_text()) if args.agent == 'codex' else json.loads(config.read_text())
         return value.get('mcp', {'servers': {}}) if args.agent == 'openclaw' else value
     with socket.socket() as sock:
@@ -149,6 +162,8 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                 client_command = ['codex', 'mcp', 'get', expected_name, '--json']
             elif args.agent == 'openclaw':
                 client_command = ['openclaw', 'mcp', 'probe', expected_name, '--json']
+            elif args.agent == 'hermes':
+                client_command = ['hermes', 'mcp', 'test', expected_name]
             checked = subprocess.run(client_command, env=env, cwd=work, stdin=subprocess.DEVNULL,
                                      capture_output=True, text=True, timeout=40)
             assert checked.returncode == 0, checked.stdout+checked.stderr
@@ -166,13 +181,20 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                 assert result['diagnostics'] == [], result
                 for name in ['litecom_ask', 'litecom_receive', 'litecom_contacts', 'litecom_download']:
                     assert expected_name + '__' + name in result['tools'], result
+            elif args.agent == 'hermes':
+                assert re.search(r'\bConnected\b', plain), plain
+                for name in ['litecom_ask', 'litecom_receive', 'litecom_contacts', 'litecom_download']:
+                    assert name in plain, plain
             else:
                 assert re.search(re.escape(expected_name)+r'[^\n]*connected', plain, re.I), plain
 
-            if args.agent in ('codex', 'claude'):
+            if args.agent in ('codex', 'claude', 'hermes'):
                 # A disabled existing connection must not produce an enabled duplicate.
                 if args.agent == 'codex':
                     config.write_text(saved.replace(f'[mcp_servers.{expected_name}]', f'[mcp_servers.{expected_name}]\nenabled = false'))
+                elif args.agent == 'hermes':
+                    subprocess.run(['hermes', 'config', 'set', f'{key}.{expected_name}.enabled', 'false'],
+                                   env=env, cwd=work, check=True, capture_output=True, text=True)
                 else:
                     disabled = read_config()
                     disabled.setdefault('projects', {}).setdefault(str(work.resolve()), {})['disabledMcpServers'] = [expected_name]
@@ -190,6 +212,8 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                                         capture_output=True, text=True, timeout=50)
                 assert failed.returncode != 0
                 assert config.read_text() == malformed
+                if args.agent == 'hermes':
+                    assert "Hermes's settings could not be validated" in failed.stderr, failed.stderr
             evidence = 'saved native configuration verified' if args.agent == 'codex' else 'native client connected'
             print(f'PASS: real {args.agent} guided MCP setup, {"empty config" if args.empty_config else "preserved collision"}, idempotent repeat, {evidence}; no model calls.')
         finally:

@@ -159,6 +159,22 @@ fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|s| s.to_string()).collect()
 }
 async fn read_cli(settings: &RunnerConfig) -> Result<Map<String, Value>> {
+    if settings.agent == NativeAgent::Hermes {
+        // `config get` can successfully return a last-known-good backup when
+        // the current file is malformed. Let Hermes validate its own format
+        // before treating that fallback as the user's saved configuration.
+        let checked = run(
+            &settings.executable,
+            &settings.workspace,
+            &strings(&["config", "check"]),
+        )
+        .await?;
+        if !checked.status.success() {
+            bail!(
+                "Hermes's settings could not be validated. Run `hermes config check` to repair them, then retry setup."
+            );
+        }
+    }
     let args = match settings.agent {
         NativeAgent::Codex => strings(&["mcp", "list", "--json"]),
         NativeAgent::OpenCode => strings(&["--pure", "debug", "config"]),
@@ -173,7 +189,7 @@ async fn read_cli(settings: &RunnerConfig) -> Result<Map<String, Value>> {
         let message = String::from_utf8_lossy(&output.stderr).to_string()
             + &String::from_utf8_lossy(&output.stdout);
         let missing = match settings.agent {
-            NativeAgent::Hermes => message.contains("Config key not set: mcp_servers"),
+            NativeAgent::Hermes => message.trim() == "Config key not set: mcp_servers",
             _ => false,
         };
         if missing {
@@ -516,7 +532,7 @@ pub async fn install(settings: &RunnerConfig, connection: &Connection) -> Result
                     );
                 }
                 bail!(
-                    "{} could not save the Litecom connection. Your phone account is saved; check the agent's configuration and retry setup.",
+                    "{} could not save the Litecom connection. Your Litecom account is saved; check the agent's configuration and retry setup.",
                     settings.agent.name()
                 );
             }
@@ -745,6 +761,7 @@ mod tests {
                 let executable = temp.path().join("native-agent");
                 let script = r#"#!/bin/sh
 if [ "$1" = --pure ]; then shift; fi
+if [ "$1" = config ] && [ "$2" = check ]; then exit 0; fi
 if [ "$1" = mcp ] && [ "$2" = add ] && [ "$3" = --help ]; then echo --global; exit 0; fi
 if [ "$1" = debug ] || [ "$2" = get ] || [ "$2" = list ]; then cat actual.json; exit 0; fi
 printf '%s\n' "$@" > arguments.txt
@@ -804,18 +821,27 @@ if [ ! -f fail-save ]; then cp expected.json actual.json; fi
     #[tokio::test]
     async fn failed_or_malformed_config_read_never_adds_a_server() {
         use std::os::unix::fs::PermissionsExt;
-        for response in [
-            "exit 1",
-            "echo not-json",
-            "echo '{}'",
-            "echo '[{\"name\":\"one\",\"transport\":{}}]'",
+        for (agent, response) in [
+            (NativeAgent::Codex, "exit 1"),
+            (NativeAgent::Codex, "echo not-json"),
+            (NativeAgent::Codex, "echo '{}'"),
+            (
+                NativeAgent::Codex,
+                "echo '[{\"name\":\"one\",\"transport\":{}}]'",
+            ),
+            // Hermes falls back to defaults on malformed YAML, then reports
+            // the same missing key as a clean first installation.
+            (
+                NativeAgent::Hermes,
+                "echo 'Your settings file has a formatting error.' >&2; echo 'Config key not set: mcp_servers' >&2; exit 1",
+            ),
         ] {
             let temp = tempfile::tempdir().unwrap();
             let executable = temp.path().join("codex");
-            std::fs::write(&executable, format!("#!/bin/sh\nif [ \"$2\" = list ]; then {response}; exit; fi\ntouch unexpected-write\n")).unwrap();
+            std::fs::write(&executable, format!("#!/bin/sh\nif [ \"$1\" = config ] && [ \"$2\" = check ]; then exit 0; fi\nif [ \"$2\" = list ] || [ \"$2\" = get ]; then {response}; exit; fi\ntouch unexpected-write\n")).unwrap();
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
             let settings = RunnerConfig {
-                agent: NativeAgent::Codex,
+                agent,
                 executable,
                 workspace: temp.path().into(),
                 arguments: vec![],

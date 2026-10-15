@@ -38,7 +38,7 @@ Litecom connects to existing agents. It does not ship its own reasoning agent or
 | Downloads | Authenticated browser/MCP receipt, all file types, expiry and interrupted transfer | Streamed browser downloads, explicit receipt, verified CLI/MCP download, preapproval privacy and corruption/revocation checks pass; 2 GiB native upload/browser/CLI transfer and progressing 64-second upload/download checks pass; cross-network validation remains pending |
 | Operator deployment | Docker Compose, HTTPS, persistence, secrets, backup/recovery and providers | Compose HTTPS/backup/restore/restart smoke passes. Render HTTPS deployment, persistent key across redeploy, and online backup verification pass; off-machine backup and outgoing provider delivery pending |
 | Consumer onboarding | Operated endpoint with no end-user server credentials or provider keys | Pending |
-| Distribution | Clean-machine installers for claimed platforms, signatures, uninstall, release artifacts | Native archive packaging configured; Apple Silicon archive runs standalone CLI, relay, SQLite, and bundled UI. Other targets, published installers, signatures, update/uninstall and clean-machine validation pending |
+| Distribution | Clean-machine installers for claimed platforms, signatures, uninstall, release artifacts | Five-platform archive checks pass at `da509ca`; current-release packaging, published installers, signatures, update/uninstall and clean-machine validation pending |
 | Open-source readiness | License, dependency review, CI, contribution/security docs, clean source tree | Rust advisory/license/source checks pass; generated notices included and verified in native archive and container. Policy and CI checks configured; full source/release audit pending |
 | README | Runnable instructions, real first success, concise diagrams, desktop/mobile rendering | One-command local preview reaches approved download in browser QA; desktop/mobile rendering passes. Hosted install path still pending |
 
@@ -195,3 +195,13 @@ The SDK regression test covers authentication before session creation, failed au
 The operator-created OAuth web client is configured in Render. Deployment `dep-db8iaj689jmc73ds7ib0` reuses commit `45da8fe` and reached live status at 19:11:51 UTC. A real Berri account completed Google account selection, basic-profile consent, code exchange, and the return to Litecom’s authenticated approval-channel picker. The callback is `/api/auth/google/callback`; the live capabilities endpoint reports `google: true`. No phone verification was required for sign-in.
 
 An initial screenshot transcription error in the client secret was diagnosed and corrected before this successful check. No credentials were committed. External-account access, live approval-channel delivery, and the complete two-person flow remain unverified.
+
+## Hermes and platform packaging — October 15, 2026
+
+The official Hermes 0.22.2 CLI, installed in an isolated environment with its ACP/MCP extras, passes `scripts/mcp-setup-smoke.py` with an absent configuration and with a conflicting existing server. Its actual MCP client connects and lists Litecom’s tools. Repeated setup preserves configuration; a deliberately disabled matching connection is not bypassed; malformed YAML stays unchanged and fails with repair instructions. The test uses a local development relay and makes no model calls. Live Hermes agent execution remains unverified.
+
+Hermes can return backup configuration when its current YAML is malformed. Litecom now runs Hermes’s own `config check` before reading its MCP settings, and only a clean missing-key response counts as a new installation. Native setup regression tests and Clippy pass.
+
+[Build downloads run 38788810731](https://github.com/BerriAI/litecom/actions/runs/38788810731) passed on Apple Silicon, Intel Mac, Linux ARM64, Linux x86-64, and Windows x86-64. Each job ran Rust tests, built a native archive, checked its checksum, and launched its extracted CLI/relay with bundled database/UI. This run covers commit `da509ca`, not the newer background-service fixes. Artifacts remain CI downloads, not published releases.
+
+The newer cross-platform service run was cancelled by a documentation-only push before Windows/Linux service checks completed. CI now ignores documentation-only changes so status updates cannot interrupt binary validation; a fresh code run is still required.

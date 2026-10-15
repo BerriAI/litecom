@@ -87,6 +87,7 @@ To test setup against an installed coding-agent CLI, use Python 3.11+:
 .litecom/qa/bin/python scripts/mcp-setup-smoke.py --agent claude
 .litecom/qa/bin/python scripts/mcp-setup-smoke.py --agent opencode
 .litecom/qa/bin/python scripts/mcp-setup-smoke.py --agent pi
+.litecom/qa/bin/python scripts/mcp-setup-smoke.py --agent hermes
 ```
 
 Pi requires both `pi` and `pi-acp` on PATH; use `--path /absolute/bin/directory` to add a temporary installation. These tests use isolated configuration directories, preserve a conflicting MCP server, and repeat setup. Claude, OpenCode, and Pi report the connection status; Codex checks its saved configuration. Codex/Claude also test disabled connections and malformed configuration. They do not start a worker or call a model.
