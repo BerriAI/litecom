@@ -215,7 +215,7 @@ async fn collect_result(
     if db.renew_cloud(claim)? != Status::Executing {
         return db.release_cloud(claim, false);
     }
-    db.stage_result(
+    let result = db.stage_result(
         &claim.job.principal,
         &claim.job.work.task_id,
         &claim.job.work.lease,
@@ -227,7 +227,11 @@ async fn collect_result(
     )?;
     db.cloud_progress(
         claim,
-        "Devin finished. Review the exact reply and files below before sharing them.",
+        if result.status == Status::Completed {
+            "Devin finished and sent the result."
+        } else {
+            "Devin finished. Review the reply and files to share them."
+        },
         false,
     )?;
     db.release_cloud(claim, true)

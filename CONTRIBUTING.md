@@ -120,6 +120,8 @@ The test starts the adapter in read-only mode. When a permission is requested, i
 
 On Windows, `./scripts/windows-service-smoke.ps1` checks the built release executable against a temporary Task Scheduler task. It distinguishes installed/stopped from running, then exercises stop and removal. The task has no automatic trigger and is removed during cleanup; this check does not connect an account or model.
 
+`python scripts/background-service-smoke.py --binary target/debug/litecom` exercises the installed background worker against an isolated development relay. On Windows, pass the `.exe` path. It checks noninteractive connection, a real worker heartbeat, repeat setup, stop/restart, one approved file transfer, no repeat execution, and service removal. It uses a temporary native-agent fixture, skips MCP configuration, and sends no provider messages. Run it from a normal signed-in desktop session; Linux needs a running systemd user manager. CI runs it on Linux and Windows, while macOS startup is also covered by the local browser onboarding checks.
+
 ## Container checks
 
 The [self-hosting guide](docs/self-host.md) covers the Compose deployment. To test the container without sending messages or calling a model:

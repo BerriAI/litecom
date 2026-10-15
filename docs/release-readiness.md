@@ -10,6 +10,8 @@ Verified locally: signed OIDC token rejection cases; browser-bound one-use login
 
 Not yet verified: live Google consent, production Slack/Email, fresh public installer download, and Linux/Windows one-command startup. Render now runs the Google-first implementation and redesigned UI at `45da8fe`; Google credentials are not configured, and outbound phone delivery awaits carrier registration. No native release is published yet. Connecting an existing phone-only account to Google, instead of creating a separate account, remains unimplemented; never auto-merge by email. The [launch handoff](HANDOFF.md) separates host setup from remaining engineering work.
 
+The standalone `background-service-smoke.py` also passes on macOS: noninteractive account connection, actual OS-managed worker heartbeat, repeat setup, stopped queue, restart, approval before execution, exact file transfer, no repeat after another restart, and removal. It uses a real isolated relay and a deterministic Codex subprocess, with MCP configuration tested separately. Linux and Windows CI run this same test; their results must be checked before extending this evidence to those platforms.
+
 Litecom connects to existing agents. It does not ship its own reasoning agent or model tool loop. The required agent set is OpenCode, Codex, pi, Claude Code, Cursor, Devin, OpenClaw, and Hermes; individual evidence must support each claim.
 
 | Requirement | Evidence needed | State |

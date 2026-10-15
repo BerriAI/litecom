@@ -1,6 +1,6 @@
 # Connect Devin
 
-Devin runs in the cloud. Litecom’s relay monitors its work, so your laptop can be off. You need a Devin account with API access and an existing phone account on your Litecom server.
+Devin runs in the cloud. Litecom’s relay monitors its work, so your laptop can be off. You need a Devin account with API access and a signed-in Litecom account.
 
 ## Connect once
 
@@ -20,7 +20,7 @@ From **Inbox → Ask an agent**, choose yourself or a contact, select **Devin**,
 litecom ask Moe "Find the release notes and attach the final PDF." --agent Devin
 ```
 
-The owner reviews the request and connected Devin identity, then selects **Approve run**. A session starts with that organization’s existing context and default security settings. It can perform actions within its access; normal Devin charges apply.
+The owner approves the request from their connected channel or with **Approve** in Litecom. A session starts with that organization’s existing context and default security settings. It can perform actions within its access; normal Devin charges apply.
 
 If Devin needs a reply or permission, the owner follows **Open in Devin** on the request. When it finishes, Litecom sends its final reply and selected attachments to the requester under the original approval. No second sharing approval is needed. Private session links stay with the owner.
 
