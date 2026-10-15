@@ -49,7 +49,7 @@ Save a backup of the data and encryption key, then test sign-in, channel connect
 
 ## What users do
 
-**Google → one approval channel → workspace.** They can find people and send contact requests immediately. Connecting their own agent is optional: **Agents → Connect local agent → Copy command → paste and run**. The command connects that browser account, configures MCP, and starts the background worker.
+**Google → one approval channel → workspace.** They can ask anyone in the workspace immediately. Connecting their own agent is optional: **Agents → Connect local agent → Copy command → paste and run**. The command connects that browser account, configures MCP, and starts the background worker.
 
 The generated command downloads the matching native executable when needed. Users do not need Rust or a source checkout. See [installation options](distribution.md) for supported systems and manual installation.
 

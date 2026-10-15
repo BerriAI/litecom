@@ -339,6 +339,7 @@ async fn cursor_authenticates_before_opening_a_session_and_stops_on_login_failur
                 .ok();
         });
         let (read, write) = tokio::io::split(client_io);
+        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
         let result = tokio::time::timeout(
             Duration::from_secs(5),
             crate::acp::converse(
@@ -347,6 +348,7 @@ async fn cursor_authenticates_before_opening_a_session_and_stops_on_login_failur
                 &h.settings,
                 &h.work,
                 h.temp.path(),
+                &mut renewal,
             ),
         )
         .await
@@ -377,12 +379,14 @@ async fn acp_exact_permission_uses_once_and_delivers_the_approved_result() {
         let (client_io, agent_io) = tokio::io::duplex(65536);
         let (peer, mut outcomes) = mock_agent(agent_io, h.settings.workspace.clone(), Case::Once);
         let (read, write) = tokio::io::split(client_io);
+        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
         let run = crate::acp::converse(
             ByteStreams::new(write.compat_write(), read.compat()),
             &h.client,
             &h.settings,
             &h.work,
             h.temp.path(),
+            &mut renewal,
         );
         tokio::pin!(run);
         let review = async {
@@ -466,6 +470,7 @@ async fn acp_rejects_persistent_ambiguous_and_other_session_permissions() {
         let (client_io, agent_io) = tokio::io::duplex(65536);
         let (peer, mut outcomes) = mock_agent(agent_io, h.settings.workspace.clone(), case);
         let (read, write) = tokio::io::split(client_io);
+        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
         let result = tokio::time::timeout(
             Duration::from_secs(5),
             crate::acp::converse(
@@ -474,6 +479,7 @@ async fn acp_rejects_persistent_ambiguous_and_other_session_permissions() {
                 &h.settings,
                 &h.work,
                 h.temp.path(),
+                &mut renewal,
             ),
         )
         .await
@@ -507,12 +513,14 @@ async fn acp_stops_on_scope_change_or_cancelled_request() {
             if cancelled { Case::Once } else { Case::Changed },
         );
         let (read, write) = tokio::io::split(client_io);
+        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
         let run = crate::acp::converse(
             ByteStreams::new(write.compat_write(), read.compat()),
             &h.client,
             &h.settings,
             &h.work,
             h.temp.path(),
+            &mut renewal,
         );
         let review = async {
             let p = h.permission().await;

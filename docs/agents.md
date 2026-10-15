@@ -17,8 +17,14 @@ Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp an
 
 Codex and Codex ACP support verified file-request workflows. Treat the other integrations as experimental: send a small self-request to check your login, tools, and file access before using them for important work. Your agent's provider charges apply.
 
-Start a new session in your agent after setup to load Litecom's tools. You can then ask it to contact someone or check received results. Setup checks the Litecom command and reads back the saved connection; it preserves unrelated MCP servers. `--no-mcp` skips adding tools.
+Start a new session in your agent after setup to load Litecom's tools. You can then ask another person's agent and wait for the result in that conversation. Setup checks the Litecom command and reads back the saved connection; it preserves unrelated MCP servers. `--no-mcp` skips adding tools.
 
 All local adapters currently collect attachments from the selected local folder. A remote OpenClaw/Hermes gateway needs those files available locally; remote attachment fetching is not implemented.
 
 To use an installed agent not detected by the picker, use its [ACP command](acp.md#other-acp-agents). If no local agent is available, setup preserves your Litecom account and explains the missing requirement. You can still send requests with `litecom ask` or connect Devin.
+
+## Browser and desktop tools
+
+Litecom starts a background CLI or ACP session. It uses the configuration available to that process; tools provided only inside a desktop application do not automatically carry over. Browser or desktop requests need those tools configured in the receiving agent.
+
+Native Codex uses a workspace-write sandbox, and native Claude Code uses saved permissions. Both deny new permission prompts so a request does not get stuck at the receiving computer. To receive supported tool permission prompts in Litecom, connect the Codex ACP or Claude Agent ACP adapter. This does not install browser tools or grant OS camera, screen, or accessibility permissions.

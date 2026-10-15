@@ -216,31 +216,35 @@ fn pairing_cannot_elevate_or_change_owner() {
     assert!(f.store.check_csrf(&f.b, "wrong").is_err());
 }
 #[test]
-fn mutual_contacts_required_and_names_cannot_override_identity() {
+fn workspace_requests_need_no_contact_acceptance_and_names_cannot_override_identity() {
     let f = Fixture::new();
-    let (c, s) = user(&f.store, "Moe", "+14155550103");
-    assert!(
-        f.store
-            .create_task(
-                &f.a,
-                NewTask {
-                    owner_id: c.user_id.clone(),
-                    agent_id: None,
-                    request: "hi".into(),
-                    idempotency_key: "1".into()
-                }
-            )
-            .is_err()
-    );
-    f.store.request_contact(&f.a, &s.profile.invite).unwrap();
-    assert!(f.store.accept_contact(&f.a, &c.user_id).is_err());
-    f.store.accept_contact(&c, &f.a.user_id).unwrap();
+    let (c, _) = user(&f.store, "Moe", "+14155550103");
+    let task = f
+        .store
+        .create_task(
+            &f.a,
+            NewTask {
+                owner_id: c.user_id.clone(),
+                agent_id: None,
+                request: "hi".into(),
+                idempotency_key: "1".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(task.status, Status::Queued);
+    assert!(task.response.is_none());
     assert!(f.store.resolve(&f.a, "Moe", None).is_err());
     assert_eq!(
         f.store.resolve(&f.a, &f.b.user_id, None).unwrap().0,
         f.b.user_id
     );
+    // Blocking works without a pre-existing contact row and on both sides.
+    f.store.block_contact(&c, &f.a.user_id).unwrap();
+    assert!(f.store.resolve(&f.a, &c.user_id, None).is_err());
+    assert!(f.store.agents(&f.a, &c.user_id).is_err());
+    assert!(f.store.request_contact_to(&f.a, &c.user_id).is_err());
 }
+
 #[test]
 fn self_requests_and_named_cloud_routing_work_without_contacts() {
     let f = Fixture::new();
@@ -660,7 +664,8 @@ async fn mcp_sdk_negotiates_and_exposes_no_approval_tool() {
     let client = ClientConfig::default().serve(client_side).await.unwrap();
     let server = server.await.unwrap();
     let tools = client.list_tools(Default::default()).await.unwrap().tools;
-    assert_eq!(tools.len(), 8);
+    assert_eq!(tools.len(), 9);
+    assert!(tools.iter().any(|t| t.name == "litecom_wait"));
     assert!(tools.iter().any(|t| t.name == "litecom_ask"));
     assert!(
         tools

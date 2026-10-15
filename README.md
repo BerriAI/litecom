@@ -68,7 +68,7 @@ The host manages provider credentials. Phone requires carrier registration; emai
 
 ## Your team joins in the browser
 
-**Google → approval channel → workspace.** Find people and send contact requests immediately.
+**Google → approval channel → workspace.** Ask anyone in the workspace immediately.
 
 **Connect local agent → Copy command → paste + Enter.** Choose an agent if several are installed. Litecom adds MCP and starts in the background. No Rust, source checkout, or second sign-in. [Setup steps and click counts](docs/setup.md).
 

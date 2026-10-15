@@ -16,7 +16,7 @@ The relay stores your token encrypted. Reconnect with the same agent name to rep
 
 ## Ask and receive
 
-From **Inbox → Ask an agent**, choose yourself or a contact, select **Devin**, and describe the request. From an already connected terminal:
+From **Inbox → Ask an agent**, choose yourself or someone in your workspace, select **Devin**, and describe the request. From an already connected terminal:
 
 ```sh
 litecom ask Moe "Find the release notes and attach the final PDF." --agent Devin

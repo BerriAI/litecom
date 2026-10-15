@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use litecom::{
     api::{AppState, router},
@@ -49,6 +49,21 @@ enum Command {
         /// Handle at most one queued item, then exit.
         #[arg(long)]
         once: bool,
+    },
+    /// List local agent runs and their session IDs.
+    Runs {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        active: bool,
+    },
+    /// Read local agent output; defaults to the latest active run.
+    Logs {
+        id: Option<String>,
+        #[arg(long, short)]
+        follow: bool,
+        #[arg(long)]
+        raw: bool,
     },
     /// Manage automatic background startup for this connection.
     Service {
@@ -108,7 +123,7 @@ enum Command {
     },
     /// Read one request and its approved result.
     Status { id: String },
-    /// Show your contacts or your contact invite link.
+    /// List workspace members or print your workspace invite link.
     Contacts {
         #[arg(long)]
         invite: bool,
@@ -226,9 +241,13 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Restore { path, data } => {
             litecom::backup::restore(&path, &data)?;
             println!(
-                "Recovered data: {}\nSign in again, re-pair agents, reconnect contacts and approval channels. Previous download access is revoked and pending work will not resume. Inspect existing cloud sessions directly before sending work again.",
+                "Recovered data: {}\nSign in again, re-pair agents, reconnect approval channels. Previous download access is revoked and pending work will not resume. Inspect existing cloud sessions directly before sending work again.",
                 data.display()
             );
+        }
+        Command::Runs { json, active } => litecom::runs::list(json, active)?,
+        Command::Logs { id, follow, raw } => {
+            litecom::runs::logs(id.as_deref(), follow, raw).await?
         }
         Command::Uninstall { all } => litecom::uninstall::run(all).await?,
         Command::Setup(options) => litecom::onboarding::setup(options, &cli.connection).await?,
@@ -322,14 +341,7 @@ async fn run(cli: Cli) -> Result<()> {
                 }
                 Command::Contacts { invite } => {
                     if invite {
-                        let p: Value = client.get("/api/me").await?;
-                        println!(
-                            "{}/invite/{}",
-                            client.config.relay.trim_end_matches('/'),
-                            p["invite"]
-                                .as_str()
-                                .context("The server omitted your contact link.")?
-                        );
+                        println!("{}/workspace", client.config.relay.trim_end_matches('/'));
                     } else {
                         let contacts: Vec<Contact> = client.get("/api/contacts").await?;
                         for c in contacts {

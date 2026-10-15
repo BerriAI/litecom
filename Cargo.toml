@@ -1,6 +1,6 @@
 [package]
 name = "litecom"
-version = "0.1.0-alpha.12"
+version = "0.1.0-alpha.13"
 edition = "2024"
 rust-version = "1.88"
 description = "Ask someone's agent. They approve. It gets done."
@@ -46,6 +46,7 @@ url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = { version = "1", features = ["derive"] }
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
+fs2 = "0.4.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

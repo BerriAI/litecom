@@ -94,20 +94,22 @@ impl Client {
             "Cannot reach your Litecom server. Your saved requests will wait until it reconnects.",
         )?;
         let status = response.status();
-        let value: Value = response
-            .json()
-            .await
-            .context("The server did not return a Litecom response.")?;
+        let value = response.json::<Value>().await;
         if !status.is_success() {
             return Err(ApiError {
                 status: status.as_u16(),
-                message: value["error"]["message"]
-                    .as_str()
-                    .unwrap_or("The server could not finish the request.")
-                    .to_owned(),
+                message: value
+                    .as_ref()
+                    .ok()
+                    .and_then(|v| v["error"]["message"].as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        format!("The server could not finish the request (HTTP {status}).")
+                    }),
             }
             .into());
         }
+        let value = value.context("The server did not return a Litecom response.")?;
         Ok(serde_json::from_value(value)?)
     }
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -180,6 +182,29 @@ impl Client {
         self.get(&format!("/api/tasks{query}")).await
     }
     pub async fn upload(&self, task: &str, lease: Option<&str>, path: &Path) -> Result<Artifact> {
+        let mut renewal = WorkLease::new(self, task, lease.unwrap_or(""));
+        loop {
+            if lease.is_some()
+                && !matches!(
+                    renewal.renew().await?,
+                    Status::Preparing | Status::Executing
+                )
+            {
+                bail!("The upload was cancelled.");
+            }
+            match self.upload_once(task, lease, path, &mut renewal).await {
+                Err(error) if lease.is_some() && transient(&error) => renewal.retry_delay().await?,
+                result => return result,
+            }
+        }
+    }
+    async fn upload_once(
+        &self,
+        task: &str,
+        lease: Option<&str>,
+        path: &Path,
+        renewal: &mut WorkLease<'_>,
+    ) -> Result<Artifact> {
         let file = tokio::fs::File::open(path).await?;
         if !file.metadata().await?.is_file() {
             bail!("Choose a regular file.");
@@ -215,22 +240,26 @@ impl Client {
             tokio::select! {
                 response = &mut response => break response?,
                 _ = heartbeat.tick(), if lease.is_some() => {
-                    let status: Status = self.post(&format!("/api/tasks/{task}/heartbeat"),json!({"lease":lease})).await?;
+                    let status = renewal.renew().await?;
                     if !matches!(status,Status::Preparing|Status::Executing) { bail!("The upload was cancelled."); }
                 }
             }
         };
         let status = response.status();
-        let value: Value = response.json().await?;
+        let value = response.json::<Value>().await;
         if !status.is_success() {
-            bail!(
-                "{}",
-                value["error"]["message"]
-                    .as_str()
+            return Err(ApiError {
+                status: status.as_u16(),
+                message: value
+                    .as_ref()
+                    .ok()
+                    .and_then(|v| v["error"]["message"].as_str())
                     .unwrap_or("The file could not be uploaded.")
-            );
+                    .to_owned(),
+            }
+            .into());
         }
-        Ok(serde_json::from_value(value)?)
+        Ok(serde_json::from_value(value?)?)
     }
     pub async fn download(
         &self,
@@ -343,4 +372,209 @@ pub(crate) fn download_name(file: &Artifact) -> String {
         stem.pop();
     }
     format!("{}-{stem}{extension}", &file.id[..8])
+}
+
+/// Retry transport failures only while the server's existing execution lease
+/// remains valid. Never acquire new work or restart an agent as part of retrying.
+pub(crate) struct WorkLease<'a> {
+    client: &'a Client,
+    task: &'a str,
+    lease: &'a str,
+    deadline: tokio::time::Instant,
+}
+impl<'a> WorkLease<'a> {
+    pub(crate) fn new(client: &'a Client, task: &'a str, lease: &'a str) -> Self {
+        Self {
+            client,
+            task,
+            lease,
+            deadline: tokio::time::Instant::now()
+                + std::time::Duration::from_secs(crate::store::LEASE_TTL as u64),
+        }
+    }
+    async fn retry_delay(&self) -> Result<()> {
+        tokio::time::sleep_until(
+            (tokio::time::Instant::now() + std::time::Duration::from_secs(2)).min(self.deadline),
+        )
+        .await;
+        if tokio::time::Instant::now() >= self.deadline {
+            bail!(
+                "The execution lease expired while reconnecting. The work will not be repeated automatically."
+            );
+        }
+        Ok(())
+    }
+    /// Retry delivery of the already produced result; never repeat agent execution.
+    pub(crate) async fn submit_result(&mut self, draft: DraftInput) -> Result<TaskView> {
+        let path = format!("/api/tasks/{}", self.task);
+        loop {
+            let result = tokio::time::timeout_at(
+                self.deadline,
+                self.client.post::<TaskView>(
+                    &format!("{path}/result"),
+                    json!({"lease":self.lease,"draft":draft}),
+                ),
+            )
+            .await
+            .context("The result could not be confirmed before the execution lease expired.")?;
+            match result {
+                Ok(task) => return Ok(task),
+                Err(error) => {
+                    // The POST may have committed even if its response was lost.
+                    // A read with matching content confirms delivery without a new lease.
+                    loop {
+                        match tokio::time::timeout_at(
+                            self.deadline,
+                            self.client.get::<TaskView>(&path),
+                        )
+                        .await
+                        {
+                            Ok(Ok(task)) => {
+                                if matches!(
+                                    task.status,
+                                    Status::Completed | Status::AwaitingApproval
+                                ) && task.revoked_at.is_none()
+                                    && task
+                                        .receipt
+                                        .as_ref()
+                                        .is_some_and(|r| r.outcome == Outcome::Succeeded)
+                                    && task.draft.as_ref().is_some_and(|d| {
+                                        d.text == draft.text
+                                            && d.action.is_none()
+                                            && d.attachments
+                                                .iter()
+                                                .map(|a| &a.id)
+                                                .eq(draft.attachment_ids.iter())
+                                    })
+                                {
+                                    return Ok(task);
+                                }
+                                if task.status != Status::Executing {
+                                    return Err(error);
+                                }
+                                break;
+                            }
+                            Ok(Err(read_error)) if transient(&read_error) && transient(&error) => {
+                                self.retry_delay().await?
+                            }
+                            _ => return Err(error),
+                        }
+                    }
+                    if !transient(&error) {
+                        return Err(error);
+                    }
+                    self.retry_delay().await?;
+                    if self.renew().await? != Status::Executing {
+                        bail!("The request is no longer executing.");
+                    }
+                }
+            }
+        }
+    }
+    pub(crate) async fn renew(&mut self) -> Result<Status> {
+        loop {
+            let started = tokio::time::Instant::now();
+            let attempt = tokio::time::timeout_at(
+                self.deadline,
+                self.client.post::<Status>(
+                    &format!("/api/tasks/{}/heartbeat", self.task),
+                    json!({"lease":self.lease}),
+                ),
+            )
+            .await;
+            match attempt {
+                Ok(Ok(status)) => {
+                    // Count from request start, not response receipt: a slow
+                    // response must not extend our view of server authority.
+                    self.deadline =
+                        started + std::time::Duration::from_secs(crate::store::LEASE_TTL as u64);
+                    return Ok(status);
+                }
+                Ok(Err(error)) if transient(&error) => {
+                    eprintln!(
+                        "Relay temporarily unavailable; reconnecting request {}.",
+                        self.task
+                    );
+                    tokio::time::sleep_until(
+                        (tokio::time::Instant::now() + std::time::Duration::from_secs(2))
+                            .min(self.deadline),
+                    )
+                    .await;
+                }
+                Ok(Err(error)) => return Err(error),
+                Err(_) => bail!(
+                    "The execution lease expired while the relay was unavailable. The agent was stopped; it will not be restarted automatically."
+                ),
+            }
+            if tokio::time::Instant::now() >= self.deadline {
+                bail!(
+                    "The execution lease expired while the relay was unavailable. The agent was stopped; it will not be restarted automatically."
+                );
+            }
+        }
+    }
+}
+pub(crate) fn transient(error: &anyhow::Error) -> bool {
+    if let Some(api) = error.downcast_ref::<ApiError>() {
+        return api.status == 408 || api.status == 429 || api.status >= 500;
+    }
+    error.downcast_ref::<reqwest::Error>().is_some_and(|e| {
+        e.is_connect() || e.is_timeout() || e.is_body() || e.is_decode() || e.is_request()
+    })
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    #[tokio::test]
+    async fn lease_rejection_is_immediate_and_transport_retry_stops_at_deadline() {
+        use axum::{http::StatusCode, routing::post};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        for rejected in [true, false] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let calls = count.clone();
+            let router = axum::Router::new().route(
+                "/api/tasks/test/heartbeat",
+                post(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        (
+                            if rejected {
+                                StatusCode::FORBIDDEN
+                            } else {
+                                StatusCode::SERVICE_UNAVAILABLE
+                            },
+                            "<html>unavailable</html>",
+                        )
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let relay = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+            let client = Client::new(ClientConfig {
+                relay,
+                token: "fixture".into(),
+                user_id: "fixture".into(),
+                agent_id: "fixture".into(),
+                workspace: None,
+                runner: None,
+                approval_channel: None,
+            })
+            .unwrap();
+            let mut lease = WorkLease::new(&client, "test", "fixture");
+            lease.deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(100);
+            let error = lease.renew().await.unwrap_err();
+            if rejected {
+                assert_eq!(error.downcast_ref::<ApiError>().unwrap().status, 403);
+            } else {
+                assert!(error.to_string().contains("expired"));
+            }
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            server.abort();
+        }
+    }
 }

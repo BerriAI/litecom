@@ -2,7 +2,7 @@
 
 For your first connection, follow [Get started](setup.md). Use this page to change a connection, manage background startup, or fix a problem.
 
-[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Uninstall](#uninstall) · [Troubleshooting](#if-something-needs-attention)
+[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Monitor runs](#monitor-local-runs) · [Uninstall](#uninstall) · [Troubleshooting](#if-something-needs-attention)
 
 Keep the browser-generated command private. If setup fails after pairing, rerun it on the same computer to resume. If it expires before pairing, click **Connect local agent** for a new command.
 
@@ -45,6 +45,30 @@ litecom --connection NAME setup --relay https://YOUR-SERVER --no-background
 litecom --connection NAME worker
 ```
 
+## Monitor local runs
+
+List the requests running on this computer and their Codex or ACP session IDs:
+
+```sh
+litecom runs
+```
+
+Follow the latest active run:
+
+```sh
+litecom logs --follow
+```
+
+To follow a specific request, copy its ID from `litecom runs`:
+
+```sh
+litecom logs REQUEST_ID --follow
+```
+
+Press Ctrl+C to stop watching; the agent keeps running. `litecom runs --active` shows only running requests. `litecom runs --json` gives paths and session IDs for scripts. `litecom logs REQUEST_ID --raw` shows the original events. No sign-in or connection selection is needed to inspect local runs.
+
+A brief relay outage retries the connection and delivery without rerunning the agent. If the outage outlasts the execution lease (two minutes since the last confirmed heartbeat), the agent stops and the request needs attention. Check its logs and any external effects before sending another request.
+
 ## Uninstall
 
 Open **Settings → Uninstall from this computer**, click **Copy command**, then paste it into your terminal and press Enter. Select the connections to remove with Space, then press Enter. The list shows each agent and its working folder.
@@ -84,5 +108,5 @@ If a connection cannot be removed, the command explains what needs attention. Re
 
 Use `--home PATH` to store private configuration somewhere else. After a fix, run `litecom --connection NAME doctor` and send a small request to your own agent.
 
-Litecom removes successful run diagnostics after preparing the result. Failed runs keep private local diagnostics for troubleshooting. There is no automatic cleanup of failed-run diagnostics or relay payloads.
+Run logs stay in the private local configuration folder, including successful runs. They can contain agent output and tool details. `litecom runs --json` shows each run’s directory; delete a finished run’s directory when you no longer need its logs. There is no automatic cleanup of local run logs or relay payloads.
 

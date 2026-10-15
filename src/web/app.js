@@ -48,7 +48,6 @@ function shell(connected) {
     ? [
         ["workspace", "/workspace", "Workspace"],
         ["inbox", "/", "Inbox"],
-        ["contacts", "/contacts", "Contacts"],
         ["agents", "/agents", "Agents"],
         ["settings", "/settings", "Settings"],
       ]
@@ -370,7 +369,7 @@ async function render() {
     {
       request: "Request",
       connect: "Connect agent",
-      invite: "Add contact",
+      invite: "Ask an agent",
       workspace: "Workspace",
       contacts: "Contacts",
       agents: "Agents",
@@ -389,7 +388,7 @@ async function render() {
   if (parts[0] === "connect" && parts[1]) return connectPage(parts[1]);
   if (parts[0] === "invite" && parts[1]) return invitePage(parts[1]);
   if (parts[0] === "workspace") return workspacePage();
-  if (parts[0] === "contacts") return contactsPage();
+  if (parts[0] === "contacts") { location.replace("/workspace"); return; }
   if (parts[0] === "agents") return agentsPage();
   if (parts[0] === "settings") return settingsPage();
   return inbox();
@@ -537,14 +536,9 @@ async function workspacePage() {
     api("/api/people"),
     api("/api/agents"),
   ]);
-  app.innerHTML = `${pageHeading("Your workspace", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><h2 class="section-label">People</h2><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Add contact</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : person.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a>` : '<span class="muted">Request sent</span>'}</article>`).join("") || '<div class="empty"><p>No one else is here yet.</p><a href="/contacts">Invite someone</a></div>'}</div></section>`;
+  app.innerHTML = `${pageHeading("Your workspace", `<div class="row-actions"><button data-action="copy-setup-prompt">Copy setup prompt</button><button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button></div>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><div class="row"><h2 class="section-label">People</h2><button data-action="copy-invite">Invite someone</button></div><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div><div class="row-actions"><a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}’s agent</a><details class="row-menu"><summary aria-label="Manage ${esc(person.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(person.id)}">Block</button></details></div></article>`).join("") || '<div class="empty"><p>No one else is here yet. Invite someone to your workspace.</p></div>'}</div></section>`;
   showLocalCommand();
   await pollLocalConnection();
-}
-
-async function contactsPage() {
-  const contacts = await api("/api/contacts");
-  app.innerHTML = `${pageHeading("Contacts", '<button class="primary" data-action="copy-invite">Copy invite link</button>')}<div class="list">${contacts.map((c) => `<article class="list-row">${avatar(c.name)}<div class="row-content"><h2>${esc(c.name)}</h2><p class="muted">${c.status === "accepted" ? agentSummary(c.agents) : c.status === "pending" ? (c.incoming ? "Wants to connect" : "Request sent") : esc(c.status)}</p></div><div class="row-actions">${c.status === "pending" && c.incoming ? `<button data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(c.id)}">Ask ${esc(c.name)}</a><details class="row-menu"><summary aria-label="Manage ${esc(c.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button></details>` : ""}</div></article>`).join("") || '<div class="empty"><p>Your contacts will appear here.</p><a href="/workspace">Find someone in your workspace</a></div>'}</div><details class="disclosure"><summary>Add with a contact link</summary><form id="contact"><label>Contact link<input name="link" type="url" placeholder="Paste their Litecom link" required></label><button>Connect</button></form></details>`;
 }
 
 async function agentsPage() {
@@ -561,7 +555,7 @@ async function agentsPage() {
 
 const shellQuote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const psQuote = (value) => "'" + value.replaceAll("'", "''") + "'";
-async function connectLocal(agentId) {
+async function connectLocal(agentId, method = "command") {
   const agents = await api("/api/agents");
   const agent = agentId
     ? agents.find((a) => a.id === agentId && a.kind === "local")
@@ -574,8 +568,9 @@ async function connectLocal(agentId) {
     );
   localPairing = await api("/api/connections/local", { agent_id: agent.id });
   localPairing.agent_id = agent.id;
-  localPairing.agent_name = agent.name === "Default" ? "this computer" : agent.name;
+  localPairing.agent_name = ["Default", "This computer"].includes(agent.name) ? "this computer" : agent.name;
   localPairing.started = Date.now();
+  localPairing.method = method;
   sessionStorage.setItem("local-pairing", JSON.stringify(localPairing));
   showLocalCommand();
 }
@@ -590,7 +585,21 @@ function showLocalCommand() {
   const command = windows
     ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
     : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
-  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder. Choose an agent if several are found.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your chosen agent and adds MCP. The agent runs in the background. Requests need your approval.</p></details></section>`;
+  if (localPairing.method === "prompt") {
+    target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Set up with your agent</h2><button class="primary" data-action="copy-setup-prompt">Copy prompt</button></div><p class="muted">Paste the prompt into your coding agent. It connects to this workspace and sets up MCP.</p><p class="muted subtitle">Private prompt · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for your agent to connect.</p><details><summary>View setup prompt</summary><textarea id="setup-prompt" readonly rows="7" spellcheck="false" aria-label="Agent setup prompt">${esc(setupPrompt(command, windows, name))}</textarea></details><details><summary>Use a terminal instead</summary><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><button data-action="copy-connect">Copy command</button></details></section>`;
+    return;
+  }
+  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder. Choose an agent if several are found.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>Set up with your agent</summary><p class="muted">Copy this prompt into your coding agent.</p><textarea id="setup-prompt" readonly rows="5" spellcheck="false" aria-label="Agent setup prompt">${esc(setupPrompt(command, windows, name))}</textarea><button data-action="copy-setup-prompt">Copy setup prompt</button></details><details><summary>What this sets up</summary><p>Installs Litecom, connects your chosen agent and adds MCP. The agent runs in the background. Requests need your approval.</p></details></section>`;
+}
+function setupPrompt(command, windows, connection) {
+  return `Connect this coding agent to my Litecom workspace at ${location.origin}. Use the private one-use setup command below (expires in 10 minutes). Install the published binary, connect this agent, configure Litecom MCP, and start its background worker. No Rust or source checkout is needed.
+
+${windows ? "PowerShell" : "Terminal"} command:
+${command}
+
+Run from this project's working folder. Detect which supported coding agent you are using and pass ${windows ? "-Agent and -Workspace" : "--agent and --workspace"} to select it and this folder without interactive prompts. Use only the existing signed-in agent account; preserve other connections, MCP servers, skills, and hooks. Do not print or share the private connection code or credentials. If no supported signed-in coding agent is available, tell me what to install or sign in to. If this command has expired, ask me to copy a new prompt from the workspace.
+
+Verify with litecom --connection ${connection} doctor. Confirm the worker is connected and MCP is configured; tell me if this chat needs a restart to load the tools. Do not approve requests or send a test request unless I ask. Finish with the workspace URL and how to ask another person's agent.`;
 }
 async function pollLocalConnection() {
   if (!localPairing || !document.getElementById("connect-status") || busy)
@@ -611,9 +620,9 @@ async function pollLocalConnection() {
     );
     if (localPairing !== current || !target.isConnected) return;
     const messages = {
-      waiting: "Waiting for you to run the command.",
-      starting: "Finishing setup. Keep the terminal open.",
-      connected: "Connected. You can close the terminal.",
+      waiting: current.method === "prompt" ? "Waiting for your agent to connect." : "Waiting for you to run the command.",
+      starting: current.method === "prompt" ? "Your agent is finishing setup." : "Finishing setup. Keep the terminal open.",
+      connected: "Connected. Ready for requests.",
       offline:
         "Setup finished, but the worker is offline. Run litecom doctor on this computer.",
       expired: "This command expired. Click Connect local agent for a new one.",
@@ -654,11 +663,11 @@ async function connectPage(code) {
     api(`/api/device/${encodeURIComponent(code)}`),
     api("/api/agents"),
   ]);
-  app.innerHTML = `<section class="narrow"><h1>Connect this agent?</h1><p><strong>${esc(device.label)}</strong> wants to join your Litecom account.</p><div class="card"><p class="muted">Check that this code matches the one in your terminal.</p><p class="code">${esc(code)}</p><form id="device" data-code="${esc(code)}"><label>Connect as<select name="agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? " (default)" : ""}</option>`).join("")}</select></label><p class="muted subtitle">It can ask your contacts, access your inbox, and prepare work for this agent. Only you can approve.</p><button class="primary">Connect agent</button></form></div></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Connect this agent?</h1><p><strong>${esc(device.label)}</strong> wants to join your Litecom account.</p><div class="card"><p class="muted">Check that this code matches the one in your terminal.</p><p class="code">${esc(code)}</p><form id="device" data-code="${esc(code)}"><label>Connect as<select name="agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? " (default)" : ""}</option>`).join("")}</select></label><p class="muted subtitle">It can ask workspace agents, access your inbox, and prepare work for this agent. Only you can approve.</p><button class="primary">Connect agent</button></form></div></section>`;
 }
 async function invitePage(code) {
   const p = await api(`/api/invite/${encodeURIComponent(code)}`);
-  app.innerHTML = `<section class="narrow"><h1>Connect with ${esc(p.name)}</h1><p>Send a contact request to start asking their agents.</p><button class="primary" data-action="use-invite" data-id="${esc(code)}">Send contact request</button></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Ask ${esc(p.name)}’s agent</h1><p>They approve the request. Their agent sends the result.</p><a class="button primary" href="/?ask=${encodeURIComponent(p.id)}">Ask their agent</a></section>`;
 }
 async function settingsPage() {
   const [connections, channels] = await Promise.all([
@@ -907,6 +916,25 @@ document.addEventListener("click", async (e) => {
   try {
     const { action, id } = button.dataset;
     if (action === "connect-local") return await connectLocal(id);
+    if (action === "copy-setup-prompt") {
+      if (!localPairing || Date.now() - localPairing.started >= 10 * 60 * 1000)
+        await connectLocal(id, "prompt");
+      else {
+        localPairing.method = "prompt";
+        sessionStorage.setItem("local-pairing", JSON.stringify(localPairing));
+        showLocalCommand();
+      }
+      const prompt = document.getElementById("setup-prompt");
+      try {
+        await navigator.clipboard.writeText(prompt.value);
+        return notice("Setup prompt copied. Paste it into your coding agent.");
+      } catch {
+        prompt.closest("details").open = true;
+        prompt.focus();
+        prompt.select();
+        return notice("Select and copy the setup prompt below.");
+      }
+    }
     if (action === "copy-connect" || action === "copy-uninstall") {
       await navigator.clipboard.writeText(
         document.getElementById(action === "copy-connect" ? "connect-command" : "uninstall-command").value,
@@ -931,10 +959,7 @@ document.addEventListener("click", async (e) => {
       }
       return await boot();
     }
-    if (action === "contact-person") {
-      await api(`/api/people/${encodeURIComponent(id)}/contact`, {});
-      return await render();
-    }
+
     if (action === "restart-login") {
       sessionStorage.removeItem("phone-challenge");
       return login();
@@ -958,9 +983,9 @@ document.addEventListener("click", async (e) => {
     }
     if (action === "copy-invite") {
       await navigator.clipboard.writeText(
-        location.origin + "/invite/" + profile.invite,
+        location.origin + "/workspace",
       );
-      return notice("Contact link copied.");
+      return notice("Workspace link copied.");
     }
     if (action === "approve-permission" || action === "decline-permission") {
       const permission = currentTask.permissions.find((p) => p.id === id);
@@ -981,22 +1006,17 @@ document.addEventListener("click", async (e) => {
       });
     } else if (action === "cancel" || action === "received")
       await api(`/api/tasks/${currentTask.id}/${action}`, {});
-    else if (action === "accept-contact" || action === "block-contact")
-      await api(
-        `/api/contacts/${id}/${action === "accept-contact" ? "accept" : "block"}`,
-        {},
-      );
+    else if (action === "block-contact") {
+      if (!confirm("Block requests between you and this person? This also revokes shared results.")) return;
+      await api(`/api/contacts/${id}/block`, {});
+    }
     else if (action === "default-agent")
       await api(`/api/agents/${id}/default`, {});
     else if (action === "revoke-agent")
       await api(`/api/agents/${id}`, undefined, "DELETE");
     else if (action === "revoke-connection")
       await api(`/api/connections/${id}`, undefined, "DELETE");
-    else if (action === "use-invite") {
-      await api("/api/contacts", { invite: id });
-      location.href = "/contacts";
-      return;
-    } else if (action === "enable-phone") {
+    else if (action === "enable-phone") {
       if (!account.has_phone) {
         sessionStorage.setItem("approval-channel", "phone");
         return phoneSetup();

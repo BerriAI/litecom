@@ -1,6 +1,10 @@
 //! Native agents are launched only after a human approves their actual access.
 //! Approval covers the requested work and delivery of its final result.
-use crate::{client::Client, config, model::*};
+use crate::{
+    client::{Client, WorkLease},
+    config,
+    model::*,
+};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -132,8 +136,8 @@ impl RunnerConfig {
         Action::Harness {
             title: format!("Run {} for this request", self.agent.name()),
             description: match self.agent {
-                NativeAgent::Codex => "Codex can read local files and edit the selected folder. Your existing context, hooks, and connected tools are available; those tools keep their access to external accounts. The final reply and requested files will be sent to the requester automatically.".into(),
-                NativeAgent::Claude => "Use Claude Code with its saved permissions, context, hooks, and connected tools. It may read or change local and external data. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::Codex => "Codex can read local files and edit the selected folder. Uses the configuration, hooks, and tools available to the Codex CLI; desktop-app-only tools are not inherited. New permission prompts are denied. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::Claude => "Use the Claude Code CLI with its saved permissions, context, hooks, and connected tools. New permission prompts are denied; desktop-app-only tools are not inherited. It may read or change local and external data. The final reply and requested files will be sent to the requester automatically.".into(),
                 NativeAgent::CodexAcp => "Use Codex through its ACP adapter, with your existing login, configuration, and tools. The adapter's selected mode controls which operations ask for permission; those requests are sent to you through Litecom. The final reply and requested files will be sent to the requester automatically.".into(),
                 NativeAgent::Pi => "Use pi through pi-acp with its existing model, project instructions, extensions, skills, and tools. It may read or change local and external data as your computer account. ACP confirmation requests are sent to you; tools that do not ask retain their native access. The final reply and requested files will be sent to the requester automatically.".into(),
                 NativeAgent::OpenClaw => "Use your configured OpenClaw gateway and its existing agent, context, and tools. Its configured workspace and permissions apply; the folder below is where Litecom collects local attachments. New ACP permission requests are sent to you. The final reply and requested files will be sent to the requester automatically.".into(),
@@ -277,7 +281,7 @@ impl Drop for ProcessGroup {
 }
 
 async fn native_reply(
-    client: &Client,
+    renewal: &mut WorkLease<'_>,
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
@@ -349,7 +353,7 @@ async fn native_reply(
         tokio::select! {
             result = child.wait() => break result?,
             _ = heartbeat.tick() => {
-                let status: Status = client.post(&format!("/api/tasks/{}/heartbeat", work.task_id), json!({"lease":work.lease})).await
+                let status = renewal.renew().await
                     .context("The work lease could not be renewed. Check the external result before retrying.")?;
                 if status != Status::Executing {
                     bail!("Work was cancelled or its permission changed. Check for effects that already happened.");
@@ -462,11 +466,9 @@ pub(crate) async fn handle_in(
     }
     // The work item is only a snapshot. Confirm its execution authority before
     // starting any native process, including hooks run during agent startup.
-    let status: Status = client
-        .post(
-            &format!("/api/tasks/{}/heartbeat", work.task_id),
-            json!({"lease": work.lease}),
-        )
+    let mut renewal = WorkLease::new(client, &work.task_id, &work.lease);
+    let status = renewal
+        .renew()
         .await
         .context("Could not verify approval to run this request.")?;
     if status != Status::Executing {
@@ -477,15 +479,19 @@ pub(crate) async fn handle_in(
         .prefix(&format!("{}-", work.task_id))
         .tempdir_in(runs)?
         .keep();
+    let mut local_run = crate::runs::RunGuard::start(&dir, client, settings, work)?;
     // Keep diagnostics if the entire worker is interrupted, including when this
     // future is dropped by a shutdown signal rather than returning an error.
-    let result = stage_native_reply(client, settings, work, &dir).await;
+    let result = stage_native_reply(client, settings, work, &dir, &mut renewal).await;
     if let Err(error) = result {
+        if let Err(record_error) = local_run.finish("needs attention") {
+            tracing::warn!(%record_error, "Could not update the local run record.");
+        }
         eprintln!("Private run diagnostics: {}", dir.display());
         return Err(error.context(format!("Private run diagnostics: {}", dir.display())));
     }
-    if std::fs::remove_dir_all(&dir).is_err() {
-        tracing::warn!(path = %dir.display(), "The reply was saved; local run diagnostics could not be removed.");
+    if let Err(record_error) = local_run.finish("completed") {
+        tracing::warn!(%record_error, "The result was delivered, but the local run record could not be updated.");
     }
     Ok(())
 }
@@ -495,21 +501,17 @@ async fn stage_native_reply(
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
+    renewal: &mut WorkLease<'_>,
 ) -> Result<()> {
     let reply = if settings.agent.is_acp() {
-        crate::acp::reply(client, settings, work, dir).await?
+        crate::acp::reply(client, settings, work, dir, renewal).await?
     } else {
-        native_reply(client, settings, work, dir).await?
+        native_reply(renewal, settings, work, dir).await?
     };
     let mut attachments = vec![];
     for path in &reply.files {
         let path = attachment_path(&settings.workspace, path)?;
-        let state: Status = client
-            .post(
-                &format!("/api/tasks/{}/heartbeat", work.task_id),
-                json!({"lease":work.lease}),
-            )
-            .await?;
+        let state = renewal.renew().await?;
         if state != Status::Executing {
             bail!("The request is no longer executing.");
         }
@@ -518,9 +520,13 @@ async fn stage_native_reply(
             .await?;
         attachments.push(file.id);
     }
-    let _: TaskView = client.post(&format!("/api/tasks/{}/result", work.task_id), json!({
-        "lease": work.lease, "draft": {"text":reply.text, "attachment_ids":attachments, "action":null}
-    })).await?;
+    renewal
+        .submit_result(DraftInput {
+            text: reply.text,
+            attachment_ids: attachments,
+            action: None,
+        })
+        .await?;
     Ok(())
 }
 

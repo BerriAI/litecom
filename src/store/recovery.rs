@@ -11,7 +11,7 @@ impl Store {
                 DELETE FROM oauth_links; DELETE FROM channel_actions; DELETE FROM deliveries; DELETE FROM channels;
                 DELETE FROM cloud_jobs; DELETE FROM tool_permissions;
                 UPDATE agents SET config=NULL,last_seen_at=NULL;
-                DELETE FROM contacts;")?;
+                DELETE FROM contacts WHERE status!='blocked';")?;
             let profiles=self.db.prepare("SELECT id FROM profiles")?.query_map([],|r|r.get::<_,String>(0))?
                 .collect::<std::result::Result<Vec<_>,_>>()?;
             for profile in profiles {

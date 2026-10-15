@@ -61,7 +61,7 @@ with sync_playwright() as p:
                 else: assert state['email_confirmations']==1
                 expect(page.get_by_role('heading',name='Your workspace')).to_be_visible()
                 expect(page.get_by_role('heading',name='Ishaan')).to_be_visible()
-                expect(page.get_by_role('button',name='Add contact')).to_be_visible()
+                expect(page.get_by_role('link',name=re.compile('Ask .+’s agent'))).to_be_visible()
                 expect(page.get_by_role('button',name='Connect local agent')).to_be_visible()
                 page.reload(); expect(page.get_by_role('heading',name='Your workspace')).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

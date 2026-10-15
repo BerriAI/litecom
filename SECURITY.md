@@ -6,9 +6,9 @@ CI checks Rust dependencies against the RustSec advisory database and the reposi
 
 ## Authority
 
-Google sign-in or a verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Browser changes require an authenticated session, matching origin, and a session-bound CSRF token. Direct approvals require a provider-verified sender and an opaque capability bound to the exact task and proposal. SMS uses AgentPhone timestamped HMAC-SHA256 signatures and the verified phone; Slack uses signed callbacks and the linked workspace, user, and DM; email uses the connected sender and a secret reference in the original notification. Connected inboxes and messaging accounts therefore carry approval authority. Agent bearer credentials cannot approve responses, pair other devices, add contacts, or change account settings.
+Google sign-in or a verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Browser changes require an authenticated session, matching origin, and a session-bound CSRF token. Direct approvals require a provider-verified sender and an opaque capability bound to the exact task and proposal. SMS uses AgentPhone timestamped HMAC-SHA256 signatures and the verified phone; Slack uses signed callbacks and the linked workspace, user, and DM; email uses the connected sender and a secret reference in the original notification. Connected inboxes and messaging accounts therefore carry approval authority. Agent bearer credentials cannot approve responses, pair other devices, block people, or change account settings.
 
-Contact acceptance is mutual. Requests target a fixed account and agent ID; names are selectors. Each connection can be revoked independently.
+One relay is one workspace. Members can request any unblocked agent in that workspace; the owner still approves execution and sharing. Requests target a fixed account and agent ID; names are selectors. Each connection can be revoked independently.
 
 ## Content
 
@@ -24,7 +24,7 @@ Revocation prevents future access. It cannot recall copies already received. New
 
 The backup command snapshots SQLite and copies its matching storage key. The complete backup can decrypt stored content and provider credentials; protect it like the live data. SHA-256 checksums, SQLite integrity checks, and an authenticated key check detect an incomplete or mismatched snapshot, but do not authenticate a backup obtained from an untrusted source.
 
-Restore writes only into a new folder. It revokes existing sessions and download access, removes contacts and channel/cloud connections, rotates contact links, and prevents pending actions from resuming. This prevents a stale snapshot from restoring previously revoked authority or replaying an action. People must reconnect after recovery. A partial restore cannot start while its marker remains. Restore does not stop external sessions or reverse effects that occurred after the snapshot. See [the recovery procedure](docs/backup.md).
+Restore writes only into a new folder. It revokes existing sessions and download access, preserves saved blocks, removes channel/cloud connections, rotates old invite links, and prevents pending actions from resuming. This prevents a stale snapshot from restoring previously revoked authority or replaying an action. People must reconnect after recovery. A partial restore cannot start while its marker remains. Restore does not stop external sessions or reverse effects that occurred after the snapshot. See [the recovery procedure](docs/backup.md).
 
 ## Execution
 
@@ -51,3 +51,5 @@ Google sign-in uses `openidconnect` for authorization-code exchange with PKCE an
 The transitive `rsa` dependency has [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html), an unpatched private-key timing disclosure. Production Litecom performs public-key signature verification only; it does not load an RSA private key, sign RSA tokens, or decrypt RSA ciphertext. The generated public test key is used only in `#[cfg(test)]` code. `deny.toml` records this specific non-reachable advisory exception. Reassess it if RSA private-key operations are ever introduced.
 
 The workspace directory exposes member names and agent names to signed-in members. It does not expose phone numbers, email addresses, private configuration, or invitations. Configure `GOOGLE_ALLOWED_DOMAINS` when the directory should be limited to a Google Workspace organization. Local connection commands contain a short-lived, one-use agent-pairing credential; keep them private and never include them in logs or screenshots shared with others.
+
+Local run logs include agent and tool output and remain on the receiving computer. They are not attached to the shared reply. See [monitoring and cleanup](docs/local-agent.md#monitor-local-runs).

@@ -358,7 +358,7 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
     }
     if !options.preview {
         println!(
-            "\nTry: litecom --connection {connection} ask me \"Find my launch notes\"\nAdd a person: litecom --connection {connection} contacts --invite"
+            "\nTry: litecom --connection {connection} ask me \"Find my launch notes\"\nInvite someone: litecom --connection {connection} contacts --invite"
         );
     }
     Ok(())

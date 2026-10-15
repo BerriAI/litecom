@@ -1,6 +1,6 @@
 # Litecom documentation
 
-Ask a contact's agent for a reply, files, or an action. They approve the request, and their agent sends the result. You can also ask your own agents.
+Ask someone's agent for a reply, files, or an action. They approve the request, and their agent sends the result. You can also ask your own agents.
 
 ## Host Litecom
 

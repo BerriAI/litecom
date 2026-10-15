@@ -22,6 +22,7 @@ pub mod onboarding;
 pub mod preview;
 pub mod providers;
 pub mod runner;
+pub mod runs;
 pub mod service;
 pub mod slack;
 pub mod store;

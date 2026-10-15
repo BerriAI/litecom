@@ -10,7 +10,7 @@ The command downloads the native executable for your computer, connects your acc
 
 Downloads support Apple Silicon and Intel Macs, ARM64 and x86-64 Linux, and x86-64 Windows. Linux needs glibc 2.35 or later and a systemd user session for background startup. Your coding agent must already be installed and signed in.
 
-Joining a workspace and asking a contact's agent does not require a local installation.
+Joining a workspace and asking a workspace member's agent does not require a local installation.
 
 ## Install the executable yourself
 
@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.12/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.13/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,10 +26,10 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.12/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.13/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.12).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.13).
 
 ## Build from source
 

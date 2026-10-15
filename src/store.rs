@@ -343,8 +343,8 @@ impl Store {
     pub fn agents(&self, p: &Principal, owner_id: &str) -> Result<Vec<Agent>> {
         if p.user_id != owner_id {
             require(
-                self.connected(&p.user_id, owner_id)?,
-                "Connect with this person first.",
+                self.requests_allowed(&p.user_id, owner_id)?,
+                "Requests between these accounts are blocked.",
             )?;
         }
         self.agent_list(owner_id)
@@ -373,66 +373,60 @@ impl Store {
     fn pair<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
         if a < b { (a, b) } else { (b, a) }
     }
-    fn connected(&self, a: &str, b: &str) -> Result<bool> {
+    fn requests_allowed(&self, a: &str, b: &str) -> Result<bool> {
         let (a, b) = Self::pair(a, b);
         Ok(self
             .db
             .query_row(
-                "SELECT status='accepted' FROM contacts WHERE a=? AND b=?",
+                "SELECT status!='blocked' FROM contacts WHERE a=? AND b=?",
                 params![a, b],
                 |r| r.get(0),
             )
             .optional()?
-            .unwrap_or(false))
+            .unwrap_or(true))
     }
     pub fn request_contact(&self, p: &Principal, invite: &str) -> Result<Contact> {
         p.human()?;
         let (target, _) = self.invite_profile(invite)?;
         self.request_contact_to(p, &target)
     }
+    // Older clients can still follow saved contact links. Workspace members
+    // are immediately addressable; these endpoints never create a pending gate.
     pub fn request_contact_to(&self, p: &Principal, target: &str) -> Result<Contact> {
         p.human()?;
         let name = self.profile_by_id(target)?.name;
-        validate(
-            target != p.user_id,
-            "This is your own link. Share it with someone else.",
-        )?;
-        let (a, b) = Self::pair(&p.user_id, target);
-        let status = self.transaction(|| {
-            let status: Option<String> = self
-                .db
-                .query_row(
-                    "SELECT status FROM contacts WHERE a=? AND b=?",
-                    params![a, b],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            require(
-                status.as_deref() != Some("blocked"),
-                "This contact is unavailable.",
-            )?;
-            if let Some(status) = status {
-                return Ok(status);
-            }
-            self.db.execute(
-                "INSERT INTO contacts(a,b,initiator,status,created_at) VALUES(?,?,?,'pending',?)",
-                params![a, b, p.user_id, self.time()],
-            )?;
-            Ok("pending".to_string())
-        })?;
+        validate(target != p.user_id, "This is your own link.")?;
         Ok(Contact {
             id: target.into(),
             name,
-            status,
+            status: "accepted".into(),
             incoming: false,
-            agents: vec![],
+            agents: self.agents(p, target)?,
         })
     }
-    /// Workspace discovery deliberately excludes private destinations and
-    /// invitation credentials. Discovery does not authorize agent requests.
+    /// Workspace members can request any listed agent. Private destinations,
+    /// credentials, and blocked accounts stay out of the directory.
     pub fn people(&self, p: &Principal) -> Result<Vec<Contact>> {
         p.human()?;
-        let ids = self
+        self.contacts(p)
+    }
+    pub fn accept_contact(&self, p: &Principal, other: &str) -> Result<()> {
+        self.request_contact_to(p, other)?;
+        Ok(())
+    }
+    pub fn block_contact(&self, p: &Principal, other: &str) -> Result<()> {
+        p.human()?;
+        validate(other != p.user_id, "You cannot block yourself.")?;
+        self.profile_by_id(other)?;
+        let (a, b) = Self::pair(&p.user_id, other);
+        self.transaction(|| {
+            self.db.execute("INSERT INTO contacts(a,b,initiator,status,created_at) VALUES(?,?,?,'blocked',?) ON CONFLICT(a,b) DO UPDATE SET status='blocked'",params![a,b,p.user_id,self.time()])?;
+            for mut task in self.task_rows("SELECT id,data FROM tasks WHERE (requester_id=? AND owner_id=?) OR (requester_id=? AND owner_id=?)",params![a,b,b,a])? { self.stop(&mut task,true)?; }
+            Ok(())
+        })
+    }
+    pub fn contacts(&self, p: &Principal) -> Result<Vec<Contact>> {
+        let rows = self
             .db
             .prepare("SELECT id,name FROM profiles WHERE id!=? ORDER BY name COLLATE NOCASE,id")?
             .query_map([&p.user_id], |r| {
@@ -440,72 +434,20 @@ impl Store {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut people = Vec::new();
-        for (id, name) in ids {
-            let (a, b) = Self::pair(&p.user_id, &id);
-            let contact: Option<(String, String)> = self
-                .db
-                .query_row(
-                    "SELECT status,initiator FROM contacts WHERE a=? AND b=?",
-                    params![a, b],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()?;
-            if contact
-                .as_ref()
-                .is_some_and(|(status, _)| status == "blocked")
-            {
+        for (id, name) in rows {
+            if !self.requests_allowed(&p.user_id, &id)? {
                 continue;
             }
-            let agents = self.agent_list(&id)?;
-            let (status, incoming) = contact
-                .map(|(status, initiator)| (status, initiator != p.user_id))
-                .unwrap_or(("available".into(), false));
             people.push(Contact {
+                agents: self.agent_list(&id)?,
                 id,
                 name,
-                status,
-                incoming,
-                agents,
+                // Preserve the response shape for already installed clients.
+                status: "accepted".into(),
+                incoming: false,
             });
         }
         Ok(people)
-    }
-    pub fn accept_contact(&self, p: &Principal, other: &str) -> Result<()> {
-        p.human()?;
-        let (a, b) = Self::pair(&p.user_id, other);
-        let count=self.db.execute("UPDATE contacts SET status='accepted' WHERE a=? AND b=? AND initiator=? AND status IN ('pending','accepted')",params![a,b,other])?;
-        conflict(count == 1, "This contact request is unavailable.")
-    }
-    pub fn block_contact(&self, p: &Principal, other: &str) -> Result<()> {
-        p.human()?;
-        let (a, b) = Self::pair(&p.user_id, other);
-        self.transaction(|| {
-            self.db.execute("UPDATE contacts SET status='blocked' WHERE a=? AND b=?",params![a,b])?;
-            for mut task in self.task_rows("SELECT id,data FROM tasks WHERE (requester_id=? AND owner_id=?) OR (requester_id=? AND owner_id=?)",params![a,b,b,a])? { self.stop(&mut task,true)?; }
-            Ok(())
-        })
-    }
-    pub fn contacts(&self, p: &Principal) -> Result<Vec<Contact>> {
-        let pairs = self.db.prepare("SELECT a,b,initiator,status FROM contacts WHERE a=? OR b=? ORDER BY created_at,a,b")?.query_map(params![p.user_id,p.user_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        pairs
-            .into_iter()
-            .map(|(a, b, initiator, status)| {
-                let other = if a == p.user_id { b } else { a };
-                let profile = self.profile_by_id(&other)?;
-                let agents = if status == "accepted" {
-                    self.agents(p, &other)?
-                } else {
-                    vec![]
-                };
-                Ok(Contact {
-                    id: other,
-                    name: profile.name,
-                    incoming: initiator != p.user_id,
-                    status,
-                    agents,
-                })
-            })
-            .collect()
     }
     pub fn resolve(
         &self,
@@ -532,15 +474,15 @@ impl Store {
         let contacts = self
             .contacts(p)?
             .into_iter()
-            .filter(|c| {
-                c.status == "accepted"
-                    && (c.id == name || c.name.to_lowercase() == name.trim().to_lowercase())
-            })
+            .filter(|c| c.id == name || c.name.to_lowercase() == name.trim().to_lowercase())
             .collect::<Vec<_>>();
-        validate(!contacts.is_empty(), "Add this person as a contact first.")?;
+        validate(
+            !contacts.is_empty(),
+            "This person is not available in your workspace.",
+        )?;
         conflict(
             contacts.len() == 1,
-            "Several contacts have this name. Select one by ID.",
+            "Several people have this name. Select one by ID.",
         )?;
         let contact = &contacts[0];
         let agent = contact
@@ -551,7 +493,7 @@ impl Store {
                     .map(|n| a.name.to_lowercase() == n.trim().to_lowercase() || a.id == n)
                     .unwrap_or(a.is_default)
             })
-            .ok_or_else(|| Error::Invalid("Choose an agent from this contact's list.".into()))?;
+            .ok_or_else(|| Error::Invalid("Choose an agent from this person's list.".into()))?;
         Ok((contact.id.clone(), agent.id.clone()))
     }
 
@@ -650,7 +592,7 @@ impl Store {
             "Provide a request ID for safe retries.",
         )?;
         self.transaction(|| {
-            require(p.user_id==input.owner_id || self.connected(&p.user_id,&input.owner_id)?,"Both people must accept the contact request first.")?;
+            require(p.user_id==input.owner_id || self.requests_allowed(&p.user_id,&input.owner_id)?,"Requests between these accounts are blocked.")?;
             // Bind retries to the original requested selector, not today's default.
             let request_hash=hash(serde_json::to_vec(&(&input.owner_id,&input.agent_id,input.request.trim()))?);
             if let Some(existing)=self.db.query_row("SELECT id FROM tasks WHERE requester_id=? AND idempotency_key=?",params![p.user_id,input.idempotency_key],|r|r.get::<_,String>(0)).optional()? {

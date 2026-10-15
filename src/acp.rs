@@ -1,6 +1,6 @@
 //! ACP v1 client. Native tools stay in the agent; new permissions go to its owner.
 use crate::{
-    client::Client,
+    client::{Client, WorkLease},
     config,
     model::{Decision, Status, ToolPermission, ToolPermissionInput, WorkItem},
     runner::{AgentReply, ProcessGroup, RunnerConfig},
@@ -129,6 +129,7 @@ pub(crate) async fn reply(
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
+    renewal: &mut WorkLease<'_>,
 ) -> Result<AgentReply> {
     let stderr = dir.join("agent-error.log");
     config::write_private(&stderr, b"")?;
@@ -166,7 +167,7 @@ pub(crate) async fn reply(
             .compat_write(),
         child.stdout.take().context("Missing ACP output")?.compat(),
     );
-    converse(transport, client, settings, work, dir).await
+    converse(transport, client, settings, work, dir, renewal).await
 }
 
 pub(crate) async fn converse(
@@ -175,9 +176,13 @@ pub(crate) async fn converse(
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
+    renewal: &mut WorkLease<'_>,
 ) -> Result<AgentReply> {
     let shared = Arc::new(Mutex::new(Session::default()));
     let notifications = shared.clone();
+    let event_path = dir.join("agent-events.jsonl");
+    config::write_private(&event_path, b"")?;
+    let session_path = dir.join("session-id");
     let permissions = shared.clone();
     let session_state = shared.clone();
     let worker = client.clone();
@@ -197,6 +202,11 @@ pub(crate) async fn converse(
                 let mut session = notifications.lock().expect("ACP session lock");
                 if session.id.as_ref() != Some(&notification.session_id) {
                     return Ok(());
+                }
+                {
+                    use std::io::Write;
+                    let mut file = std::fs::OpenOptions::new().append(true).open(&event_path).map_err(AcpError::into_internal_error)?;
+                    writeln!(file, "{}", serde_json::to_string(&notification).map_err(AcpError::into_internal_error)?).map_err(AcpError::into_internal_error)?;
                 }
                 match notification.update {
                     SessionUpdate::AgentMessageChunk(chunk) => {
@@ -279,6 +289,7 @@ pub(crate) async fn converse(
                 ));
             }
             let created = cx.send_request(new_session).block_task().await?;
+            config::write_private(&session_path, created.session_id.to_string().as_bytes()).map_err(|e| AcpError::internal_error().data(e.to_string()))?;
             {
                 let mut session = session_state.lock().expect("ACP session lock");
                 session.id = Some(created.session_id.clone());
@@ -305,7 +316,7 @@ pub(crate) async fn converse(
         tokio::select! {
             result = &mut connection => break result.map_err(anyhow::Error::from),
             _ = heartbeat.tick() => {
-                let state: Result<Status> = client.post(&format!("/api/tasks/{}/heartbeat",work.task_id),json!({"lease":work.lease})).await;
+                let state = renewal.renew().await;
                 if !matches!(state, Ok(Status::Executing)) {
                     {
                         let session = shared.lock().expect("ACP session lock");

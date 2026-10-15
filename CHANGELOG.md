@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.13
+
+- Keep local agent runs alive through brief relay outages and retry result delivery without rerunning the agent.
+- Request anyone in your workspace without contact acceptance. Existing blocks still apply.
+- Wait for results inside the calling agent with MCP.
+- Inspect local sessions with `litecom runs` and `litecom logs --follow`.
+- Copy a workspace-specific setup prompt for your coding agent.
+
 ## 0.1.0-alpha.12
 
 - Choose from installed agents when connecting your computer. Repeated setup keeps your choice.

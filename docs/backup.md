@@ -34,7 +34,7 @@ Copy `backups/backup-1` to your protected backup destination. A backup that exis
 Stop the original relay and prevent it from restarting before switching to a recovered copy. Do not run both copies as independent servers. A backup can predate revocations or completed actions, so restoration deliberately resets access:
 
 - Accounts, request history, drafts, and attachment bytes remain.
-- People must sign in again, pair agents again, and reconnect contacts and approval channels. Old contact links are replaced.
+- People must sign in again, pair agents again, and reconnect approval channels. Saved blocks are preserved; blocks added after the backup must be reapplied before reopening the workspace. Old invite links are replaced.
 - Previous download access is revoked. Pending work stops and is never automatically replayed.
 - Cloud connections are removed. Existing provider sessions may still be running; inspect them directly before sending work again. Restore does not undo external actions or remotely stop those sessions.
 

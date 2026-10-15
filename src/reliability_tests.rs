@@ -1190,3 +1190,283 @@ async fn downloads_publish_only_verified_bytes_with_portable_filenames() {
     );
     server.abort();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_run_survives_a_temporary_relay_outage_without_relaunching() {
+    for failure in ["heartbeat", "upload", "result", "lost_result"] {
+        run_through_outage(failure).await;
+    }
+}
+
+#[cfg(unix)]
+async fn run_through_outage(failure: &'static str) {
+    use crate::{
+        client::Client,
+        config::ClientConfig,
+        runner::{NativeAgent, RunnerConfig, handle_in},
+    };
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        middleware::Next,
+        response::IntoResponse,
+    };
+    use std::{os::unix::fs::PermissionsExt, sync::atomic::AtomicUsize};
+
+    let f = Fixture::new();
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("agent");
+    std::fs::write(dir.path().join("attachment.txt"), "exact attached bytes").unwrap();
+    std::fs::write(&executable, r#"#!/bin/sh
+cat >/dev/null
+printf 'run\n' >> invoked
+printf '{"type":"thread.started","thread_id":"fixture-session"}\n'
+sleep 1
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --output-last-message ]; then shift; printf '{"text":"Still here after the restart.","files":["%s/attachment.txt"]}' "$PWD" > "$1"; fi
+  shift
+done
+"#).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let settings = RunnerConfig {
+        agent: NativeAgent::Codex,
+        executable,
+        workspace: dir.path().into(),
+        arguments: vec![],
+        mcp: None,
+    };
+    let device = f.store.begin_local_connection(&f.b, &f.agent).unwrap();
+    let token = f.store.poll_device(&device.device_code).unwrap().unwrap();
+    let worker = f.store.authenticate(&token.token, Role::Agent).unwrap();
+    let task = f.request("temporary-outage");
+    let draft = f
+        .store
+        .prepare(
+            &f.b,
+            &task.id,
+            None,
+            DraftInput {
+                text: String::new(),
+                attachment_ids: vec![],
+                action: Some(settings.action(&task.request)),
+            },
+        )
+        .unwrap()
+        .draft
+        .unwrap();
+    f.store
+        .decide(
+            &f.b,
+            &task.id,
+            draft.version,
+            &draft.digest,
+            Decision::Approve,
+        )
+        .unwrap();
+    let work = f.store.claim(&worker, &f.agent).unwrap().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let client = Client::new(ClientConfig {
+        relay: origin.clone(),
+        token: token.token,
+        user_id: f.b.user_id.clone(),
+        agent_id: f.agent,
+        workspace: None,
+        runner: None,
+        approval_channel: None,
+    })
+    .unwrap();
+    let state = crate::api::AppState::new(
+        f.store,
+        origin,
+        crate::providers::Providers::from_env(true).unwrap(),
+    );
+    let failures = Arc::new(AtomicUsize::new(0));
+    let renewals = Arc::new(AtomicUsize::new(0));
+    let counter = failures.clone();
+    let heartbeat_count = renewals.clone();
+    let router = crate::api::router(state.clone()).layer(axum::middleware::from_fn(
+        move |req: Request<Body>, next: Next| {
+            let counter = counter.clone();
+            let heartbeat_count = heartbeat_count.clone();
+            async move {
+                let path = req.uri().path();
+                let heartbeat = path.ends_with("/heartbeat");
+                let n = if heartbeat {
+                    heartbeat_count.fetch_add(1, Ordering::SeqCst)
+                } else {
+                    0
+                };
+                let fail = match failure {
+                    "heartbeat" => heartbeat && n == 1,
+                    "upload" => {
+                        path.ends_with("/files") && req.method() == axum::http::Method::POST
+                    }
+                    _ => path.ends_with("/result"),
+                };
+                if fail && counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                    if failure == "lost_result" {
+                        let response = next.run(req).await;
+                        assert!(response.status().is_success());
+                    }
+                    return (StatusCode::SERVICE_UNAVAILABLE, "<html>Deploying</html>")
+                        .into_response();
+                }
+                next.run(req).await
+            }
+        },
+    ));
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let outcome = handle_in(&client, &settings, &work, &dir.path().join("runs")).await;
+    server.abort();
+    outcome.unwrap();
+    assert!(
+        failures.load(Ordering::SeqCst) >= 1,
+        "{failure} did not run"
+    );
+    let local = crate::runs::list_in(&dir.path().join("runs")).unwrap();
+    assert_eq!(local.len(), 1);
+    assert_eq!(local[0].status, "completed");
+    assert_eq!(local[0].session_id.as_deref(), Some("fixture-session"));
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("invoked")).unwrap(),
+        "run\n"
+    );
+    let delivered = state.db().unwrap().get_task(&f.a, &task.id).unwrap();
+    assert_eq!(delivered.status, Status::Completed);
+    let response = delivered.response.unwrap();
+    assert_eq!(response.text, "Still here after the restart.");
+    assert_eq!(response.attachments.len(), 1);
+    assert_eq!(
+        response.attachments[0].sha256,
+        hash(b"exact attached bytes")
+    );
+}
+
+#[tokio::test]
+async fn mcp_wait_returns_the_approved_result_without_another_user_prompt() {
+    use rmcp::{
+        ServiceExt,
+        model::{CallToolRequestParams, ClientConfig as McpConfig},
+    };
+    use serde_json::{Value, json};
+    let f = Fixture::new();
+    let task = f.draft("mcp-auto-wait", None);
+    let local = f.store.agents(&f.a, &f.a.user_id).unwrap()[0].id.clone();
+    let pairing = f.store.begin_local_connection(&f.a, &local).unwrap();
+    let token = f.store.poll_device(&pairing.device_code).unwrap().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let client = crate::client::Client::new(crate::config::ClientConfig {
+        relay: origin.clone(),
+        token: token.token,
+        user_id: f.a.user_id.clone(),
+        agent_id: local,
+        workspace: None,
+        runner: None,
+        approval_channel: None,
+    })
+    .unwrap();
+    let state = crate::api::AppState::new(
+        f.store,
+        origin,
+        crate::providers::Providers::from_env(true).unwrap(),
+    );
+    let router = crate::api::router(state.clone());
+    let relay = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let (reader, writer) = tokio::io::duplex(64 * 1024);
+    let server = tokio::spawn(async move {
+        crate::mcp::LitecomMcp::new(client)
+            .serve(writer)
+            .await
+            .unwrap()
+    });
+    let mcp = McpConfig::default().serve(reader).await.unwrap();
+    let server = server.await.unwrap();
+    let call = |name: &'static str, args: Value| {
+        CallToolRequestParams::new(name).with_arguments(args.as_object().unwrap().clone())
+    };
+    let before = mcp
+        .call_tool(call("litecom_status", json!({"task_id":task.id})))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert!(before["response"].is_null() && before["draft"].is_null());
+    let approval_state = state.clone();
+    let approval_task = task.clone();
+    let owner = f.b.clone();
+    let approve = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let draft = approval_task.draft.unwrap();
+        approval_state
+            .db()
+            .unwrap()
+            .decide(
+                &owner,
+                &approval_task.id,
+                draft.version,
+                &draft.digest,
+                Decision::Approve,
+            )
+            .unwrap();
+    });
+    let result = mcp.call_tool(call("litecom_ask",json!({"contact":"Moe","request":"Please send the document","request_id":"mcp-auto-wait"}))).await.unwrap().structured_content.unwrap();
+    approve.await.unwrap();
+    assert_eq!(result["waiting"], false);
+    assert_eq!(result["request"]["response"]["text"], "A private draft");
+    assert!(result["next"].is_null());
+    assert!(result["request"]["draft"].is_null());
+    // Cancellation and decline return immediately instead of instructing a retry.
+    for decision in [Decision::Decline, Decision::Approve] {
+        let id = crate::crypto::id();
+        let task = state
+            .db()
+            .unwrap()
+            .create_task(
+                &f.a,
+                NewTask {
+                    owner_id: f.b.user_id.clone(),
+                    agent_id: None,
+                    request: "Other request".into(),
+                    idempotency_key: id,
+                },
+            )
+            .unwrap();
+        if decision == Decision::Decline {
+            let prepared = state
+                .db()
+                .unwrap()
+                .prepare(
+                    &f.b,
+                    &task.id,
+                    None,
+                    DraftInput {
+                        text: "Private".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let d = prepared.draft.unwrap();
+            state
+                .db()
+                .unwrap()
+                .decide(&f.b, &task.id, d.version, &d.digest, Decision::Decline)
+                .unwrap();
+        } else {
+            state.db().unwrap().cancel(&f.a, &task.id).unwrap();
+        }
+        let result = mcp
+            .call_tool(call("litecom_wait", json!({"task_id":task.id})))
+            .await
+            .unwrap()
+            .structured_content
+            .unwrap();
+        assert_eq!(result["waiting"], false);
+        assert!(result["request"]["response"].is_null());
+    }
+    mcp.cancel().await.unwrap();
+    server.cancel().await.unwrap();
+    relay.abort();
+}

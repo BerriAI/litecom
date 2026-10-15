@@ -1,6 +1,6 @@
 # Open-source components
 
-Litecom owns account and contact mapping, request routing, human approval, and controlled delivery. Existing agents supply reasoning and use their own tools, context, and accounts.
+Litecom owns workspace identity, request routing, human approval, and controlled delivery. Existing agents supply reasoning and use their own tools, context, and accounts.
 
 ## Protocols
 
@@ -8,7 +8,7 @@ Litecom is built in Rust and uses three protocols:
 
 | Protocol | What it connects |
 | --- | --- |
-| [MCP](https://modelcontextprotocol.io/) | Your coding agent to Litecom’s contacts, requests, and results. |
+| [MCP](https://modelcontextprotocol.io/) | Your coding agent to Litecom’s workspace, requests, and results. |
 | [A2A](https://a2a-protocol.org/) | Compatible agents to Litecom’s requests and tasks. |
 | [ACP](https://agentclientprotocol.com/) | Litecom to an installed agent and its permission prompts. |
 
@@ -28,6 +28,7 @@ Litecom is built in Rust and uses three protocols:
 | [Geist](https://github.com/vercel/geist-font) | Bundled UI typefaces, under the SIL Open Font License. |
 | [Lettre](https://github.com/lettre/lettre) | SMTP email delivery. |
 | [RustCrypto](https://github.com/RustCrypto/AEADs) | AES-GCM encryption; related RustCrypto crates provide hashes and HMAC. |
+| [fs2](https://github.com/danburkert/fs2-rs) | OS file locks distinguish running local sessions from interrupted ones. |
 | [Dialoguer](https://github.com/console-rs/dialoguer) | Terminal setup prompts. |
 | [jsonc-parser](https://github.com/dprint/jsonc-parser) | Preserve comments and formatting when adding Cursor's MCP connection. |
 | [Caddy](https://github.com/caddyserver/caddy) | HTTPS in the optional self-hosted Compose deployment. |

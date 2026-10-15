@@ -117,7 +117,7 @@ fn live_backup_restores_data_without_reviving_access_or_running_actions() {
     let (fresh_b, new_sb) = user(&restored, "Moe", "+14155550412");
     assert_eq!(new_sa.profile.id, sa.profile.id);
     assert_eq!(new_sb.profile.id, sb.profile.id);
-    assert!(restored.contacts(&fresh_b).unwrap().is_empty());
+    assert_eq!(restored.contacts(&fresh_b).unwrap().len(), 1);
     assert!(
         restored
             .get_task(&fresh_a, &shared.id)

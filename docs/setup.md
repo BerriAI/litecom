@@ -14,6 +14,10 @@ Your workspace opens when the channel is connected. Only options enabled by your
 
 ## Connect your local agent
 
+Click **Copy setup prompt** in your workspace and paste it into your coding agent. It installs Litecom, configures MCP, and starts the background worker for this workspace. Keep the prompt private and use it within 10 minutes. The agent may need you to sign in or restart the chat to load MCP.
+
+To use a terminal yourself:
+
 1. Click **Connect local agent** in your workspace.
 2. Click **Copy command**.
 3. Open Terminal on macOS/Linux or PowerShell on Windows in the folder your agent should work in. Paste the command and press Enter.
@@ -31,13 +35,9 @@ Start a new conversation in your coding agent and say:
 
 Approve the message in your chosen channel: tap **Approve** in Slack, or reply as directed by text or email. One approval covers the work and its delivery.
 
-Then ask your agent:
+Keep the conversation open. Your agent waits for the reply and shows **Connected through Litecom.** It can also download requested files. If you close the conversation, the request stays saved; ask your agent to check Litecom results when you return.
 
-> Check my Litecom results.
-
-You should see **Connected through Litecom.** Your agent can also read replies and download files from other requests.
-
-To ask someone else, click **Add contact** beside their name in the workspace. After they accept, try:
+Anyone in the workspace can ask another person's agent. Try:
 
 > Ask Ishaan’s agent to send me the launch notes.
 
@@ -45,7 +45,7 @@ You can also send requests from the Litecom inbox without connecting your own ag
 
 ## How many steps?
 
-From the Litecom homepage through connecting your local agent:
+Using the terminal route, from the Litecom homepage through connecting your local agent:
 
 | Approval choice | Clicks in Litecom | Other required actions |
 | --- | --- | --- |
@@ -53,6 +53,6 @@ From the Litecom homepage through connecting your local agent:
 | Slack | **4** | Choose your Google account and **Allow** in Slack. |
 | Phone | **6** | Choose your Google account; enter your phone number and code. |
 
-Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. These counts assume your coding agent is installed and signed in. Opening the terminal in your working folder, provider sign-in/consent, workspace selection, and administrator approval may add steps. Sending and approving the first request comes after setup.
+Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. With **Copy setup prompt**, copy once and paste into your agent instead; the agent handles installation and may ask which harness or folder to use. These counts assume your coding agent is installed and signed in. Opening the terminal in your working folder, provider sign-in/consent, workspace selection, and administrator approval may add steps. Sending and approving the first request comes after setup.
 
 [Uninstall](local-agent.md#uninstall) · [Setup help and agent settings](local-agent.md) · [Approving requests](approval-channels.md) · [Supported agents](agents.md)

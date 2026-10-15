@@ -92,7 +92,7 @@ fn google_phone_link_is_purpose_bound_and_cannot_take_another_account() {
 }
 
 #[test]
-fn directory_preserves_private_fields_blocking_and_contact_approval() {
+fn directory_preserves_private_fields_and_blocking_without_contact_approval() {
     let f = Fixture::new();
     let (p, _) = google_user(&f.store, "newcomer");
     let people = f.store.people(&p).unwrap();
@@ -106,11 +106,8 @@ fn directory_preserves_private_fields_blocking_and_contact_approval() {
         request: "hello".into(),
         idempotency_key: "directory".into(),
     };
-    assert!(f.store.create_task(&p, request()).is_err());
-    f.store.request_contact_to(&p, &f.b.user_id).unwrap();
-    f.store.request_contact_to(&p, &f.b.user_id).unwrap();
-    assert!(f.store.create_task(&p, request()).is_err());
-    f.store.accept_contact(&f.b, &p.user_id).unwrap();
+    assert!(f.store.create_task(&p, request()).is_ok());
+    assert!(people.iter().all(|person| person.status == "accepted"));
     assert!(f.store.create_task(&p, request()).is_ok());
     f.store.block_contact(&f.b, &p.user_id).unwrap();
     assert!(
