@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Litecom — third-party notices</title>
+  <style>
+    body { max-width: 900px; margin: auto; padding: 32px 20px; font: 16px/1.6 system-ui, sans-serif; color: #17202c; }
+    a { color: #233a9c; overflow-wrap: anywhere; }
+    h1, h2 { line-height: 1.2; }
+    section { border-top: 1px solid #ddd; padding-top: 20px; margin-top: 32px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; padding: 16px; background: #f5f6f8; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Third-party notices</h1>
+  <p>Litecom uses the Cargo dependencies below. This file includes dependencies
+  for all configured release platforms; an individual binary may use a subset.</p>
+  <p>Each component's source link downloads the exact, unmodified crate release.
+  The listed licenses apply to those components. Litecom's own source is licensed
+  under Apache-2.0. External coding agents and separately installed adapters have
+  their own distributions and licenses.</p>
+  <p>Generated from Cargo.lock with cargo-about. To regenerate, see CONTRIBUTING.md.</p>
+  <ul>
+  {{#each overview}}
+    <li>{{name}} — {{count}} components</li>
+  {{/each}}
+  </ul>
+  {{#each licenses}}
+  <section id="license-{{@index}}">
+    <h2>{{name}}</h2>
+    <ul>
+    {{#each used_by}}
+      <li>{{crate.name}} {{crate.version}} —
+        <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">source</a>
+      </li>
+    {{/each}}
+    </ul>
+    <pre>{{text}}</pre>
+  </section>
+  {{/each}}
+</main>
+</body>
+</html>

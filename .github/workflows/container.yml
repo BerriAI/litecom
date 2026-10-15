@@ -1,0 +1,13 @@
+name: Container
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t litecom:qa .
+      - run: python3 scripts/container-smoke.py

@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Keep generated upstream license texts byte-for-byte, including line endings.
+THIRD-PARTY-NOTICES.html -text whitespace=-trailing-space

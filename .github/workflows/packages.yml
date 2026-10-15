@@ -1,0 +1,54 @@
+name: Build downloads
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            extension: tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            extension: tar.gz
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            extension: tar.gz
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            extension: tar.gz
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            extension: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install packaging tool (Unix)
+        if: runner.os != 'Windows'
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-installer.sh | sh
+      - name: Install packaging tool (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: irm https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-installer.ps1 | iex
+      - run: cargo test --locked
+      - run: dist build --artifacts=local --target ${{ matrix.target }}
+      - name: Verify the packaged executable
+        run: python scripts/check-package.py target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: litecom-${{ matrix.target }}
+          path: |
+            target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }}
+            target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }}.sha256
+          if-no-files-found: error

@@ -1,0 +1,905 @@
+use crate::{
+    crypto::secret,
+    error::{Error, Result, require},
+    model::*,
+    providers::Providers,
+    store::Store,
+};
+use axum::{
+    Json, Router,
+    body::{Body, Bytes},
+    extract::{DefaultBodyLimit, Path, Query, State},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{delete, get, post},
+};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
+
+#[derive(Clone)]
+pub struct AppState {
+    pub store: Arc<Mutex<Store>>,
+    pub origin: String,
+    pub providers: Providers,
+    limits: Arc<Mutex<HashMap<String, (Instant, u32)>>>,
+}
+impl AppState {
+    pub fn new(store: Store, origin: String, providers: Providers) -> Self {
+        Self {
+            store: Arc::new(Mutex::new(store)),
+            origin: origin.trim_end_matches('/').into(),
+            providers,
+            limits: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+    pub fn db(&self) -> Result<MutexGuard<'_, Store>> {
+        self.store
+            .lock()
+            .map_err(|_| Error::Internal(anyhow::anyhow!("database lock poisoned")))
+    }
+    fn limit(&self, key: &str, count: u32) -> Result<()> {
+        let mut limits = self
+            .limits
+            .lock()
+            .map_err(|_| Error::Internal(anyhow::anyhow!("rate limit lock poisoned")))?;
+        limits.retain(|_, (start, _)| start.elapsed() < Duration::from_secs(60));
+        if limits.len() >= 10_000 && !limits.contains_key(key) {
+            return Err(Error::RateLimited);
+        }
+        let entry = limits.entry(key.into()).or_insert((Instant::now(), 0));
+        entry.1 += 1;
+        if entry.1 > count {
+            Err(Error::RateLimited)
+        } else {
+            Ok(())
+        }
+    }
+    fn origin(&self, h: &HeaderMap) -> Result<()> {
+        require(
+            h.get(header::ORIGIN).and_then(|h| h.to_str().ok()) == Some(&self.origin),
+            "Open this page directly on your Litecom server.",
+        )
+    }
+    pub fn principal(&self, h: &HeaderMap, write: bool) -> Result<Principal> {
+        if let Some(token) = h
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+        {
+            return self.db()?.authenticate(token, Role::Agent);
+        }
+        let token = cookie(h, "litecom_session").ok_or(Error::Unauthorized)?;
+        let db = self.db()?;
+        let p = db.authenticate(&token, Role::Human)?;
+        if write {
+            self.origin(h)?;
+            db.check_csrf(
+                &p,
+                h.get("x-csrf-token")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or(""),
+            )?;
+        }
+        Ok(p)
+    }
+    fn cookie(&self, name: &str, value: &str, http_only: bool, age: i64) -> String {
+        format!(
+            "{name}={value}; Path=/; SameSite=Strict; Max-Age={age}{}{}",
+            if http_only { "; HttpOnly" } else { "" },
+            if self.origin.starts_with("https:") {
+                "; Secure"
+            } else {
+                ""
+            }
+        )
+    }
+}
+pub fn cookie(h: &HeaderMap, name: &str) -> Option<String> {
+    h.get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .find_map(|s| {
+            let (k, v) = s.trim().split_once('=')?;
+            (k == name).then(|| v.to_string())
+        })
+}
+fn cookies(mut response: Response, values: Vec<String>) -> Result<Response> {
+    for c in values {
+        response.headers_mut().append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&c).map_err(|e| Error::Internal(e.into()))?,
+        );
+    }
+    Ok(response)
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/a2a/{owner}/{agent}", post(crate::a2a::rpc))
+        .route(
+            "/a2a/{owner}/{agent}/.well-known/agent-card.json",
+            get(crate::a2a::agent_card),
+        )
+        .route(
+            "/health",
+            get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
+        )
+        .route("/api/capabilities", get(capabilities))
+        .route("/auth/start", post(start_login))
+        .route("/auth/verify", post(verify_login))
+        .route("/auth/logout", post(logout))
+        .route("/device/start", post(start_device))
+        .route("/device/poll", post(poll_device))
+        .route(
+            "/api/device/{code}",
+            get(device_info).post(authorize_device),
+        )
+        .route("/api/me", get(me))
+        .route("/api/channels", get(channels))
+        .route("/api/channels/phone", post(enable_phone))
+        .route("/api/channels/email/start", post(start_email))
+        .route("/api/channels/email/verify", post(verify_email))
+        .route("/api/channels/slack/start", post(start_slack))
+        .route("/api/channels/slack/finish", post(finish_slack))
+        .route("/oauth/slack/callback", get(slack_callback))
+        .route("/api/channels/{id}", delete(disable_channel))
+        .route("/api/agents", get(agents).post(add_agent))
+        .route("/api/agents/devin", post(connect_devin))
+        .route("/api/agents/{id}", delete(revoke_agent))
+        .route("/api/agents/{id}/default", post(default_agent))
+        .route("/api/connections", get(connections))
+        .route("/api/connections/{id}", delete(revoke_connection))
+        .route("/api/contacts", get(contacts).post(add_contact))
+        .route("/api/contacts/{id}/accept", post(accept_contact))
+        .route("/api/contacts/{id}/block", post(block_contact))
+        .route("/api/invite/rotate", post(rotate_invite))
+        .route("/api/invite/{code}", get(invite))
+        .route("/api/resolve", post(resolve))
+        .route("/api/tasks", get(tasks).post(new_task))
+        .route("/api/tasks/lookup", post(lookup_request))
+        .route("/api/tasks/{id}", get(task))
+        .route("/api/tasks/{id}/draft", post(prepare))
+        .route("/api/tasks/{id}/decision", post(decide))
+        .route("/api/tasks/{id}/cancel", post(cancel))
+        .route("/api/tasks/{id}/received", post(received))
+        .route("/api/tasks/{id}/heartbeat", post(heartbeat))
+        .route("/api/tasks/{id}/finish", post(finish))
+        .route("/api/tasks/{id}/result", post(stage_result))
+        .route("/api/tasks/{id}/permissions", post(request_permission))
+        .route(
+            "/api/tasks/{id}/permissions/{permission}/status",
+            post(permission_status),
+        )
+        .route(
+            "/api/tasks/{id}/permissions/{permission}/decision",
+            post(decide_permission),
+        )
+        .route(
+            "/api/tasks/{id}/files",
+            post(upload).layer(DefaultBodyLimit::max(36 * 1024 * 1024)),
+        )
+        .route("/api/files/{id}", get(download))
+        .route("/api/files/{id}/received", post(download_received))
+        .route("/api/work/claim", post(claim))
+        .route("/api/events", get(events))
+        .route(
+            "/app.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("web/app.js"),
+                )
+            }),
+        )
+        .route(
+            "/style.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("web/style.css"),
+                )
+            }),
+        )
+        .fallback(get(|| async {
+            axum::response::Html(include_str!("web/index.html"))
+        }))
+        .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
+        .layer(middleware::from_fn(security_headers))
+        .with_state(state)
+}
+async fn security_headers(request: axum::extract::Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let h = response.headers_mut();
+    for (k, v) in [
+        ("cache-control", "no-store"),
+        ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "no-referrer"),
+        ("x-frame-options", "DENY"),
+        (
+            "content-security-policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        ),
+        (
+            "permissions-policy",
+            "camera=(), microphone=(), geolocation=()",
+        ),
+    ] {
+        h.insert(k, HeaderValue::from_static(v));
+    }
+    response
+}
+async fn capabilities(State(s): State<AppState>) -> Json<Value> {
+    Json(
+        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev}),
+    )
+}
+#[derive(Deserialize)]
+struct LoginInput {
+    name: String,
+    phone: String,
+}
+async fn start_login(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<LoginInput>,
+) -> Result<Response> {
+    s.origin(&h)?;
+    s.limit("login-global", 30)?;
+    if !s.providers.phone_available() {
+        return Err(Error::Unavailable(
+            "Phone delivery is not enabled on this server.".into(),
+        ));
+    }
+    let nonce = secret();
+    let (challenge, code) = s.db()?.begin_login(&v.name, &v.phone, &nonce)?;
+    s.providers.sms(&v.phone,&format!("Your Litecom sign-in code is {code}. It expires in 10 minutes. Never share this code.")).await?;
+    cookies(
+        Json(challenge).into_response(),
+        vec![s.cookie("litecom_login", &nonce, true, 600)],
+    )
+}
+#[derive(Deserialize)]
+struct VerifyInput {
+    id: String,
+    code: String,
+}
+async fn verify_login(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<VerifyInput>,
+) -> Result<Response> {
+    s.origin(&h)?;
+    s.limit("verify-global", 120)?;
+    let session = s.db()?.verify_login(
+        &v.id,
+        &v.code,
+        &cookie(&h, "litecom_login").unwrap_or_default(),
+    )?;
+    cookies(
+        Json(json!({"profile":session.profile})).into_response(),
+        vec![
+            s.cookie("litecom_session", &session.token, true, 30 * 86400),
+            s.cookie("litecom_csrf", &session.csrf, false, 30 * 86400),
+            s.cookie("litecom_login", "", true, 0),
+        ],
+    )
+}
+async fn logout(State(s): State<AppState>, h: HeaderMap) -> Result<Response> {
+    let p = s.principal(&h, true)?;
+    s.db()?.logout(&p)?;
+    cookies(
+        StatusCode::NO_CONTENT.into_response(),
+        vec![
+            s.cookie("litecom_session", "", true, 0),
+            s.cookie("litecom_csrf", "", false, 0),
+        ],
+    )
+}
+#[derive(Deserialize)]
+struct DeviceInput {
+    label: String,
+}
+async fn start_device(
+    State(s): State<AppState>,
+    Json(v): Json<DeviceInput>,
+) -> Result<Json<Value>> {
+    s.limit("device-global", 60)?;
+    Ok(Json(serde_json::to_value(s.db()?.begin_device(&v.label)?)?))
+}
+#[derive(Deserialize)]
+struct DevicePoll {
+    device_code: String,
+}
+async fn poll_device(State(s): State<AppState>, Json(v): Json<DevicePoll>) -> Result<Json<Value>> {
+    s.limit(&format!("poll:{}", crate::crypto::hash(&v.device_code)), 30)?;
+    Ok(Json(serde_json::to_value(
+        s.db()?.poll_device(&v.device_code)?,
+    )?))
+}
+async fn device_info(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(code): Path<String>,
+) -> Result<Json<Value>> {
+    s.principal(&h, false)?.human()?;
+    Ok(Json(json!({"label":s.db()?.device_label(&code)?})))
+}
+#[derive(Deserialize)]
+struct AgentChoice {
+    agent_id: String,
+}
+async fn authorize_device(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(code): Path<String>,
+    Json(v): Json<AgentChoice>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.authorize_device(&p, &code, &v.agent_id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn me(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Profile>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.profile(&p)?))
+}
+#[derive(Deserialize)]
+struct OwnerQuery {
+    owner_id: Option<String>,
+}
+async fn agents(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<OwnerQuery>,
+) -> Result<Json<Vec<Agent>>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(
+        s.db()?
+            .agents(&p, q.owner_id.as_deref().unwrap_or(&p.user_id))?,
+    ))
+}
+#[derive(Deserialize)]
+struct AgentInput {
+    name: String,
+    kind: AgentKind,
+    #[serde(default)]
+    make_default: bool,
+}
+async fn add_agent(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<AgentInput>,
+) -> Result<Json<Agent>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.register_agent(
+        &p,
+        &v.name,
+        v.kind,
+        v.make_default,
+    )?))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DevinInput {
+    name: String,
+    token: String,
+    org_id: Option<String>,
+}
+async fn connect_devin(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<DevinInput>,
+) -> Result<Json<Agent>> {
+    let p = s.principal(&h, true)?;
+    p.human()?;
+    s.limit(&format!("connect-devin:{}", p.user_id), 10)?;
+    let connection = crate::devin::Devin::new()?
+        .connect(v.token.trim(), v.org_id.as_deref().map(str::trim))
+        .await?;
+    // The session may have been revoked while the provider check was in flight.
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.connect_devin(&p, &v.name, connection)?))
+}
+async fn default_agent(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.set_default(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn revoke_agent(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.revoke_agent(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn connections(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(serde_json::to_value(s.db()?.connections(&p)?)?))
+}
+async fn revoke_connection(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.revoke_connection(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn contacts(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Vec<Contact>>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.contacts(&p)?))
+}
+#[derive(Deserialize)]
+struct InviteInput {
+    invite: String,
+}
+async fn add_contact(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<InviteInput>,
+) -> Result<Json<Contact>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.request_contact(&p, &v.invite)?))
+}
+async fn accept_contact(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.accept_contact(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn block_contact(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.block_contact(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn rotate_invite(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Profile>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.rotate_invite(&p)?))
+}
+async fn invite(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(code): Path<String>,
+) -> Result<Json<Value>> {
+    s.principal(&h, false)?;
+    let (id, name) = s.db()?.invite_profile(&code)?;
+    Ok(Json(json!({"id":id,"name":name})))
+}
+#[derive(Deserialize)]
+struct ResolveInput {
+    contact: String,
+    agent: Option<String>,
+}
+async fn resolve(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<ResolveInput>,
+) -> Result<Json<Value>> {
+    let p = s.principal(&h, true)?;
+    let (owner_id, agent_id) = s.db()?.resolve(&p, &v.contact, v.agent.as_deref())?;
+    Ok(Json(json!({"owner_id":owner_id,"agent_id":agent_id})))
+}
+#[derive(Deserialize)]
+struct PageQuery {
+    before_time: Option<i64>,
+    before_id: Option<String>,
+}
+async fn tasks(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<PageQuery>,
+) -> Result<Json<Vec<TaskView>>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.tasks(&p, q.before_time.zip(q.before_id))?))
+}
+async fn new_task(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<NewTask>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    s.limit(&format!("tasks:{}", p.user_id), 30)?;
+    Ok(Json(s.db()?.create_task(&p, v)?))
+}
+async fn task(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.get_task(&p, &id)?))
+}
+#[derive(Deserialize)]
+struct PrepareInput {
+    lease: Option<String>,
+    draft: DraftInput,
+}
+async fn prepare(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<PrepareInput>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.prepare(
+        &p,
+        &id,
+        v.lease.as_deref(),
+        v.draft,
+    )?))
+}
+async fn stage_result(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<PrepareInput>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.stage_result(
+        &p,
+        &id,
+        v.lease.as_deref().unwrap_or(""),
+        v.draft,
+    )?))
+}
+#[derive(Deserialize)]
+struct DecisionInput {
+    version: u32,
+    digest: String,
+    decision: Decision,
+}
+async fn decide(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<DecisionInput>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(
+        s.db()?.decide(&p, &id, v.version, &v.digest, v.decision)?,
+    ))
+}
+async fn cancel(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.cancel(&p, &id)?))
+}
+async fn received(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.acknowledge(&p, &id)?))
+}
+#[derive(Deserialize)]
+struct LeaseInput {
+    lease: String,
+}
+#[derive(Deserialize)]
+struct PermissionInput {
+    lease: String,
+    permission: ToolPermissionInput,
+}
+#[derive(Deserialize)]
+struct PermissionDecision {
+    digest: String,
+    decision: Decision,
+}
+async fn request_permission(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<PermissionInput>,
+) -> Result<Json<ToolPermission>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.request_permission(
+        &p,
+        &id,
+        &v.lease,
+        v.permission,
+    )?))
+}
+async fn permission_status(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path((id, permission)): Path<(String, String)>,
+    Json(v): Json<LeaseInput>,
+) -> Result<Json<ToolPermission>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.permission_status(
+        &p,
+        &id,
+        &v.lease,
+        &permission,
+    )?))
+}
+async fn decide_permission(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path((id, permission)): Path<(String, String)>,
+    Json(v): Json<PermissionDecision>,
+) -> Result<Json<ToolPermission>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.decide_permission(
+        &p,
+        &id,
+        &permission,
+        &v.digest,
+        v.decision,
+    )?))
+}
+async fn heartbeat(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<LeaseInput>,
+) -> Result<Json<Status>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.heartbeat(&p, &id, &v.lease)?))
+}
+#[derive(Deserialize)]
+struct FinishInput {
+    lease: String,
+    receipt: Receipt,
+}
+async fn finish(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<FinishInput>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.finish(&p, &id, &v.lease, v.receipt)?))
+}
+#[derive(Deserialize)]
+struct UploadInput {
+    lease: Option<String>,
+    name: String,
+    media_type: String,
+    data: String,
+}
+async fn upload(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<UploadInput>,
+) -> Result<Json<Artifact>> {
+    let p = s.principal(&h, true)?;
+    let data = STANDARD
+        .decode(v.data)
+        .map_err(|_| Error::Invalid("The file encoding is invalid.".into()))?;
+    Ok(Json(s.db()?.upload(
+        &p,
+        &id,
+        v.lease.as_deref(),
+        &v.name,
+        &v.media_type,
+        &data,
+    )?))
+}
+async fn download(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response> {
+    let p = s.principal(&h, false)?;
+    let (file, bytes) = s.db()?.download(&p, &id)?;
+    let safe_name = file
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._- ".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let mut response = Body::from(Bytes::from(bytes)).into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "attachment; filename=\"{safe_name}\"; filename*=UTF-8''{}",
+            url::form_urlencoded::byte_serialize(file.name.as_bytes()).collect::<String>()
+        ))
+        .map_err(|e| Error::Internal(e.into()))?,
+    );
+    headers.insert(
+        "x-content-sha256",
+        HeaderValue::from_str(&file.sha256).map_err(|e| Error::Internal(e.into()))?,
+    );
+    Ok(response)
+}
+async fn claim(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Option<WorkItem>>> {
+    let p = s.principal(&h, true)?;
+    let agent = p.agent_id.as_deref().ok_or(Error::Unauthorized)?;
+    Ok(Json(s.db()?.claim(&p, agent)?))
+}
+#[derive(Deserialize)]
+struct EventQuery {
+    #[serde(default)]
+    after: i64,
+}
+async fn events(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<EventQuery>,
+) -> Result<Json<Vec<Event>>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.events(&p, q.after)?))
+}
+
+async fn channels(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(serde_json::to_value(s.db()?.channels(&p)?)?))
+}
+async fn enable_phone(State(s): State<AppState>, h: HeaderMap) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.enable_phone(&p)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+#[derive(Deserialize)]
+struct EmailInput {
+    email: String,
+}
+async fn start_email(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<EmailInput>,
+) -> Result<Json<crate::auth::OtpChallenge>> {
+    let p = s.principal(&h, true)?;
+    if !s.providers.email_available() {
+        return Err(Error::Unavailable(
+            "Email delivery is not enabled on this server.".into(),
+        ));
+    }
+    s.limit(&format!("email:{}", p.user_id), 5)?;
+    let email = crate::channels::email_address(&v.email)?;
+    let (challenge, code) = s.db()?.begin_email(&p, &email)?;
+    s.providers.email(&email,"Connect email to Litecom",&format!("Your Litecom email code is {code}. It expires in 10 minutes. If you did not request this, ignore it.")).await?;
+    Ok(Json(challenge))
+}
+#[derive(Deserialize)]
+struct EmailVerification {
+    id: String,
+    code: String,
+}
+async fn verify_email(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<EmailVerification>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.verify_email(&p, &v.id, &v.code)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn disable_channel(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.disable_channel(&p, &id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn start_slack(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>> {
+    let p = s.principal(&h, true)?;
+    let slack = s
+        .providers
+        .slack
+        .as_ref()
+        .ok_or_else(|| Error::Unavailable("Slack is not enabled on this server.".into()))?;
+    let start = s.db()?.begin_slack(&p)?;
+    Ok(Json(json!({"url":slack.authorize_url(&s.origin,&start)})))
+}
+#[derive(Deserialize)]
+struct SlackCallback {
+    state: String,
+    code: Option<String>,
+    error: Option<String>,
+}
+async fn slack_callback(
+    State(s): State<AppState>,
+    Query(v): Query<SlackCallback>,
+) -> Result<axum::response::Redirect> {
+    s.db()?.take_slack_link(&v.state)?;
+    if v.error.is_some() || v.code.is_none() {
+        return Ok(axum::response::Redirect::to(
+            "/slack/connected?error=cancelled",
+        ));
+    }
+    let slack = s
+        .providers
+        .slack
+        .as_ref()
+        .ok_or_else(|| Error::Unavailable("Slack is not enabled on this server.".into()))?;
+    match slack
+        .exchange(
+            s.providers.http(),
+            &s.origin,
+            v.code.as_deref().unwrap_or(""),
+        )
+        .await
+    {
+        Ok(destination) => {
+            s.db()?.stage_slack_link(&v.state, destination)?;
+            let encoded: String =
+                url::form_urlencoded::byte_serialize(v.state.as_bytes()).collect();
+            Ok(axum::response::Redirect::to(&format!(
+                "/slack/connected?state={encoded}"
+            )))
+        }
+        Err(_) => Ok(axum::response::Redirect::to(
+            "/slack/connected?error=failed",
+        )),
+    }
+}
+#[derive(Deserialize)]
+struct SlackFinish {
+    state: String,
+}
+async fn finish_slack(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<SlackFinish>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.finish_slack_link(&p, &v.state)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct RequestLookup {
+    key: String,
+}
+async fn lookup_request(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<RequestLookup>,
+) -> Result<Json<Option<TaskView>>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.lookup_request(&p, &v.key)?))
+}
+
+#[derive(Deserialize)]
+struct DownloadCheck {
+    sha256: String,
+}
+async fn download_received(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+    Json(v): Json<DownloadCheck>,
+) -> Result<Json<TaskView>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.acknowledge_download(&p, &id, &v.sha256)?))
+}
