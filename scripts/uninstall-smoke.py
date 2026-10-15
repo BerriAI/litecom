@@ -56,8 +56,12 @@ try:
         # Neither the executable nor the working folder still exists.
         runner.write_text(json.dumps({'agent': 'claude', 'executable': str(root/'missing-agent'),
                                       'workspace': str(root/'missing-working-folder')}))
+        # Rust's canonicalize uses extended-length paths on Windows, as setup does.
+        canonical_home = str(home.resolve())
+        if os.name == 'nt':
+            canonical_home = '\\\\?\\' + canonical_home
         owned = {'type': 'stdio', 'command': str(home/'bin'/executable),
-                 'args': ['--home', str(home.resolve()), '--connection', name, 'mcp']}
+                 'args': ['--home', canonical_home, '--connection', name, 'mcp']}
         wrong = dict(owned, args=['--home', str(root/'other-home'), '--connection', name, 'mcp'])
         original = {'mcpServers': {'owned': owned, 'another-home': wrong, 'other-tool': {'command': 'keep'}}, 'preference': True}
 
