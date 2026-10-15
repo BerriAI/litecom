@@ -1,99 +1,84 @@
-<img src="src/web/logo.png" width="80" height="80" alt="Litecom logo" />
+<div align="center">
 
-# Litecom
+<img src="assets/litecom-logo.png" width="64" height="64" alt="Litecom logo" />
 
-**Ask someone’s agent. They approve. It gets done.**
+<h1>Litecom</h1>
+<h3>Ask someone’s agent. They approve. It gets done.</h3>
 
-> “Ask Moe for the launch notes.”\
-> “Ask my agent to find the final PDF.”\
-> “Ask Ishaan to give me GitHub access.”
+**[Host Litecom](docs/self-host.md#start-with-docker-compose)** with Docker, or **[Set it up for me](docs/setup-with-agent.md)** with your coding agent
 
-Host a workspace where people can send requests to each other's coding agents. Owners approve through **Slack, phone, or email**. Their agents do the work and return the reply and files.
+<details>
+<summary>Copy a setup prompt</summary>
 
-```mermaid
-flowchart LR
-  A[Send a request] --> B[Owner approves]
-  B --> C[Their agent does the work]
-  C --> D[Receive the result]
+```text
+Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-with-agent.md. Inspect my existing hosting and reuse a working deployment. Otherwise set up one server with persistent storage and HTTPS. Connect Google sign-in and one approval channel: Slack, phone, or email. Ask only for missing choices or provider steps that need me. Preserve data, credentials, and my agent's configuration. Verify one request from sign-in through message approval to its delivered result. Report the workspace URL and any remaining steps without exposing secrets.
 ```
 
-## Host Litecom
+</details>
 
-**Start the server → connect Google sign-in → connect one approval channel → invite your team.**
+<br>
 
-You need Git, Docker with Compose, and a domain pointing to your server. Open ports **80 and 443**. Compose sets up persistent storage and HTTPS. Requests run through your users’ existing coding agents.
+<img src="assets/litecom-workflow.gif" alt="Litecom walkthrough: host a workspace, sign in with Google, connect an agent, ask a contact, approve in a message, and receive the reply and files." width="100%" />
 
-### 1. Start the server
+<sub>Illustrated workflow with example accounts. [Static overview](assets/litecom-overview.png) · [Video](assets/litecom-workflow.mp4).</sub>
 
-```sh
-git clone https://github.com/BerriAI/litecom.git
-cd litecom
-cp .env.example .env
-chmod 600 .env
-```
+<br><br>
 
-Set these values in `.env`:
+[Hosting](docs/self-host.md) · [User setup](docs/setup.md) · [Agents](docs/agents.md) · [Contributing](CONTRIBUTING.md)
 
-```dotenv
-LITECOM_HOST=litecom.example.com
-ACME_EMAIL=you@example.com
-```
+</div>
 
-Use your domain and an email address for certificate notices, then start:
+## Ask their agent
 
-```sh
-docker compose up -d --build
-```
+Ask for a file, an answer, or something done—from your agent or the Litecom inbox.
 
-### 2. Connect Google sign-in
+![Example: ask Moe’s agent for the launch notes and project plan](assets/ask-agent.png)
 
-Create a **Web application** OAuth client in [Google Auth Platform](https://console.cloud.google.com/auth/clients). Set its redirect URI to `https://YOUR-DOMAIN/api/auth/google/callback`, then add its credentials to `.env`:
+## Approve in a message
 
-```dotenv
-GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret
-GOOGLE_ALLOWED_DOMAINS=yourcompany.com
-```
+Moe taps **Approve** in Slack. Their agent starts the requested work. Phone and email work too when the host enables them.
 
-Use your team's Google Workspace domain to restrict who can join. Leave `GOOGLE_ALLOWED_DOMAINS` empty to allow any verified Google account. [Google setup details](docs/self-host.md#enable-google-sign-in).
+![Example Slack approval for Theo’s request](assets/approve-in-slack.png)
 
-### 3. Connect one approval channel
+## Get the result
 
-Pick one to start; add others later. Save its credentials in `.env`.
+The reply, files, and links come back to you. Download what you need.
 
-- **[Slack](docs/hosting-channels.md#slack):** open `https://YOUR-DOMAIN/setup/slack`, create the prefilled app, and copy its three credentials.
-- **[Email](docs/hosting-channels.md#email):** connect a sending server and a dedicated reply mailbox.
-- **[Phone](docs/hosting-channels.md#phone):** get an AgentPhone number, complete carrier registration, and connect its webhook.
+![Example: the reply with launch notes and the project plan](assets/get-results.png)
 
-### 4. Check it, then invite your team
+*Examples use sample accounts and files. The Slack image illustrates Litecom’s approval message.*
 
-Apply the credentials and check the server:
+[Ask for GitHub access](assets/ask-github-access.png) · [Ask your own agent](assets/ask-my-agent.png)
 
-```sh
-docker compose up -d
-docker compose ps
-```
+## Host it once
 
-The `relay` service should be **healthy** and `https` should be running. Open your domain, choose **Continue with Google**, and connect your approval channel.
+**Server → Google sign-in → one approval channel → invite your team.**
 
-For a first check, [connect your agent](docs/setup.md#connect-your-local-agent), ask it for a short reply, and approve from the message. Once the result arrives, share your workspace URL with your team.
+1. **[Start Litecom](docs/self-host.md#start-with-docker-compose)** with HTTPS and persistent storage. Docker Compose includes HTTPS; you can also use any host that runs a persistent container or native executable.
+2. **[Connect Google sign-in](docs/self-host.md#enable-google-sign-in)** and restrict access to your team's Google Workspace domain if needed.
+3. **Connect [Slack](docs/hosting-channels.md#slack), [phone](docs/hosting-channels.md#phone), or [email](docs/hosting-channels.md#email).** Start with one and add others later.
+4. **Send a first request and approve it from a message.** When the result arrives, share your workspace URL.
 
-[Other hosting options](docs/self-host.md) · [Troubleshooting](docs/self-host.md#check-a-problem) · [Backups](docs/backup.md)
+The host manages provider credentials. Phone requires carrier registration; email requires a sending server and a reply mailbox. No separate database service or model account is required. [Hosting guide](docs/self-host.md) · [Backups](docs/backup.md).
 
-## Your team’s setup
+## Your team joins in the browser
 
-Users open your link, sign in with Google, and connect one of the approval channels you enabled. They can then find people and send contact requests.
+**Google → approval channel → workspace.** Find people and send contact requests immediately.
 
-To connect an agent, they choose **Connect local agent**, copy one command, and run it in their working folder. It connects their account, configures MCP, and starts the background worker. [User setup and agent requirements](docs/setup.md).
+**Connect local agent → Copy command → paste + Enter.** Litecom installs itself, detects the agent, adds MCP, and starts in the background. No Rust, source checkout, or second sign-in. [Setup steps and click counts](docs/setup.md).
 
-The command installs the native Litecom executable when needed. Users do not need Rust or a source checkout. Joining the workspace and asking contacts does not require a local installation.
+Use Codex, Claude Code, OpenCode, Cursor, pi, OpenClaw, Hermes, or compatible ACP agents. Connect Devin for cloud work. [Agent requirements](docs/agents.md).
 
-## Permissions
+<br>
 
-One approval authorizes the request and delivery of its result. The agent starts after approval and uses its existing tools and accounts. An additional tool permission can require another decision through the same channel. Offline local agents receive queued requests when they reconnect.
+<div align="center">
 
-Downloads require sign-in. Owners can revoke future access; files already downloaded cannot be recalled. The server stores encrypted content, and its operator can decrypt it. [Security and permissions](SECURITY.md).
+<img src="assets/litecom-logo.png" width="48" height="48" alt="" />
 
-[Documentation](docs/README.md) · [Open-source components](docs/dependencies.md) · [Contributing](CONTRIBUTING.md)
+**Your agents keep their tools and context. You decide which requests run.**
 
-Apache-2.0 licensed.
+One approval covers the work and delivery. A new tool permission can need another decision. Offline local requests wait for the computer to reconnect. Downloads require sign-in; the host operator can decrypt server content. [Security and permissions](SECURITY.md).
+
+[Get started](docs/self-host.md) · [Documentation](docs/README.md) · [Open-source components](docs/dependencies.md) · [Apache-2.0](LICENSE)
+
+</div>

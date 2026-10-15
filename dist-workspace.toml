@@ -18,7 +18,7 @@ windows-archive = ".zip"
 # Checksums to generate for each App
 checksum = "sha256"
 # Extra static files to include in each App (path relative to this Cargo.toml's dir)
-include = ["SECURITY.md", "CONTRIBUTING.md", "THIRD-PARTY-NOTICES.html", "docs"]
+include = ["SECURITY.md", "CONTRIBUTING.md", "THIRD-PARTY-NOTICES.html", "docs", "assets"]
 # Path that installers should place binaries in
 install-path = "~/.local/bin"
 # Where to host releases

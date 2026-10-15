@@ -281,7 +281,7 @@ pub fn router(state: AppState) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "image/png")],
-                    include_bytes!("web/logo.png").as_slice(),
+                    include_bytes!("../assets/litecom-logo.png").as_slice(),
                 )
             }),
         )

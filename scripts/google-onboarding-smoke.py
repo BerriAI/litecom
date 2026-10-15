@@ -36,7 +36,9 @@ with sync_playwright() as p:
                         request.fulfill(content_type='text/html',body='<h1>Fixture Slack consent</h1><a href="/slack/connected?state=fixture">Allow</a>'); return
                     elif path=='/api/agents': data=state['agents']
                     elif path=='/api/people': data=[{'id':'ishaan','name':'Ishaan','status':'available','agents':[{'name':'Devin','kind':'devin','connected':True}]}]
-                    elif path=='/app.js' or path=='/style.css' or path=='/logo.png' or path.startswith('/fonts/'):
+                    elif path=='/logo.png':
+                        request.fulfill(path='assets/litecom-logo.png'); return
+                    elif path=='/app.js' or path=='/style.css' or path.startswith('/fonts/'):
                         request.fulfill(path=str(web/path.lstrip('/'))); return
                     elif not path.startswith('/api/'):
                         request.fulfill(path=str(web/'index.html'),content_type='text/html'); return

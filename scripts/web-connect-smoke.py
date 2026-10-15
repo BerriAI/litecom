@@ -86,7 +86,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             assert first_agent['name']==first_agent['local']['device_name']
             expect(page.locator('#your-agents')).to_contain_text(first_agent['name']+' · Codex')
             page.get_by_role('link',name='Ask '+first_agent['name']+' · Codex',exact=True).click()
-            expect(page.get_by_label('Agent',exact=True)).to_have_value(first_agent['id'])
+            expect(page.get_by_role('combobox',name='Agent',exact=True)).to_have_value(first_agent['id'])
             page.goto(origin+'/workspace')
             page.screenshot(path=str(shots/'connected-mobile.png'),full_page=True)
             repeated=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)

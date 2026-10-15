@@ -72,9 +72,11 @@ The Compose route below builds the container from source and adds HTTPS for a se
 
 You need the [source checkout](https://github.com/BerriAI/litecom), Docker with Compose, and a server with a domain pointing to it. Allow inbound ports **80 and 443**. You also need Google OAuth credentials and at least one configured approval provider. [Provider setup](hosting-channels.md) covers the required values.
 
-From the repository folder:
+Clone the repository and prepare its configuration:
 
 ```sh
+git clone https://github.com/BerriAI/litecom.git
+cd litecom
 cp .env.example .env
 chmod 600 .env
 ```
