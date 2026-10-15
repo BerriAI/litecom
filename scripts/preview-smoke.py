@@ -103,6 +103,8 @@ output.write_text(json.dumps({'text':'Here is the sample file you requested.', '
         try:
             until('Where do you want to approve requests?')
             os.write(master,b'\r')
+            until('Which agent should handle your requests?')
+            os.write(master,b'\r')
             until('?approve=phone')
             connect = re.search(r'http://127\.0\.0\.1:\d+/connect/[A-Za-z0-9-]+\?approve=phone',output).group(0)
             origin = connect.split('/connect/')[0]
@@ -117,8 +119,7 @@ output.write_text(json.dumps({'text':'Here is the sample file you requested.', '
             page.get_by_label('Sign-in code').fill(code)
             page.get_by_role('button',name='Continue',exact=True).click()
             page.get_by_role('button',name='Connect agent',exact=True).click()
-            until('Which agent should handle your requests?')
-            os.write(master,b'\r')
+
             until('Your first request is ready.')
             request = re.search(r'http://127\.0\.0\.1:\d+/request/[a-f0-9-]+',output).group(0)
             page.goto(request)

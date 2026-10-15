@@ -47,38 +47,69 @@ impl Store {
         Ok(())
     }
     pub fn begin_email(&self, p: &Principal, email: &str) -> Result<(OtpChallenge, String)> {
-        p.human()?;
         let email = email_address(email)?;
+        self.begin_channel(p, &email, "email")
+    }
+    pub fn begin_phone(&self, p: &Principal, phone: &str) -> Result<(OtpChallenge, String)> {
+        validate(
+            phone.starts_with('+')
+                && !phone.starts_with("+0")
+                && (2..=16).contains(&phone.len())
+                && phone[1..].bytes().all(|b| b.is_ascii_digit()),
+            "Enter your phone number with country code.",
+        )?;
+        self.begin_channel(p, phone, "phone")
+    }
+    fn begin_channel(
+        &self,
+        p: &Principal,
+        email: &str,
+        kind: &str,
+    ) -> Result<(OtpChallenge, String)> {
+        p.human()?;
         self.transaction(||{
-            let destination_key=self.vault.fingerprint("email",email.as_bytes());
+            let destination_key=self.vault.fingerprint(kind,email.as_bytes());
             let count:i64=self.db.query_row("SELECT COUNT(*) FROM channel_challenges WHERE (user_id=? OR destination_key=?) AND expires_at>?",params![p.user_id,destination_key,self.time()-3000],|r|r.get(0))?;
             if count>=5{return Err(Error::RateLimited);}
             let recent:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM channel_challenges WHERE user_id=? AND expires_at>?)",params![p.user_id,self.time()+540],|r|r.get(0))?;
             if recent{return Err(Error::RateLimited);}
             let challenge=id();
             let code=format!("{:06}",rand::thread_rng().gen_range(0..1_000_000));
-            self.db.execute("INSERT INTO channel_challenges(id,user_id,credential_id,destination_key,code_hash,data,expires_at) VALUES(?,?,?,?,?,?,?)",params![challenge,p.user_id,p.credential_id,destination_key,self.vault.fingerprint(&format!("email:{challenge}"),code.as_bytes()),self.vault.seal(&email,&format!("email:{challenge}"))?,self.time()+600])?;
+            self.db.execute("INSERT INTO channel_challenges(id,user_id,credential_id,destination_key,code_hash,data,expires_at,kind) VALUES(?,?,?,?,?,?,?,?)",params![challenge,p.user_id,p.credential_id,destination_key,self.vault.fingerprint(&format!("email:{challenge}"),code.as_bytes()),self.vault.seal(&email,&format!("email:{challenge}"))?,self.time()+600,kind])?;
             Ok((OtpChallenge{id:challenge,expires_in:600},code))
         })
     }
     pub fn verify_email(&self, p: &Principal, challenge: &str, code: &str) -> Result<()> {
+        self.verify_channel(p, challenge, code, "email")
+    }
+    pub fn verify_phone(&self, p: &Principal, challenge: &str, code: &str) -> Result<()> {
+        self.verify_channel(p, challenge, code, "phone")
+    }
+    fn verify_channel(&self, p: &Principal, challenge: &str, code: &str, kind: &str) -> Result<()> {
         p.human()?;
         // Return an invalid result after committing the attempt count.
         let valid=self.transaction(||{
-            let row=self.db.query_row("SELECT user_id,credential_id,code_hash,data,expires_at,attempts,used FROM channel_challenges WHERE id=?",[challenge],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Vec<u8>>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?,r.get::<_,bool>(6)?))).optional()?;
+            let row=self.db.query_row("SELECT user_id,credential_id,code_hash,data,expires_at,attempts,used FROM channel_challenges WHERE id=? AND kind=?",[challenge,kind],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Vec<u8>>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?,r.get::<_,bool>(6)?))).optional()?;
             let Some((user,credential,expected,data,expires,attempts,used))=row else{return Ok(false)};
-            require(user==p.user_id && credential==p.credential_id,"Use the browser that requested this email code.")?;
+            require(user==p.user_id && credential==p.credential_id,"Use the browser that requested this code.")?;
             if used || expires<=self.time() || attempts>=5{return Ok(false);}
             self.db.execute("UPDATE channel_challenges SET attempts=attempts+1 WHERE id=?",[challenge])?;
             if !equal(&expected,&self.vault.fingerprint(&format!("email:{challenge}"),code.as_bytes())){return Ok(false);}
             let email:String=self.vault.open(&data,&format!("email:{challenge}"))?;
-            self.verified_channel(p,"email",&email)?;
+            if kind == "phone" {
+                let fingerprint = self.vault.fingerprint("phone", email.as_bytes());
+                let owner: Option<String> = self.db.query_row("SELECT id FROM profiles WHERE phone_key=?", [&fingerprint], |r| r.get(0)).optional()?;
+                crate::error::conflict(owner.as_deref().is_none_or(|id| id == p.user_id), "This number belongs to another Litecom account. Sign in to that account to manage it.")?;
+                let count = self.db.execute("UPDATE profiles SET phone_key=?,phone=? WHERE id=? AND (phone_key IS NULL OR phone_key=?)", params![fingerprint, self.vault.seal(&email,&format!("phone:{}",p.user_id))?,p.user_id,fingerprint])?;
+                crate::error::conflict(count == 1, "This account already has a different phone number.")?;
+            }
+            self.verified_channel(p,kind,&email)?;
             self.db.execute("UPDATE channel_challenges SET used=1 WHERE id=?",[challenge])?;
             Ok(true)
         })?;
         validate(
             valid,
-            "That email code is incorrect or expired. Request another code and try again.",
+            "That code is incorrect or expired. Request another code and try again.",
         )
     }
 }

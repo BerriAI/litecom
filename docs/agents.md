@@ -11,7 +11,7 @@ Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp an
 | OpenCode | `opencode acp`. Setup adds MCP tools to ordinary and receiving sessions; checked with 1.18.29. |
 | Cursor | Signed-in Cursor CLI: `cursor-agent acp` or `agent acp`. Setup saves and enables MCP tools; receiving sessions reuse the existing login. Interactive question/plan extensions are not implemented. |
 | Pi | Node.js 22+, signed-in Pi, and `pi-acp` 0.0.34. Automatic MCP setup checked with Pi 1.2.0. See [Pi limitations](acp.md#pi). |
-| OpenClaw | `openclaw acp` with a configured gateway. Setup uses its native MCP command; a running gateway may need stopping first. |
+| OpenClaw | `openclaw acp` with a configured gateway. Native MCP setup checked with 2026.10.3; a running gateway may need stopping first. |
 | Hermes | `hermes acp` with its ACP dependencies and configured gateway. Setup saves native MCP tools; session MCP needs gateway support. |
 | Devin | Cloud API with an existing account and API access. The relay runs and monitors requests. |
 

@@ -6,27 +6,21 @@
 > “Ask my agent to find the final PDF.”\
 > “Ask Ishaan to give me GitHub access.”
 
-One phone account. Your contacts and agents in one place. Approve requests on **Phone, Slack, or Email**; add other channels later.
+One account. Your contacts and agents in one place. Approve requests on **Phone, Slack, or Email**; add other channels later.
 
 ## Get started
 
-Install and sign in to a [supported coding agent](docs/agents.md), then download Litecom for your computer:
+1. Open your team’s Litecom link and **Continue with Google**.
+2. Choose **Phone**, **Slack**, or **Email** for approvals. Only channels enabled by your host appear.
+3. You’re in. Find people in the workspace and send a contact request.
 
-[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
+To connect your own [coding agent](docs/agents.md), choose **Connect local agent**, copy the command, and run it in your working folder. It installs Litecom if needed, connects your account, configures MCP, and starts the background worker. When it says **Connected**, you can receive requests and ask other people from that agent.
 
-Extract the download and run the setup command from your Litecom operator:
+No Rust, repository clone, or messaging-provider account required. Your coding agent must already be installed and signed in. Start a new agent conversation if the open one does not reload MCP tools.
 
-```sh
-./litecom setup --relay https://YOUR-SERVER
-```
+**Running the shared service?** [Set up Google sign-in and your approval channels once](docs/self-host.md). Everyone else follows the steps above.
 
-Replace `https://YOUR-SERVER` with their address. On Windows, use `./litecom.exe`. Choose **Phone**, **Slack**, or **Email** for approvals, verify your phone, and pick your installed agent. Litecom connects it and runs in the background.
-
-No Rust, Node, repository clone, or messaging-provider account is needed for Litecom; your agent may have its own requirements. Downloads require repository access until this repository is public.
-
-**Running the shared service?** [Set up the server and phone number once](docs/self-host.md). Everyone else follows the short setup above.
-
-**Trying it locally first?** Run `./litecom try`. It prints sign-in codes in the terminal, sends no messages, and opens a sample request. Your agent's normal billing applies after approval. **Ctrl+C** removes the temporary tryout data.
+[Setup details and step counts](docs/setup.md) · [Native downloads and local tryout](docs/distribution.md)
 
 ## Use it with people
 
@@ -37,7 +31,7 @@ flowchart TD
   C --> D[Read the reply · download the files]
 ```
 
-Share your contact link. They connect, you accept, and then you can ask by name from a connected agent. Every person chooses their default agent; you can also select a named one. Requests for an offline local agent wait until it reconnects.
+Send a contact request from the workspace, or share your contact link. Once they accept, ask by name from a connected agent. Every person chooses their default agent; you can also select a named one. Requests for an offline local agent wait until it reconnects.
 
 Work runs through that agent's existing tools and accounts. Litecom handles the request, approval, and delivery.
 

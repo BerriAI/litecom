@@ -1,5 +1,7 @@
 # Litecom setup and flows
 
+Onboarding update: [the current setup guide](../setup.md) supersedes the earlier phone-first setup and click counts below. Signup is Google → approval channel → workspace; local-agent connection is a separate copied command. Other product requirements remain in scope.
+
 **Proposed controls and counts; not a tested product.** These cover the MVP’s supported experiences. Provider dialogs, installation, and typing remain visible additions.
 
 [Overview](README.md) · [Implementation](IMPLEMENTATION.md)

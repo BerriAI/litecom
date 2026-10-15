@@ -43,3 +43,11 @@ Devin uses the same single request approval for launch and result delivery. The 
 ## Reporting a vulnerability
 
 Do not post credentials, private files, phone numbers, or live exploit details in public issues. Private vulnerability reporting and a maintainer contact must be configured when the GitHub repository is published.
+
+## Google sign-in
+
+Google sign-in uses `openidconnect` for authorization-code exchange with PKCE and RS256 ID-token verification. One-use state is encrypted, expires after ten minutes, and is bound to an HttpOnly browser cookie. Signature, issuer, audience, authorized party, expiry, nonce, verified email, and configured Workspace domains are checked. The Google subject is the identity key; matching email addresses never merge accounts. Workspace domain policy is rechecked for existing human and agent credentials.
+
+The transitive `rsa` dependency has [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071.html), an unpatched private-key timing disclosure. Production Litecom performs public-key signature verification only; it does not load an RSA private key, sign RSA tokens, or decrypt RSA ciphertext. The generated public test key is used only in `#[cfg(test)]` code. `deny.toml` records this specific non-reachable advisory exception. Reassess it if RSA private-key operations are ever introduced.
+
+The workspace directory exposes member names and agent names to signed-in members. It does not expose phone numbers, email addresses, private configuration, or invitations. Configure `GOOGLE_ALLOWED_DOMAINS` when the directory should be limited to a Google Workspace organization. Local connection commands contain a short-lived, one-use agent-pairing credential; keep them private and never include them in logs or screenshots shared with others.

@@ -1,6 +1,6 @@
 # Approve where you are
 
-Choose **Phone**, **Slack**, or **Email** during setup. Add another destination later in **Settings → Approval channels**. They all belong to the same phone account.
+Choose **Phone**, **Slack**, or **Email** during setup. Add another destination later in **Settings → Approval channels**. They all belong to the same Litecom account. Google sign-in is separate from approval delivery; Slack and email do not require a phone number.
 
 | Channel | Approve a request | Required actions |
 | --- | --- | --- |
@@ -20,9 +20,7 @@ Remove a channel in **Settings** to stop notifications and invalidate its outsta
 
 ## Setup effort
 
-After installation and native-agent sign-in, the measured Phone setup uses **six activations and three fields**: select Phone, enter name/phone/code, connect the device, confirm the agent, and confirm the folder. Email adds two buttons and two fields. Slack adds its workspace consent flow, whose controls depend on workspace policy.
-
-These counts exclude obtaining the binary and server address, reading codes, and operating-system prompts. See [the measured setup path](setup.md#how-much-work-is-setup).
+After Google sign-in, Email needs one confirmation of your Google address; Slack opens its consent screen; Phone asks for a number and code. You can join the workspace before installing an agent. [All setup counts and prerequisites](setup.md#how-many-steps) are listed together.
 
 ## Configure the relay
 
@@ -101,11 +99,12 @@ Treat that mailbox and the connected email accounts as approval credentials. Do 
 
 Create a Slack app using [server-side OAuth](https://docs.slack.dev/authentication/installing-with-oauth/).
 
-1. Add a bot user with scopes `chat:write` and `im:write`.
-2. In **OAuth & Permissions**, add `https://YOUR_RELAY_HOST/oauth/slack/callback` as a redirect URL.
-3. In **Interactivity & Shortcuts**, enable interactivity and set the request URL to `https://YOUR_RELAY_HOST/webhooks/slack`.
-4. Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and `SLACK_SIGNING_SECRET` from **Basic Information → App Credentials** on the relay, then restart it.
-5. In Litecom, choose **Settings → Connect Slack** and allow the workspace app.
+1. Open `https://YOUR_RELAY_HOST/setup/slack`, replacing the host with your running Litecom server. This opens Slack’s app creation flow with its name, bot scopes, OAuth callback, and interactive-message URL prefilled. Select your workspace and create the app.
+2. Copy **Client ID**, **Client Secret**, and **Signing Secret** from **Basic Information → App Credentials** into `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and `SLACK_SIGNING_SECRET` on the relay. Restart it.
+3. In Litecom, choose **Connect Slack** and allow the app. To serve other Slack workspaces, enable distribution in the Slack app’s settings; their administrators may restrict installation.
+4. Send a test request and approve it in the resulting DM. Verify that the result arrives and the original approval message updates.
+
+The generated [Slack app manifest](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/) requests only `chat:write` and `im:write`. For manual setup, the OAuth callback is `/oauth/slack/callback` and the Interactivity request URL is `/webhooks/slack`, both under your public HTTPS address.
 
 Do not enable Slack's public-client PKCE option for this server-side app. Token rotation is supported. Workspace administrators may need to allow installation.
 

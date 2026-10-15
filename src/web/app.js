@@ -2,6 +2,8 @@ const app = document.querySelector("#app"),
   nav = document.querySelector("#nav");
 let profile,
   capabilities,
+  account,
+  localPairing,
   currentTask,
   busy = false,
   challenge;
@@ -129,58 +131,176 @@ async function boot() {
     try {
       profile = await api("/api/me");
     } catch (e) {
+      if (e.status === 403) {
+        login();
+        error(e);
+        return;
+      }
       if (e.status !== 401) throw e;
     }
-    if (!profile) return login();
-    if (sessionStorage.getItem("approval-channel") === "phone") {
-      await api("/api/channels/phone", {});
-      sessionStorage.removeItem("approval-channel");
+    if (!profile) {
+      const pending = sessionStorage.getItem("phone-challenge");
+      if (pending) {
+        try {
+          challenge = JSON.parse(pending);
+          if (challenge.expires_at > Date.now()) return phoneCode();
+        } catch {}
+        sessionStorage.removeItem("phone-challenge");
+      }
+      return login();
     }
-    if (location.pathname === "/slack/connected") return slackConnected();
-    if (
-      sessionStorage.getItem("approval-channel") === "email" &&
-      !(await api("/api/channels")).some(
-        (c) => c.kind === "email" && c.verified,
-      )
-    )
-      return emailSetup();
-    if (
-      sessionStorage.getItem("approval-channel") === "slack" &&
-      !(await api("/api/channels")).some(
-        (c) => c.kind === "slack" && c.verified,
-      )
-    )
-      return slackSetup();
+    account = await api("/api/account");
+    if (location.pathname === "/slack/connected") return await slackConnected();
+    const channels = await api("/api/channels");
+    const selected = sessionStorage.getItem("approval-channel");
+    if (selected && !channels.some((c) => c.kind === selected && c.verified)) {
+      if (!availableChannels().includes(selected)) {
+        sessionStorage.removeItem("approval-channel");
+        return approvalSetup(
+          "That channel is not available on this server. Choose another.",
+        );
+      }
+      if (selected === "phone") {
+        if (!account.has_phone) return phoneSetup();
+        await api("/api/channels/phone", {});
+      } else if (selected === "slack") return await slackSetup();
+      else {
+        emailSetup();
+        const address = sessionStorage.getItem("approval-email-pending");
+        if (address && !sessionStorage.getItem("email-challenge")) {
+          sessionStorage.removeItem("approval-email-pending");
+          await startEmail(address);
+        }
+        return;
+      }
+    } else if (
+      !selected &&
+      !channels.some((c) => c.verified && availableChannels().includes(c.kind))
+    ) {
+      return approvalSetup();
+    }
+    sessionStorage.removeItem("approval-channel");
     nav.innerHTML =
-      '<a href="/">Inbox</a><a href="/contacts">Contacts</a><a href="/agents">Agents</a><a href="/settings">Settings</a>';
+      '<a href="/workspace">Workspace</a><a href="/">Inbox</a><a href="/contacts">Contacts</a><a href="/agents">Agents</a><a href="/settings">Settings</a>';
     await render();
   } catch (e) {
     error(e);
   }
 }
+function availableChannels() {
+  return ["phone", "slack", "email"].filter(
+    (kind) =>
+      capabilities[kind] &&
+      (capabilities.development || capabilities.direct_approvals?.[kind]),
+  );
+}
+function approvalSetup(message = "") {
+  nav.innerHTML = "";
+  const labels = { phone: "Phone", slack: "Slack", email: "Email" };
+  const details = {
+    phone: "Confirm your number. Approve by text.",
+    slack: "Connect Slack. Approve in a direct message.",
+    email: account?.google_email
+      ? `Use ${account.google_email}. Approve by replying.`
+      : "Confirm your address. Approve by replying.",
+  };
+  const kinds = availableChannels();
+  app.innerHTML = `<section class="narrow"><h1>Where do you want to approve requests?</h1><p class="muted">Choose one to get started. Add others in Settings whenever you want.</p>${message ? `<p class="error" role="alert">${esc(message)}</p>` : ""}${kinds.map((kind) => `<section class="card"><h2>${labels[kind]}</h2><p class="muted">${esc(details[kind])}</p><button data-action="choose-channel" data-id="${kind}">Connect ${labels[kind]}</button></section>`).join("")}${!kinds.length ? '<p class="banner">The host has not enabled an approval channel yet. You can return here when it is ready.</p>' : ""}<button data-action="logout">Sign out</button></section>`;
+}
+function phoneSetup() {
+  const pending = sessionStorage.getItem("phone-link-challenge");
+  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your phone" : "Approve requests by text"}</h1><p class="muted">Reply APPROVE and the request code to let your agent do the work and send its result. Message rates may apply; reply STOP to unsubscribe.</p>${pending ? '<form id="phone-link-verify"><label>Phone code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect phone</button></form><button data-action="restart-phone-link">Use another number</button>' : '<form id="phone-link-start"><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><button class="primary">Send code</button></form>'}<button data-action="choose-another-channel">Choose another channel</button></section>`;
+}
 function login() {
   nav.innerHTML = "";
+  if (capabilities.google) {
+    const next =
+      location.pathname === "/"
+        ? "/workspace"
+        : location.pathname + location.search;
+    app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p><a class="button primary" href="/api/auth/google?next=${encodeURIComponent(next)}">Continue with Google</a><p class="muted subtitle">Next, choose where to receive approvals. Your name and connected agents are visible to people in this workspace.</p>${new URLSearchParams(location.search).has("signin") ? '<p class="error" role="alert">Sign-in was not completed. Try again.</p>' : ""}${capabilities.phone_signin ? '<button data-action="phone-login">Sign in with phone instead</button>' : ""}</section>`;
+    return;
+  }
+  phoneLogin();
+}
+function phoneLogin() {
   const requested = new URLSearchParams(location.search).get("approve");
   const chosen = ["phone", "slack", "email"].includes(requested)
     ? requested
     : null;
   if (chosen) sessionStorage.setItem("approval-channel", chosen);
-  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${chosen ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>` : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${["Phone", "Slack", "Email"].map((c, i) => `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`).join("")}</div></fieldset>`}<label>Your name<input name="name" autocomplete="name" required></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone connects all your agents to one account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${
+    chosen
+      ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>`
+      : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${availableChannels()
+          .map((c) => ({ phone: "Phone", slack: "Slack", email: "Email" })[c])
+          .map(
+            (c, i) =>
+              `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`,
+          )
+          .join("")}</div></fieldset>`
+  }<label>Your name<input name="name" autocomplete="name" required></label><label id="approval-email-field" hidden>Email for approvals<input name="approval_email" type="email" autocomplete="email" disabled></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone signs you in to this account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
+  syncApprovalFields();
+}
+function syncApprovalFields() {
+  const form = document.getElementById("login");
+  if (!form) return;
+  const email = new FormData(form).get("channel") === "email";
+  const field = document.getElementById("approval-email-field");
+  field.hidden = !email;
+  const input = field.querySelector("input");
+  input.disabled = !email;
+  input.required = email;
+}
+function phoneCode() {
+  app.innerHTML = `<section class="narrow"><h1>Check your phone</h1><p class="muted">Enter the six-digit code. It expires in 10 minutes.</p><form id="verify"><label>Sign-in code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Continue</button></form><p><button data-action="restart-login">Use another number</button></p></section>`;
+}
+async function startEmail(address) {
+  const c = await api("/api/channels/email/start", { email: address });
+  sessionStorage.setItem("email-challenge", c.id);
+  emailSetup();
 }
 
-function slackSetup() {
+async function startSlack() {
+  if (location.pathname !== "/slack/connected") {
+    const returnTo = location.pathname + location.search;
+    sessionStorage.setItem("slack-return", returnTo);
+    sessionStorage.setItem("slack-started-url", returnTo);
+  }
+  const link = await api("/api/channels/slack/start", {});
+  location.assign(link.url);
+}
+async function slackSetup() {
   app.innerHTML =
-    '<section class="narrow"><h1>Approve requests in Slack</h1><p class="muted">Connect the Litecom app to your workspace. It sends you a direct message with a review link and updates that message when the request changes.</p><button class="primary" data-action="add-slack">Connect Slack</button></section>';
+    '<section class="narrow"><h1>Approve requests in Slack</h1><p class="muted">Allow Litecom in your workspace to receive requests by direct message. Tap Approve in Slack to let your agent do the work and send its result.</p><button class="primary" data-action="add-slack">Continue to Slack</button><button data-action="choose-another-channel">Choose another channel</button></section>';
+  // Choosing Slack already expresses intent. Go straight to its consent page,
+  // but do not send the user back there automatically after Back or a failure.
+  if (
+    sessionStorage.getItem("slack-started-url") !==
+    location.pathname + location.search
+  ) {
+    const button = app.querySelector("[data-action=add-slack]");
+    button.disabled = true;
+    button.textContent = "Opening Slack…";
+    try {
+      await startSlack();
+    } catch (e) {
+      button.disabled = false;
+      button.textContent = "Try again";
+      throw e;
+    }
+  }
 }
 async function slackConnected() {
   const params = new URLSearchParams(location.search);
   if (params.has("error")) {
     app.innerHTML =
-      '<section class="narrow"><h1>Slack was not connected.</h1><p class="muted">You can retry, or ask your workspace administrator to allow the Litecom app.</p><button class="primary" data-action="add-slack">Try again</button></section>';
+      '<section class="narrow"><h1>Slack was not connected.</h1><p class="muted">You can retry, or ask your workspace administrator to allow the Litecom app.</p><button class="primary" data-action="add-slack">Try again</button><button data-action="choose-another-channel">Choose another channel</button></section>';
     return;
   }
   await api("/api/channels/slack/finish", { state: params.get("state") });
   sessionStorage.removeItem("approval-channel");
+  sessionStorage.removeItem("slack-started-url");
   const next = new URL(
     sessionStorage.getItem("slack-return") || "/settings",
     location.origin,
@@ -199,7 +319,7 @@ async function slackConnected() {
 
 function emailSetup() {
   const pending = sessionStorage.getItem("email-challenge");
-  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your email" : "Approve requests by email"}</h1><p class="muted">Your phone account stays the same. Email receives a link to review each request.</p>${capabilities.development ? '<p class="banner">Local development: email codes print in the relay terminal.</p>' : ""}${pending ? `<form id="email-verify"><label>Email code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect email</button></form><button data-action="restart-email">Use another email</button>` : `<form id="email-start"><label>Email address<input name="email" type="email" autocomplete="email" required></label><button class="primary">Send email code</button></form>`}</section>`;
+  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your email" : "Approve requests by email"}</h1><p class="muted">Reply Approve to a request email to let your agent do the work and send its result.</p>${capabilities.development ? '<p class="banner">Local development: email codes print in the relay terminal.</p>' : ""}${pending ? `<form id="email-verify"><label>Email code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect email</button></form><button data-action="restart-email">Use another email</button>` : `<form id="email-start"><label>Email address<input name="email" type="email" autocomplete="email" required></label><button class="primary">Send email code</button></form>`}<button data-action="choose-another-channel">Choose another channel</button></section>`;
 }
 
 async function render() {
@@ -209,6 +329,7 @@ async function render() {
       request: "Request",
       connect: "Connect agent",
       invite: "Add contact",
+      workspace: "Workspace",
       contacts: "Contacts",
       agents: "Agents",
       settings: "Account",
@@ -222,6 +343,7 @@ async function render() {
   if (parts[0] === "request" && parts[1]) return taskPage(parts[1]);
   if (parts[0] === "connect" && parts[1]) return connectPage(parts[1]);
   if (parts[0] === "invite" && parts[1]) return invitePage(parts[1]);
+  if (parts[0] === "workspace") return workspacePage();
   if (parts[0] === "contacts") return contactsPage();
   if (parts[0] === "agents") return agentsPage();
   if (parts[0] === "settings") return settingsPage();
@@ -237,16 +359,29 @@ async function inbox() {
           before_id: cursor.get("before_id"),
         })
       : "";
-  const [tasks, contacts, agents] = await Promise.all([
+  const [tasks, contacts, ownAgents] = await Promise.all([
     api("/api/tasks" + query),
     api("/api/contacts"),
     api("/api/agents"),
   ]);
+  const requested = new URLSearchParams(location.search).get("ask");
+  const owner = contacts.some(
+    (c) => c.id === requested && c.status === "accepted",
+  )
+    ? requested
+    : profile.id;
+  const agents =
+    owner === profile.id
+      ? ownAgents
+      : await api("/api/agents?owner_id=" + encodeURIComponent(owner));
   const names = new Map(contacts.map((c) => [c.id, c.name]));
   names.set(profile.id, "You");
-  app.innerHTML = `<div class="intro"><h1>Your inbox</h1><p class="muted">Requests and responses, shared across your agents.</p></div><details class="card"><summary>Ask an agent</summary><form id="ask"><label>Who<select name="owner"><option value="${esc(profile.id)}">My agents</option>${contacts
+  app.innerHTML = `<div class="intro"><h1>Your inbox</h1><p class="muted">Requests and responses, shared across your agents.</p></div><details class="card" ${requested ? "open" : ""}><summary>Ask an agent</summary><form id="ask"><label>Who<select name="owner"><option value="${esc(profile.id)}">My agents</option>${contacts
     .filter((c) => c.status === "accepted")
-    .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
+    .map(
+      (c) =>
+        `<option value="${esc(c.id)}" ${c.id === owner ? "selected" : ""}>${esc(c.name)}</option>`,
+    )
     .join(
       "",
     )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details>${tasks.length ? tasks.map((t) => `<article class="card"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="card empty"><h2>No older requests.</h2></div>' : '<div class="card empty"><h2>Start with a request.</h2><p>Ask one of your own agents above, or <a href="/contacts">connect with someone</a>.</p></div>'}`;
@@ -315,14 +450,104 @@ async function taskPage(id, update, previous) {
     (replacement || app).focus({ preventScroll: true });
   }
 }
+async function workspacePage() {
+  try {
+    localPairing = JSON.parse(sessionStorage.getItem("local-pairing"));
+  } catch {
+    sessionStorage.removeItem("local-pairing");
+  }
+  const [people, agents] = await Promise.all([
+    api("/api/people"),
+    api("/api/agents"),
+  ]);
+  app.innerHTML = `<div class="intro"><h1>Your workspace</h1><p class="muted">Connect with someone to ask their agents for help. Each request needs their approval.</p><button class="primary" data-action="connect-local">Connect local agent</button><div id="local-command"></div></div><section class="card"><h2>Your agents</h2><p class="muted">${agents.map((a) => esc(a.name)).join(" · ") || "No agents connected yet"}</p><a href="/?ask=me">Ask my agent</a></section>${people.map((person) => `<article class="card"><h2>${esc(person.name)}</h2><p class="muted">${person.agents.length ? person.agents.map((a) => esc(a.name)).join(" · ") : "No agents connected yet"}</p>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Send contact request</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : `<span class="badge">${person.status === "accepted" ? "Connected" : "Request sent"}</span>${person.status === "accepted" ? `<p><a href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a></p>` : ""}`}</article>`).join("") || '<section class="card"><h2>You’re the first one here.</h2><p>Share your <a href="/contacts">contact link</a> to bring someone in.</p></section>'}`;
+  showLocalCommand();
+  await pollLocalConnection();
+}
 async function contactsPage() {
   const contacts = await api("/api/contacts");
   app.innerHTML = `<h1>People you can ask</h1><p class="muted">Share a link. They accept. Then ask by name from any agent.</p><section class="card"><label>Your contact link<input id="invite-link" readonly value="${esc(location.origin + "/invite/" + profile.invite)}"></label><button data-action="copy-invite">Copy link</button></section><form id="contact" class="card"><label>Add a contact<input name="link" type="url" placeholder="Paste their Litecom contact link" required></label><button>Connect</button></form>${contacts.map((c) => `<article class="card"><div class="row"><h2>${esc(c.name)}</h2><span class="badge">${esc(c.status)}</span></div>${c.status === "pending" && c.incoming ? `<button class="primary" data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<p class="muted">${c.agents.map((a) => esc(a.name) + (a.is_default ? " (default)" : "")).join(" · ")}</p><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button>` : ""}</article>`).join("")}`;
 }
 async function agentsPage() {
   const agents = await api("/api/agents");
-  app.innerHTML = `<h1>Your agents</h1><p class="muted">One account. A separate connection for every agent.</p>${agents.map((a) => `<section class="card"><div class="row"><h2>${esc(a.name)}</h2><span class="badge">${a.is_default ? "Default" : esc(a.kind)}</span></div><p class="muted">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : a.kind === "devin" ? "Connect Devin below to enable cloud requests" : "Waiting for a runner to connect"}</p><div class="actions">${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></div></section>`).join("")}<details class="card"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Adding a name creates a destination. It becomes available after you connect its runner.</p><button>Create agent</button></form></details><details class="card" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use Devin even when your computer is off. Get a personal access token or service-user key from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings → Devin API</a>. Your existing Devin plan is required.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">To reconnect, use the same agent name. The organization ID is at the top of Devin Settings → Devin API.</p></details><p class="muted subtitle">The server stores this token encrypted. Connecting checks access without starting a session. Each run needs your approval and uses your normal Devin billing.</p><button class="primary">Connect Devin</button></form></details>`;
+  try {
+    localPairing = JSON.parse(sessionStorage.getItem("local-pairing"));
+  } catch {
+    sessionStorage.removeItem("local-pairing");
+  }
+  app.innerHTML = `<h1>Your agents</h1><p class="muted">One account. A separate connection for every agent.</p><section class="card" id="connect-local"><h2>Connect this computer</h2><p>Run one command in the folder your agent should work in. Litecom installs if needed, uses your installed agent, and starts in the background.</p><button class="primary" data-action="connect-local">Connect local agent</button><div id="local-command"></div></section>${agents.map((a) => `<section class="card"><div class="row"><h2>${esc(a.name)}</h2><span class="badge">${a.is_default ? "Default" : esc(a.kind)}</span></div><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : a.kind === "devin" ? "Connect Devin below to enable cloud requests" : "Waiting for a runner to connect"}</p><div class="actions">${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></div></section>`).join("")}<details class="card"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Adding a name creates a destination. It becomes available after you connect its runner.</p><button>Create agent</button></form></details><details class="card" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use Devin even when your computer is off. Get a personal access token or service-user key from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings → Devin API</a>. Your existing Devin plan is required.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">To reconnect, use the same agent name. The organization ID is at the top of Devin Settings → Devin API.</p></details><p class="muted subtitle">The server stores this token encrypted. Connecting checks access without starting a session. Each run needs your approval and uses your normal Devin billing.</p><button class="primary">Connect Devin</button></form></details>`;
+  showLocalCommand();
+  await pollLocalConnection();
 }
+const shellQuote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+const psQuote = (value) => "'" + value.replaceAll("'", "''") + "'";
+async function connectLocal() {
+  const agents = await api("/api/agents");
+  const agent =
+    agents.find((a) => a.kind === "local") ||
+    (await api("/api/agents", { name: "This computer", kind: "local" }));
+  localPairing = await api("/api/connections/local", { agent_id: agent.id });
+  localPairing.agent_id = agent.id;
+  localPairing.started = Date.now();
+  sessionStorage.setItem("local-pairing", JSON.stringify(localPairing));
+  showLocalCommand();
+}
+function showLocalCommand() {
+  const target = document.getElementById("local-command");
+  if (!target || !localPairing) return;
+  const name = "local-" + localPairing.user_code.toLowerCase();
+  const windows = /Windows/i.test(navigator.userAgent);
+  const command = windows
+    ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
+    : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
+  target.innerHTML = `<label>${windows ? "PowerShell command" : "Terminal command"}<textarea id="connect-command" readonly rows="4" spellcheck="false">${esc(command)}</textarea></label><button data-action="copy-connect">Copy command</button><p class="muted subtitle">Paste and run it in your working folder. Keep this command private; it connects to your account and expires in 10 minutes. Requests still need your approval. If several agents are installed, Litecom uses the first detected agent; you can change it later with setup.</p><p id="connect-status" role="status">Waiting for you to run the command.</p>`;
+}
+async function pollLocalConnection() {
+  if (!localPairing || !document.getElementById("connect-status") || busy)
+    return;
+  const current = localPairing;
+  const target = document.getElementById("connect-status");
+  if (Date.now() - current.started > 30 * 60 * 1000) {
+    target.textContent =
+      "This connection check has stopped. Refresh to check again, or generate a new command.";
+    return;
+  }
+  try {
+    const result = await api(
+      `/api/connections/local/${encodeURIComponent(current.user_code)}`,
+    );
+    if (localPairing !== current || !target.isConnected) return;
+    const messages = {
+      waiting: "Waiting for you to run the command.",
+      starting: "Finishing setup. Keep the terminal open.",
+      connected:
+        "Connected. Your agent is listening for requests. You can close the terminal.",
+      offline:
+        "Setup finished, but the worker is offline. Run litecom doctor on this computer.",
+      expired: "This command expired. Click Connect local agent for a new one.",
+      disconnected:
+        "This connection was disconnected. Generate a new command to reconnect.",
+    };
+    target.textContent = messages[result.status] || "Checking connection…";
+    if (["connected", "expired", "disconnected"].includes(result.status)) {
+      sessionStorage.removeItem("local-pairing");
+      localPairing = null;
+      const panel = document.getElementById("local-command");
+      if (panel)
+        panel.innerHTML = `<p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? '<p><a href="/?ask=me">Ask your agent</a> · <a href="/workspace">Find someone to ask</a></p>' : ""}`;
+      if (result.status === "connected") {
+        const row = [...document.querySelectorAll("[data-agent-status]")].find(
+          (el) => el.dataset.agentStatus === current.agent_id,
+        );
+        if (row) row.textContent = "Connected · listening for requests";
+      }
+    }
+  } catch (e) {
+    if (target.isConnected)
+      target.textContent = "Connection check failed. Retrying…";
+  }
+}
+setInterval(pollLocalConnection, 2000);
 async function connectPage(code) {
   const [device, agents] = await Promise.all([
     api(`/api/device/${encodeURIComponent(code)}`),
@@ -346,7 +571,7 @@ async function settingsPage() {
     accepted_by_provider: "Last notice accepted by provider",
     failed: "Delivery failed. Check the channel or reconnect.",
   };
-  const rows = ["phone", "email", "slack"]
+  const rows = availableChannels()
     .map((kind) => {
       const channel = channels.find((c) => c.kind === kind && c.verified);
       const instructions = capabilities.direct_approvals?.[kind]
@@ -364,7 +589,7 @@ async function settingsPage() {
       return `<div class="card"><div class="row"><h3>${labels[kind]}</h3><span class="muted subtitle">${channel ? "Connected" : "Not connected"}</span></div><p class="muted subtitle">${instructions}</p>${channel?.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="${channel.delivery_status === "failed" ? "error" : "muted subtitle"}">${deliveryLabels[channel.delivery_status]}</p>` : ""}<div class="actions">${capabilities[kind] ? `<button data-action="${addAction}">${channel ? (kind === "phone" ? "Keep phone enabled" : "Reconnect " + labels[kind]) : "Connect " + labels[kind]}</button>` : '<p class="muted subtitle">Not enabled on this server.</p>'}${channel ? `<button data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>` : ""}</div></div>`;
     })
     .join("");
-  app.innerHTML = `<h1>Account</h1><p class="muted">Signed in as ${esc(profile.name)}.</p><h2>Approval channels</h2><p class="muted">Approve from a connected channel. One decision updates them all. Add or remove channels without changing your phone account. Reply STOP to stop texts.</p>${rows}${capabilities.development ? '<p class="banner">Local development: notifications print in the relay terminal.</p>' : ""}<h2>Connected apps</h2>${connections.map((c) => `<div class="card row"><span>${esc(c.label)}</span><button data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("")}<button data-action="logout">Sign out</button>`;
+  app.innerHTML = `<h1>Account</h1><p class="muted">Signed in as ${esc(profile.name)}.</p><h2>Approval channels</h2><p class="muted">Approve from a connected channel. One decision updates them all. Add or remove channels without changing your account. Reply STOP to stop texts.</p>${rows}${capabilities.development ? '<p class="banner">Local development: notifications print in the relay terminal.</p>' : ""}<h2>Connected apps</h2>${connections.map((c) => `<div class="card row"><span>${esc(c.label)}</span><button data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("")}<button data-action="logout">Sign out</button>`;
 }
 document.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -375,7 +600,21 @@ document.addEventListener("submit", async (e) => {
     buttons = [...form.querySelectorAll("button")];
   buttons.forEach((b) => (b.disabled = true));
   try {
-    if (form.id === "login") {
+    if (form.id === "phone-link-start") {
+      const c = await api("/api/channels/phone/start", {
+        phone: data.get("phone").replace(/[ ()-]/g, ""),
+      });
+      sessionStorage.setItem("phone-link-challenge", c.id);
+      phoneSetup();
+    } else if (form.id === "phone-link-verify") {
+      await api("/api/channels/phone/verify", {
+        id: sessionStorage.getItem("phone-link-challenge"),
+        code: data.get("code"),
+      });
+      sessionStorage.removeItem("phone-link-challenge");
+      sessionStorage.removeItem("approval-channel");
+      await boot();
+    } else if (form.id === "login") {
       const channel = data.get("channel");
       if (channel !== "phone" && !capabilities[channel]) {
         throw new Error(
@@ -383,23 +622,31 @@ document.addEventListener("submit", async (e) => {
         );
       }
       sessionStorage.setItem("approval-channel", channel);
+      sessionStorage.removeItem("slack-started-url");
+      if (channel === "email") {
+        sessionStorage.setItem(
+          "approval-email-pending",
+          data.get("approval_email"),
+        );
+      } else {
+        sessionStorage.removeItem("approval-email-pending");
+      }
       challenge = await api("/auth/start", {
         name: data.get("name"),
         phone: data.get("phone").replace(/[ ()-]/g, ""),
       });
-      app.innerHTML = `<section class="narrow"><h1>Check your phone</h1><p class="muted">Enter the six-digit code. It expires in 10 minutes.</p><form id="verify"><label>Sign-in code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Continue</button></form><p><button data-action="restart-login">Use another number</button></p></section>`;
+      challenge.expires_at = Date.now() + challenge.expires_in * 1000;
+      sessionStorage.setItem("phone-challenge", JSON.stringify(challenge));
+      phoneCode();
     } else if (form.id === "verify") {
       sessionStorage.removeItem("email-challenge");
       await api("/auth/verify", { id: challenge.id, code: data.get("code") });
+      sessionStorage.removeItem("phone-challenge");
       if (sessionStorage.getItem("approval-channel") === "phone")
         await api("/api/channels/phone", {});
       await boot();
     } else if (form.id === "email-start") {
-      const c = await api("/api/channels/email/start", {
-        email: data.get("email"),
-      });
-      sessionStorage.setItem("email-challenge", c.id);
-      emailSetup();
+      await startEmail(data.get("email"));
     } else if (form.id === "email-verify") {
       await api("/api/channels/email/verify", {
         id: sessionStorage.getItem("email-challenge"),
@@ -484,7 +731,7 @@ document.addEventListener("submit", async (e) => {
         agent_id: data.get("agent"),
       });
       app.innerHTML =
-        '<section class="narrow"><h1>Agent connected.</h1><p>Return to your terminal to finish setup.</p><a href="/">Open inbox</a></section>';
+        '<section class="narrow"><h1>Computer connected.</h1><p>Litecom is finishing setup automatically. Keep the terminal open until it says it is listening for requests. Any setup issue will appear there.</p><a href="/">Open inbox</a></section>';
     }
   } catch (err) {
     error(err);
@@ -497,6 +744,7 @@ document.addEventListener("input", (e) => {
   if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
 });
 document.addEventListener("change", async (e) => {
+  if (e.target.name === "channel") syncApprovalFields();
   if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
   if (e.target.form?.id === "ask") delete e.target.form.dataset.requestId;
   if (e.target.name === "owner") {
@@ -558,18 +806,49 @@ document.addEventListener("click", async (e) => {
   button.disabled = true;
   try {
     const { action, id } = button.dataset;
-    if (action === "restart-login") return login();
+    if (action === "connect-local") return await connectLocal();
+    if (action === "copy-connect") {
+      await navigator.clipboard.writeText(
+        document.getElementById("connect-command").value,
+      );
+      return notice("Command copied. Paste it into your terminal and run it.");
+    }
+    if (action === "phone-login") return phoneLogin();
+    if (action === "choose-another-channel") {
+      sessionStorage.removeItem("approval-channel");
+      return approvalSetup();
+    }
+    if (action === "restart-phone-link") {
+      sessionStorage.removeItem("phone-link-challenge");
+      return phoneSetup();
+    }
+    if (action === "choose-channel") {
+      sessionStorage.setItem("approval-channel", id);
+      sessionStorage.removeItem("slack-started-url");
+      if (id === "email" && account.google_email) {
+        await api("/api/channels/email/google", {});
+        sessionStorage.removeItem("approval-channel");
+      }
+      return await boot();
+    }
+    if (action === "contact-person") {
+      await api(`/api/people/${encodeURIComponent(id)}/contact`, {});
+      return await render();
+    }
+    if (action === "restart-login") {
+      sessionStorage.removeItem("phone-challenge");
+      return login();
+    }
     if (action === "add-slack") {
-      if (location.pathname !== "/slack/connected")
-        sessionStorage.setItem(
-          "slack-return",
-          location.pathname + location.search,
-        );
-      const link = await api("/api/channels/slack/start", {});
-      location.assign(link.url);
+      await startSlack();
       return;
     }
     if (action === "add-email") {
+      if (account.google_email) {
+        await api("/api/channels/email/google", {});
+        await render();
+        return notice("Email connected.");
+      }
       sessionStorage.removeItem("email-challenge");
       return emailSetup();
     }
@@ -617,13 +896,18 @@ document.addEventListener("click", async (e) => {
       await api("/api/contacts", { invite: id });
       location.href = "/contacts";
       return;
-    } else if (action === "enable-phone") await api("/api/channels/phone", {});
-    else if (action === "disable-channel")
+    } else if (action === "enable-phone") {
+      if (!account.has_phone) {
+        sessionStorage.setItem("approval-channel", "phone");
+        return phoneSetup();
+      }
+      await api("/api/channels/phone", {});
+    } else if (action === "disable-channel")
       await api(`/api/channels/${id}`, undefined, "DELETE");
     else if (action === "logout") {
       await api("/auth/logout", {});
       profile = null;
-      sessionStorage.removeItem("email-challenge");
+      sessionStorage.clear();
       return login();
     }
     await render();

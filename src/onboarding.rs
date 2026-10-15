@@ -16,6 +16,9 @@ use std::{
 pub struct Setup {
     #[arg(long, env = "LITECOM_RELAY")]
     pub relay: Option<String>,
+    /// One-use code from Connect local agent in your signed-in workspace.
+    #[arg(long, requires = "relay", conflicts_with = "requester_only")]
+    pub connect_code: Option<String>,
     #[arg(long, default_value = "This computer")]
     pub name: String,
     /// Replace an expired or revoked connection after signing in again.
@@ -53,6 +56,7 @@ impl Default for Setup {
     fn default() -> Self {
         Self {
             relay: std::env::var("LITECOM_RELAY").ok(),
+            connect_code: None,
             name: "This computer".into(),
             reconnect: false,
             agent: None,
@@ -90,12 +94,13 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
     let theme = dialoguer::theme::ColorfulTheme::default();
     println!("\n  litecom\n  Your people. Your agents. Your approval.\n");
     let mut verified_profile = None;
+    let mut selected_runner = None;
     if path.exists() && !options.reconnect {
         let saved = ClientConfig::load_named(connection)?;
         let client = Client::new(saved.clone())?;
         match client.get::<Value>("/api/me").await {
             Err(error) if error.downcast_ref::<crate::client::ApiError>().is_some_and(|e|e.status==401) => {
-                println!("This connection expired or was disconnected. Let's reconnect your phone account.");
+                println!("This connection expired or was disconnected. Let's reconnect your account.");
                 options.reconnect = true;
                 if options.relay.is_none() { options.relay = Some(saved.relay); }
             }
@@ -125,13 +130,9 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         if path.exists() && options.relay.is_none() {
             options.relay = Some(ClientConfig::load_named(connection)?.relay);
         }
-        let choice = dialoguer::Select::with_theme(&theme)
-            .with_prompt("Where do you want to approve requests?")
-            .items(["Phone", "Slack", "Email"])
-            .default(0)
-            .interact()?;
         let relay = match options
             .relay
+            .clone()
             .or_else(|| option_env!("LITECOM_DEFAULT_RELAY").map(String::from))
         {
             Some(value) => value,
@@ -153,62 +154,101 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
             .error_for_status()?
             .json()
             .await?;
-        let channel = ["phone", "slack", "email"][choice];
-        if caps[channel] != true {
-            bail!(
-                "{} approvals are not available on this server. Run setup again and choose an available channel. Nothing was changed.",
-                ["Phone", "Slack", "Email"][choice]
-            );
-        }
-        let device: DeviceCode = http
-            .post(format!("{relay}/device/start"))
-            .json(&json!({"label":options.name}))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        let url = format!("{relay}/connect/{}?approve={channel}", device.user_code);
-        println!(
-            "\nConnect with your phone in the browser.\nCheck this code: {}\n{url}\n",
-            device.user_code
-        );
-        if !options.no_browser && open_browser(&url).is_err() {
-            println!("Open the link above to continue.");
-        }
-        let start = Instant::now();
-        let token: AgentToken = loop {
-            if start.elapsed() > Duration::from_secs(device.expires_in as u64) {
-                bail!("The connection code expired. Run setup again.");
+        if let Some(code) = &options.connect_code {
+            selected_runner = Some(choose_runner(&options, connection)?);
+            let token: Option<AgentToken> = http.post(format!("{relay}/device/poll"))
+                .json(&json!({"device_code":code})).send().await?
+                .error_for_status().context("This connection command expired or was already used. Click Connect local agent again in your workspace.")?
+                .json().await?;
+            let token = token.context("This connection is not authorized. Generate a new command in your signed-in workspace.")?;
+            ClientConfig {
+                relay,
+                token: token.token,
+                user_id: token.user_id,
+                agent_id: token.agent_id,
+                workspace: None,
+                runner: None,
+                approval_channel: None,
             }
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => bail!("Setup cancelled. Your saved settings are unchanged."),
-                _ = tokio::time::sleep(Duration::from_secs(device.interval as u64)) => {}
+            .save_named(connection)?;
+            println!("Account connected.");
+        } else {
+            if caps["phone"] != true && caps["google"] != true {
+                bail!(
+                    "This server has not enabled sign-in. Ask its operator to finish setup before connecting."
+                );
             }
-            let response = http
-                .post(format!("{relay}/device/poll"))
-                .json(&json!({"device_code":device.device_code}))
+            let channels = [("phone", "Phone"), ("slack", "Slack"), ("email", "Email")]
+                .into_iter()
+                .filter(|(key, _)| {
+                    caps[*key] == true
+                        && (caps["development"] == true || caps["direct_approvals"][*key] == true)
+                })
+                .collect::<Vec<_>>();
+            if channels.is_empty() {
+                bail!(
+                    "This server has no approval channels ready. Ask its operator to finish messaging setup."
+                );
+            }
+            let choice = dialoguer::Select::with_theme(&theme)
+                .with_prompt("Where do you want to approve requests?")
+                .items(channels.iter().map(|(_, label)| *label).collect::<Vec<_>>())
+                .default(0)
+                .interact()?;
+            let channel = channels[choice].0;
+            if !options.requester_only {
+                selected_runner = Some(choose_runner(&options, connection)?);
+            }
+            let device: DeviceCode = http
+                .post(format!("{relay}/device/start"))
+                .json(&json!({"label":options.name}))
                 .send()
+                .await?
+                .error_for_status()?
+                .json()
                 .await?;
-            if !response.status().is_success() {
-                bail!("The pairing request expired or was rejected. Run setup again.");
+            let url = format!("{relay}/connect/{}?approve={channel}", device.user_code);
+            println!(
+                "\nSign in in the browser.\nCheck this code: {}\n{url}\n",
+                device.user_code
+            );
+            if !options.no_browser && open_browser(&url).is_err() {
+                println!("Open the link above to continue.");
             }
-            if let Some(token) = response.json::<Option<AgentToken>>().await? {
-                break token;
+            let start = Instant::now();
+            let token: AgentToken = loop {
+                if start.elapsed() > Duration::from_secs(device.expires_in as u64) {
+                    bail!("The connection code expired. Run setup again.");
+                }
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => bail!("Setup cancelled. Your saved settings are unchanged."),
+                    _ = tokio::time::sleep(Duration::from_secs(device.interval as u64)) => {}
+                }
+                let response = http
+                    .post(format!("{relay}/device/poll"))
+                    .json(&json!({"device_code":device.device_code}))
+                    .send()
+                    .await?;
+                if !response.status().is_success() {
+                    bail!("The pairing request expired or was rejected. Run setup again.");
+                }
+                if let Some(token) = response.json::<Option<AgentToken>>().await? {
+                    break token;
+                }
+            };
+            let previous = ClientConfig::load_named(connection).ok();
+            ClientConfig {
+                relay,
+                token: token.token,
+                user_id: token.user_id,
+                agent_id: token.agent_id,
+                workspace: previous.as_ref().and_then(|c| c.workspace.clone()),
+                runner: previous.and_then(|c| c.runner),
+                approval_channel: Some(channel.into()),
             }
-        };
-        let previous = ClientConfig::load_named(connection).ok();
-        ClientConfig {
-            relay,
-            token: token.token,
-            user_id: token.user_id,
-            agent_id: token.agent_id,
-            workspace: previous.as_ref().and_then(|c| c.workspace.clone()),
-            runner: previous.and_then(|c| c.runner),
-            approval_channel: Some(channel.into()),
+            .save_named(connection)?;
+            println!("Account connected.");
         }
-        .save_named(connection)?;
-        println!("Phone account connected.");
     }
     if options.requester_only {
         println!(
@@ -216,85 +256,16 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         );
         return Ok(());
     }
-    let saved_runner = RunnerConfig::load(connection).ok();
     let mut restart_worker = options.reconnect
-        || saved_runner.is_none()
+        || RunnerConfig::load(connection).is_err()
         || options.agent.is_some()
         || options.acp.is_some()
         || options.workspace.is_some();
-    let mut settings = if let Some(mut saved) =
-        saved_runner.filter(|_| options.agent.is_none() && options.acp.is_none())
-    {
-        if let Some(path) = options.workspace {
-            saved.workspace = path
-                .canonicalize()
-                .context("Choose an existing working folder.")?;
-            saved.save(connection)?;
-        }
-        saved
-    } else {
-        let detected = runner::detect();
-        if options.acp.is_none()
-            && (options.agent.as_deref() == Some("pi")
-                || (options.agent.is_none() && detected.is_empty()))
-            && let Some(hint) = runner::pi_setup_hint()
-        {
-            bail!("{hint} Your phone account is saved.");
-        }
-        if detected.is_empty() && options.acp.is_none() {
-            bail!(
-                "No coding agents found. Install and sign in to Codex or Claude Code, then run `litecom setup` again. Your phone account is saved; you can already send requests with `litecom ask`."
-            );
-        }
-        let (agent, executable) = if let Some(command) = options.acp {
-            let path = if std::path::Path::new(&command).components().count() > 1 {
-                PathBuf::from(command)
-                    .canonicalize()
-                    .context("Choose an installed ACP executable.")?
-            } else {
-                runner::find_executable(&command)
-                    .context("That ACP executable was not found on PATH.")?
-            };
-            (NativeAgent::Acp, path)
-        } else if let Some(requested) = options.agent {
-            detected
-                .into_iter()
-                .find(|(a, _)| a.command() == requested)
-                .context("That agent was not found. Install it and run setup again.")?
-        } else {
-            let names = detected.iter().map(|(a, _)| a.name()).collect::<Vec<_>>();
-            let choice = dialoguer::Select::with_theme(&theme)
-                .with_prompt("Which agent should handle your requests?")
-                .items(&names)
-                .default(0)
-                .interact()?;
-            detected[choice].clone()
-        };
-        let workspace = match options.workspace {
-            Some(path) => path,
-            None => PathBuf::from(
-                dialoguer::Input::<String>::with_theme(&theme)
-                    .with_prompt("Folder your agent can work in")
-                    .default(std::env::current_dir()?.to_string_lossy().into())
-                    .interact_text()?,
-            ),
-        }
-        .canonicalize()
-        .context("Choose an existing folder. Your phone connection has been saved.")?;
-        let settings = RunnerConfig {
-            agent,
-            executable,
-            workspace,
-            arguments: if agent == NativeAgent::Acp {
-                options.acp_arg
-            } else {
-                agent.default_arguments()
-            },
-            mcp: None,
-        };
-        settings.save(connection)?;
-        settings
+    let mut settings = match selected_runner {
+        Some(settings) => settings,
+        None => choose_runner(&options, connection)?,
     };
+    settings.save(connection)?;
     if settings.agent.is_acp() {
         let mcp = if options.no_mcp || !settings.agent.session_mcp() {
             None
@@ -360,6 +331,14 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         let mut ready = false;
         for _ in 0..10 {
             tokio::time::sleep(Duration::from_secs(1)).await;
+            if options.connect_code.is_some() {
+                let state: Value = client.post("/api/connection/ready", json!({})).await?;
+                if state["listening"] == true {
+                    ready = true;
+                    break;
+                }
+                continue;
+            }
             let agents: Vec<crate::model::Agent> = client.get("/api/agents").await?;
             if agents.iter().any(|a| {
                 a.id == client.config.agent_id && a.last_seen_at.is_some_and(|t| t >= since)
@@ -383,4 +362,90 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
+    let theme = dialoguer::theme::ColorfulTheme::default();
+    let saved_runner = RunnerConfig::load(connection).ok();
+    let settings = if let Some(mut saved) =
+        saved_runner.filter(|_| options.agent.is_none() && options.acp.is_none())
+    {
+        if let Some(path) = &options.workspace {
+            saved.workspace = path
+                .canonicalize()
+                .context("Choose an existing working folder.")?;
+        }
+        saved
+    } else {
+        let detected = runner::detect();
+        if options.acp.is_none()
+            && (options.agent.as_deref() == Some("pi")
+                || (options.agent.is_none() && detected.is_empty()))
+            && let Some(hint) = runner::pi_setup_hint()
+        {
+            bail!("{hint}");
+        }
+        if detected.is_empty() && options.acp.is_none() {
+            if options.connect_code.is_some() {
+                bail!(
+                    "No coding agents found. Install and sign in to a supported coding agent, then run this connection command again. Your workspace account is ready."
+                );
+            }
+            bail!(
+                "No coding agents found. Install and sign in to a supported coding agent, then run `litecom setup` again. Use `--requester-only` if you only want to send requests."
+            );
+        }
+        let (agent, executable) = if let Some(command) = &options.acp {
+            let path = if std::path::Path::new(&command).components().count() > 1 {
+                PathBuf::from(command)
+                    .canonicalize()
+                    .context("Choose an installed ACP executable.")?
+            } else {
+                runner::find_executable(command)
+                    .context("That ACP executable was not found on PATH.")?
+            };
+            (NativeAgent::Acp, path)
+        } else if let Some(requested) = &options.agent {
+            detected
+                .into_iter()
+                .find(|(a, _)| a.command() == requested.as_str())
+                .context("That agent was not found. Install it and run setup again.")?
+        } else if detected.len() == 1 || options.connect_code.is_some() {
+            println!("Using {}.", detected[0].0.name());
+            detected[0].clone()
+        } else {
+            let names = detected.iter().map(|(a, _)| a.name()).collect::<Vec<_>>();
+            let choice = dialoguer::Select::with_theme(&theme)
+                .with_prompt("Which agent should handle your requests?")
+                .items(&names)
+                .default(0)
+                .interact()?;
+            detected[choice].clone()
+        };
+        let workspace = match &options.workspace {
+            Some(path) => path.clone(),
+            None if options.connect_code.is_some() => std::env::current_dir()?,
+            None => PathBuf::from(
+                dialoguer::Input::<String>::with_theme(&theme)
+                    .with_prompt("Folder your agent can work in")
+                    .default(std::env::current_dir()?.to_string_lossy().into())
+                    .interact_text()?,
+            ),
+        }
+        .canonicalize()
+        .context("Choose an existing folder.")?;
+        RunnerConfig {
+            agent,
+            executable,
+            workspace,
+            arguments: if agent == NativeAgent::Acp {
+                options.acp_arg.clone()
+            } else {
+                agent.default_arguments()
+            },
+            mcp: None,
+        }
+    };
+    settings.validate()?;
+    Ok(settings)
 }

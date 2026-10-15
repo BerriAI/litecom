@@ -152,6 +152,9 @@ impl Store {
             )
         })?;
         let profile = self.verified_profile(&challenge.name, &challenge.phone)?;
+        self.session_for(profile)
+    }
+    pub(crate) fn session_for(&self, profile: Profile) -> Result<Session> {
         let token = secret();
         let csrf = secret();
         self.db.execute("INSERT INTO credentials(id,user_id,token_hash,role,label,csrf_hash,expires_at) VALUES(?,?,?,'human','Browser',?,?)",params![id(),profile.id,hash(&token),hash(&csrf),self.time()+30*24*60*60])?;
@@ -245,7 +248,9 @@ impl Store {
             let active:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM agents WHERE id=? AND revoked=0)",[&agent_id],|r|r.get(0))?;
             conflict(active,"This agent was disconnected.")?;
             let token=secret();let expires_at=self.time()+365*24*60*60;
-            self.db.execute("INSERT INTO credentials(id,user_id,agent_id,token_hash,role,label,expires_at) VALUES(?,?,?,?,'agent',?,?)",params![id(),user_id,agent_id,hash(&token),label,expires_at])?;
+            let credential_id = id();
+            self.db.execute("INSERT INTO credentials(id,user_id,agent_id,token_hash,role,label,expires_at) VALUES(?,?,?,?,'agent',?,?)",params![credential_id,user_id,agent_id,hash(&token),label,expires_at])?;
+            self.db.execute("UPDATE local_pairings SET credential_id=? WHERE device_hash=?",params![credential_id,hash(device_code)])?;
             self.db.execute("UPDATE devices SET consumed=1 WHERE device_hash=?",[hash(device_code)])?;
             Ok(Some(AgentToken{token,user_id,agent_id,expires_at}))
         })
@@ -253,6 +258,62 @@ impl Store {
     pub fn connections(&self, p: &Principal) -> Result<Vec<ConnectionInfo>> {
         p.human()?;
         Ok(self.db.prepare("SELECT id,label,agent_id,expires_at FROM credentials WHERE user_id=? AND role='agent' AND revoked=0 ORDER BY label,id")?.query_map([&p.user_id],|r|Ok(ConnectionInfo{id:r.get(0)?,label:r.get(1)?,agent_id:r.get(2)?,expires_at:r.get(3)?}))?.collect::<std::result::Result<Vec<_>,_>>()?)
+    }
+    pub fn begin_local_connection(&self, p: &Principal, agent_id: &str) -> Result<DeviceCode> {
+        p.human()?;
+        require(
+            self.owned_agent(p, agent_id)?.kind == AgentKind::Local,
+            "Choose a local agent.",
+        )?;
+        self.transaction(|| {
+            let device = self.begin_device("Local agent")?;
+            // Already signed in: authorize directly, without a second browser login.
+            self.db.execute(
+                "UPDATE devices SET user_id=?,agent_id=? WHERE device_hash=?",
+                params![p.user_id, agent_id, hash(&device.device_code)],
+            )?;
+            self.db.execute(
+                "INSERT INTO local_pairings(device_hash) VALUES(?)",
+                [hash(&device.device_code)],
+            )?;
+            Ok(device)
+        })
+    }
+    pub fn local_connection_ready(&self, p: &Principal) -> Result<()> {
+        require(p.role == Role::Agent, "Use the newly connected agent.")?;
+        self.db.execute(
+            "UPDATE local_pairings SET ready_at=? WHERE credential_id=?",
+            params![self.time(), p.credential_id],
+        )?;
+        Ok(())
+    }
+    pub fn local_connection_listening(&self, p: &Principal) -> Result<bool> {
+        require(p.role == Role::Agent, "Use the newly connected agent.")?;
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM local_pairings WHERE credential_id=? AND last_seen_at>=?)",
+            params![p.credential_id, self.time() - 60],
+            |r| r.get(0),
+        )?)
+    }
+    pub fn local_connection_status(&self, p: &Principal, code: &str) -> Result<&'static str> {
+        p.human()?;
+        let (expires, consumed, ready, seen, revoked): (i64,bool,Option<i64>,Option<i64>,Option<bool>) = self.db.query_row(
+            "SELECT d.expires_at,d.consumed,l.ready_at,l.last_seen_at,c.revoked OR c.expires_at<=? FROM devices d JOIN local_pairings l ON d.device_hash=l.device_hash LEFT JOIN credentials c ON c.id=l.credential_id WHERE d.user_code=? AND d.user_id=?",
+            params![self.time(),code,p.user_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)),
+        ).optional()?.ok_or(Error::NotFound)?;
+        Ok(if revoked == Some(true) {
+            "disconnected"
+        } else if ready.is_some() && seen.is_some_and(|t| t >= self.time() - 60) {
+            "connected"
+        } else if ready.is_some() {
+            "offline"
+        } else if consumed {
+            "starting"
+        } else if expires <= self.time() {
+            "expired"
+        } else {
+            "waiting"
+        })
     }
     pub fn revoke_connection(&self, p: &Principal, credential_id: &str) -> Result<()> {
         p.human()?;

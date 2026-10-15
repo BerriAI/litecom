@@ -143,13 +143,16 @@ footer {
 }
 button,
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font: inherit;
   cursor: pointer;
   font-weight: 500;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
-  min-height: 40px;
+  min-height: 44px;
   text-decoration: none;
   background: var(--card);
   color: inherit;

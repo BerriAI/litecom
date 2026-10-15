@@ -1,81 +1,66 @@
-# Connect your agent
+# Join Litecom and connect your agent
 
-Join your team's existing Litecom server with a [prebuilt download](distribution.md). Your operator sets up hosting and message delivery once. You need only their setup command and a signed-in coding agent—no provider accounts, API keys, Rust, or repository clone. Setting up that shared service yourself? Use [Run your own server](self-host.md).
+Your host sets up Google sign-in and approval delivery once. You need their Litecom link. No API keys, provider accounts, repository clone, or Rust installation are required.
 
-## Connect your computer
+## Join the workspace
 
-Obtain a Litecom server address from its operator. Install and sign in to your [coding agent](agents.md) first. For a temporary local preview, use the single command in the [README](../README.md); for a persistent development server, see [Run a local server](#run-a-local-server) below.
+1. Open the link and choose **Continue with Google**. Choose your Google account and finish any consent or sign-in prompts.
+2. Choose where to receive approvals. Only channels configured by your host appear:
+   - **Email:** confirm the verified Google address with **Connect Email**. No second code.
+   - **Slack:** choose **Connect Slack**, then **Allow** in Slack. A workspace administrator may need to approve the app.
+   - **Phone:** choose **Connect Phone**, enter your number, and enter its verification code.
+3. The workspace opens. Send a contact request to a person; once they accept, you can ask their agents. You can also share your contact link from **Contacts**.
 
-From the extracted download folder:
+You can join and ask other people before connecting your own agent. Your name and agent names are visible in this workspace; phone numbers, email addresses, files, and account credentials are not in the directory. Your host can restrict Google sign-in to approved Workspace domains.
 
-```sh
-./litecom setup --relay https://YOUR-SERVER
-```
+## Connect your local agent
 
-Replace `https://YOUR-SERVER` with your operator's address, or paste their complete command unchanged. Choose where you want to approve requests: **Phone**, **Slack**, or **Email**. Enter your name and phone number in the browser, then the verification code sent to your phone. Check the displayed pairing code and choose **Connect agent**.
+Install and sign in to a [supported coding agent](agents.md) first. Then:
 
-Back in the terminal, select the detected agent and confirm its working folder. Litecom saves the connection, adds its tools to the selected agent, and registers background startup. The ready message requires a real worker heartbeat. Start a new session in your coding agent to load the tools. See [agent compatibility](agents.md) for requirements and validation status.
+1. Click **Connect local agent** in the workspace or on the Agents page.
+2. Click **Copy command**.
+3. Paste it into a terminal in the folder your agent should work in, then press Enter.
 
-Installed ACP adapters also appear in the picker. See [Connect an ACP agent](acp.md) for other compatible executables and per-operation approvals.
+The command installs Litecom if needed, uses your signed-in account, selects an installed agent, configures its MCP tools, and starts Litecom in the background. No second sign-in or pairing confirmation. With several installed agents, the detected default is shown in the terminal; use `setup --agent` to change it later.
 
-Phone, Email, and Slack are available when their providers are configured on the relay. Selecting Email verifies a notification address after phone signup; selecting Slack opens the workspace app connection. Add more later in Settings. See [approval channels](approval-channels.md) for setup and validation limits.
+Wait for **Connected** in the browser and **Listening for requests** in the terminal. This requires a heartbeat from this connection’s worker. You can close the terminal.
 
-## Try it before connecting a server
+The same connection works in both directions: your agent receives approved work and can use MCP to ask your accepted contacts. Try **“Ask Ishaan for the launch notes”** or **“Ask my agent for the final PDF.”** Already-open agent conversations may need a new session to load their updated MCP configuration.
 
-```sh
-./litecom try
-```
+Keep the command private. It is single-use and expires after 10 minutes. If setup fails after pairing, rerun the same command on the same computer to resume the saved connection. If it expires before pairing, generate another command.
 
-This local preview handles the server and sample request. Measured after the command starts: two terminal selections, three browser setup buttons, and three fields. Then approve once and download the resulting file. A downloaded binary and a signed-in native agent are prerequisites. The automated measurement uses a fixture agent and local delivery.
+## How many steps?
 
-## How much work is setup?
+These counts start on your host’s Litecom page. Google account selection, provider sign-in, admin approvals, and operating-system prompts are listed separately because they vary.
 
-Measured with the terminal/browser test on macOS, starting with `litecom setup --relay` and an existing native agent:
+| Path | Litecom actions | Additional provider actions | Fields in Litecom |
+| --- | --- | --- | --- |
+| Google + Email | Continue with Google → Connect Email: **2 clicks** | Choose account; first-use consent if shown | **0** |
+| Google + Slack | Continue with Google → Connect Slack: **2 clicks** | Google account/consent; Slack workspace selection and Allow | **0** |
+| Google + Phone | Continue with Google → Connect Phone → Send code → Connect phone: **4 clicks** | Google account/consent; read the text code | **2:** phone, code |
+| Local agent, starting in the workspace | Connect local agent → Copy command: **2 clicks**, then **1 paste + Enter** | Open a terminal; possible OS prompts | **0** |
+| Add a workspace contact | Send contact request: **1 click** | Recipient clicks Accept contact once | **0** |
+| Approve an ordinary request | **1 Slack button** or **1 text/email reply** | None after channel connection | Requested reply for phone/email |
 
-| Step | Activations | Typing |
-| --- | --- | --- |
-| Select Phone in the terminal | 1 Enter | None |
-| Sign in in the browser | 2 buttons | Name, phone, code |
-| Connect the agent | 1 button | None; existing default selected |
-| Confirm detected agent | 1 Enter | None |
-| Confirm the current working folder | 1 Enter | None |
-| **Total** | **6 activations** | **3 fields** |
+The browser paths are tested at 320, 390, and 1100 px using Google/Slack provider fixtures. The copied-command path is tested with an already-installed binary, native Codex MCP configuration, a real macOS background service, a deterministic agent reply, and one approval. These checks do not establish live OAuth consent, message delivery, fresh release download, or Windows/Linux startup. See [release validation](release-readiness.md).
 
-This excludes obtaining the binary, installing/signing in to the native agent, copying the setup command, the relay address, reading the code, and any operating-system prompts. The test used local delivery and a fake agent process. It did verify actual macOS background startup. It is not evidence of a complete one-click consumer install.
+## Ask and receive
 
-The Email route adds two buttons and two fields, for **eight activations and five fields** in the local test. Slack provider steps remain unmeasured.
+Ask from your coding agent or the Litecom inbox. The recipient approves in their chosen channel, the agent performs the request, and the result returns automatically. A new ACP tool permission can require an additional decision in that same channel; no desktop approval prompt is needed.
 
-A returning, valid connection skips pairing and the saved agent/folder questions. An expired or revoked connection resumes pairing. A server outage preserves settings and explains how to retry.
+Click a returned file to download it. Browser downloads stream to your download folder; **Mark received** acknowledges receipt. MCP and CLI downloads verify the complete file hash and record receipt automatically.
 
-## First useful result
+## Existing installations and terminal setup
 
-```sh
-./litecom ask me "Find the launch notes and attach them."
-```
-
-Approve in the channel you chose: reply `APPROVE` and the code by text, tap **Approve** in Slack, or reply `Approve` to the email. The request link also provides a browser review. [Channel setup and behavior](approval-channels.md).
-
-That one decision authorizes the requested work and sending the final reply and files. There is no second sharing decision. Existing native hooks and tools keep their permissions; a new ACP permission can be approved once in the same channel.
-
-When the result arrives, click a file to download it. Your browser streams it to its download folder. **Mark received** acknowledges receipt; CLI and MCP downloads verify the complete hash and report receipt automatically.
-
-A request to another person follows the same owner approval path. The requester needs no account invitation for their own agents.
-
-Once background setup is complete, the computer runs unattended while it is awake. ACP tool permission requests use the same connected channels, with a browser review available. The direct Codex/Claude adapters deny new permission prompts instead of opening a local approval dialog; choose a compatible ACP adapter when you need those decisions forwarded remotely.
-
-## Add another person or agent
-
-Run `./litecom contacts --invite` and share the link. The recipient opens it and selects **Send contact request**; you select **Accept contact**. Name lookup works after that mutual acceptance.
-
-To give another harness a separate, revocable connection:
+The browser-generated command is the shortest route. Existing installations can also run:
 
 ```sh
-./litecom --connection claude setup --relay http://127.0.0.1:4141
+litecom setup --relay https://YOUR-SERVER
 ```
 
-Use the same verified phone account. Select the agent this connection represents in the browser. Create another named destination under **Agents** first if it needs its own work queue.
+Replace the address with your host’s URL. This alternative selects an approval channel and opens browser pairing. A returning valid connection reuses saved settings. `--requester-only` configures sending without a receiving worker; `--connection NAME` gives another harness its own revocable connection.
 
-Use `setup --requester-only` for a connection that only sends requests. It does not start a receiving worker. `mcp-config` prints the configuration for any compatible MCP client without embedding a credential.
+For a temporary local tryout, run `litecom try`. It prints verification codes locally and sends no messages. Your signed-in agent’s normal billing applies after approval. Ctrl+C stops the tryout and removes its temporary data.
 
 ## Background operation
 
@@ -98,7 +83,7 @@ macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows us
 To keep everything in the terminal:
 
 ```sh
-./litecom setup --relay http://127.0.0.1:4141 --no-background
+./litecom setup --relay https://YOUR-SERVER --no-background
 ./litecom worker
 ```
 
@@ -108,7 +93,7 @@ To keep everything in the terminal:
 | --- | --- |
 | Server cannot be reached | Retry `setup` when the server is available; saved settings remain intact. |
 | Connection expired or disconnected | Run `setup`; it opens pairing again. `setup --reconnect` also starts this explicitly. |
-| No coding agents found | Install and sign in to a supported coding agent, then rerun `setup`. Your phone account setup is saved. |
+| No coding agents found | Install and sign in to a supported coding agent, then rerun `setup`. Your existing account is preserved. |
 | Folder unavailable | Reconnect the volume, or rerun `setup --workspace /absolute/folder`. |
 | MCP server name already exists | Setup preserves the other server and selects an unused name. A matching, enabled Litecom connection is reused. |
 | Matching Litecom server is disabled | Enable that connection in your coding agent, then retry setup. |

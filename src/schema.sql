@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS profiles (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_key TEXT NOT NULL UNIQUE,
-  phone BLOB NOT NULL, invite_hash TEXT NOT NULL UNIQUE, invite BLOB NOT NULL
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_key TEXT UNIQUE,
+  phone BLOB, invite_hash TEXT NOT NULL UNIQUE, invite BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES profiles(id),
@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS devices (
   device_hash TEXT PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, label TEXT NOT NULL,
   expires_at INTEGER NOT NULL, user_id TEXT REFERENCES profiles(id), agent_id TEXT REFERENCES agents(id), consumed INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS local_pairings (
+  device_hash TEXT PRIMARY KEY REFERENCES devices(device_hash),
+  credential_id TEXT REFERENCES credentials(id), ready_at INTEGER, last_seen_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS channels (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES profiles(id), kind TEXT NOT NULL,
   destination BLOB NOT NULL, verified INTEGER NOT NULL DEFAULT 0, UNIQUE(user_id,kind)
@@ -66,6 +70,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 CREATE TABLE IF NOT EXISTS channel_challenges (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES profiles(id), credential_id TEXT NOT NULL REFERENCES credentials(id),
+  kind TEXT NOT NULL DEFAULT 'email',
   destination_key TEXT NOT NULL, code_hash TEXT NOT NULL, data BLOB NOT NULL,
   expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, used INTEGER NOT NULL DEFAULT 0
 );
@@ -74,6 +79,14 @@ CREATE TABLE IF NOT EXISTS oauth_links (
   state_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES profiles(id),
   credential_id TEXT NOT NULL REFERENCES credentials(id), data BLOB NOT NULL,
   expires_at INTEGER NOT NULL, phase TEXT NOT NULL DEFAULT 'pending'
+);
+CREATE TABLE IF NOT EXISTS login_states (
+  state_hash TEXT PRIMARY KEY, browser_hash TEXT NOT NULL,
+  data BLOB NOT NULL, expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_identities (
+  provider TEXT NOT NULL, subject_key TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES profiles(id),
+  data BLOB NOT NULL, PRIMARY KEY(provider,subject_key), UNIQUE(provider,user_id)
 );
 CREATE TABLE IF NOT EXISTS cloud_jobs (
   task_id TEXT PRIMARY KEY REFERENCES tasks(id), phase TEXT NOT NULL,

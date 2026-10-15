@@ -163,7 +163,7 @@ async fn read_cli(settings: &RunnerConfig) -> Result<Map<String, Value>> {
         NativeAgent::Codex => strings(&["mcp", "list", "--json"]),
         NativeAgent::OpenCode => strings(&["--pure", "debug", "config"]),
         NativeAgent::Hermes => strings(&["config", "get", "mcp_servers", "--json"]),
-        NativeAgent::OpenClaw => strings(&["config", "get", "mcp", "--json"]),
+        NativeAgent::OpenClaw => strings(&["mcp", "list", "--json"]),
         _ => unreachable!(),
     };
     let output = run(&settings.executable, &settings.workspace, &args).await?;
@@ -174,7 +174,6 @@ async fn read_cli(settings: &RunnerConfig) -> Result<Map<String, Value>> {
             + &String::from_utf8_lossy(&output.stdout);
         let missing = match settings.agent {
             NativeAgent::Hermes => message.contains("Config key not set: mcp_servers"),
-            NativeAgent::OpenClaw => message.contains("Config path not found: mcp"),
             _ => false,
         };
         if missing {
@@ -218,8 +217,7 @@ async fn read_cli(settings: &RunnerConfig) -> Result<Map<String, Value>> {
             let mcp = value.get("mcp");
             map(mcp.and_then(|v| v.get("servers")).or(mcp))
         }
-        NativeAgent::OpenClaw => map(value.get("servers")),
-        NativeAgent::Hermes => map(Some(&value)),
+        NativeAgent::OpenClaw | NativeAgent::Hermes => map(Some(&value)),
         _ => unreachable!(),
     }
 }
@@ -772,7 +770,6 @@ if [ ! -f fail-save ]; then cp expected.json actual.json; fi
                     match agent {
                     NativeAgent::Codex => Value::Array(servers.as_object().unwrap().iter().map(|(name, transport)| json!({"name":name,"enabled":true,"transport":transport})).collect()),
                     NativeAgent::OpenCode => json!({"mcp":servers}),
-                    NativeAgent::OpenClaw => json!({"servers":servers}),
                     _ => servers,
                 }
                 };

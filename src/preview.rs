@@ -57,6 +57,7 @@ pub async fn run(no_browser: bool) -> Result<()> {
     );
     onboarding::setup(
         Setup {
+            connect_code: None,
             relay: Some(origin.clone()),
             name: "Local preview".into(),
             reconnect: false,

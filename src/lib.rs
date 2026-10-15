@@ -14,6 +14,7 @@ pub mod crypto;
 pub mod devin;
 pub mod email_replies;
 pub mod error;
+pub mod google;
 pub mod mcp;
 pub mod model;
 pub mod notifications;

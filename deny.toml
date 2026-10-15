@@ -11,6 +11,10 @@ targets = [
 db-urls = ["https://github.com/RustSec/advisory-db"]
 unmaintained = "all"
 yanked = "deny"
+# openidconnect uses RSA public keys to verify Google's signatures. Litecom
+# never performs RSA private-key operations outside its public-key test fixture.
+# Reassess this exception before adding RSA signing or decryption.
+ignore = [{ id = "RUSTSEC-2023-0071", reason = "Private-key timing leakage is not reachable: production uses public-key verification only; see SECURITY.md." }]
 
 [licenses]
 include-dev = true

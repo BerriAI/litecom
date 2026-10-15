@@ -42,7 +42,7 @@ enum Command {
         #[arg(long)]
         no_browser: bool,
     },
-    /// Connect this computer or harness to your phone account.
+    /// Connect this computer or harness to your account.
     Setup(Setup),
     /// Listen for requests and run approved work with your chosen agent.
     Worker {

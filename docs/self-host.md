@@ -1,27 +1,55 @@
 # Run your own Litecom server
 
-Set up **one shared server and one sending phone number** for everyone. This page is for the person running that service. People joining it follow [Connect your agent](setup.md); they do not need a hosting account, AgentPhone account, API key, or their own sending number.
+You configure the shared service once: **hosting, Google sign-in, and at least one approval channel**. Users get a link, sign in, and connect their own destination. They never need your provider credentials or their own sending number.
 
 ## What you set up once
 
-1. **A running server:** one Litecom relay, an HTTPS address, and a persistent data directory. Use the downloadable executable or the Docker image built from this repository on your preferred host.
-2. **A sending number:** one AgentPhone agent and two-way number, with outbound messaging enabled and its signed webhook connected to the relay. US SMS carrier registration can take days; start it alongside the server setup. The [phone setup](approval-channels.md#phone) covers registration and the four environment values.
-3. **A working first request:** sign in, connect your coding agent, and ask it for a short reply. Receive the approval text, reply to approve, and check the delivered result.
-4. **A backup and a handoff:** back up the data directory and encryption key, then give people your server's setup command. Add Slack and email only when you want them.
+| Part | Host setup | What users do |
+| --- | --- | --- |
+| Server | Run Litecom at an HTTPS address with persistent storage | Open your link |
+| Google | Create a web OAuth client; save two credentials and the callback below | Continue with Google |
+| Slack, optional | Create the prefilled app; save its three credentials | Connect Slack → Allow |
+| Email, optional | Provide SMTP delivery and a dedicated IMAP reply mailbox | Confirm their Google email address |
+| Phone, optional | Get an AgentPhone number, finish carrier registration, and connect its webhook | Enter their number and verification code |
 
-There is no separate database service, model account, or coding agent required on the relay. It stores accounts, requests, approvals, and transfers. Local work runs in each user's installed agent; connected cloud agents run at their provider.
+Choose any combination of channels. Litecom only offers configured channels with incoming approval support. Connecting a provider is not proof of delivery: test a complete request and approval before inviting users.
 
-## What each person does
+There is no separate database service, model account, or coding agent required on the relay. Local work runs through each person’s existing agent. Cloud work runs at their connected provider.
 
-Send them a [Litecom download](distribution.md) and this command, replacing `YOUR-DOMAIN` with your server:
+## Enable Google sign-in
 
-```sh
-./litecom setup --relay https://YOUR-DOMAIN
-```
+Use the same direct Google OAuth/OpenID Connect approach as LiteReview; no separate authentication service is needed.
 
-They choose **Phone**, **Slack**, or **Email** for approvals, verify their phone, and pick an installed coding agent and working folder. Litecom connects MCP and starts its background worker. This happens once per computer; normal requests need only the message approval. People add each other by sharing a contact link.
+1. In [Google Cloud’s Clients page](https://console.cloud.google.com/auth/clients), create an OAuth client of type **Web application**. Complete your app’s branding and audience settings if Google asks.
+2. Add this authorized redirect URI, replacing the domain with your public server address:
 
-The server address is the only hosting detail in that command. A distribution built with your live `LITECOM_DEFAULT_RELAY` can omit `--relay`. Hosting and messaging credentials never go to end users.
+   ```text
+   https://YOUR-DOMAIN/api/auth/google/callback
+   ```
+
+3. Set these values on the relay and restart it:
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=your_web_client_id
+   GOOGLE_CLIENT_SECRET=your_web_client_secret
+   GOOGLE_ALLOWED_DOMAINS=yourcompany.com
+   ```
+
+`GOOGLE_ALLOWED_DOMAINS` is optional and accepts comma-separated Google Workspace domains. Leave it empty only if any verified Google account may join this server and see its people/agent directory. Domain restrictions are checked against Google’s verified Workspace claim and enforced on existing account connections too. Restricting domains disables phone-only signup.
+
+Keep the client secret on the server. Use Google’s audience/publishing controls to make sign-in available to the intended users. The callback must exactly match the configured URL. [Google’s setup reference](https://developers.google.com/identity/openid-connect/openid-connect#settingup).
+
+## Enable approval channels
+
+Configure at least one of [Slack, Email, or Phone](approval-channels.md#configure-the-relay). For Slack, opening `https://YOUR-DOMAIN/setup/slack` prefills app creation with the required scopes and callbacks. Email requires both outgoing delivery and incoming replies. Phone requires an outbound-enabled number; carrier registration can delay readiness.
+
+Save a backup of the data and encryption key, then test sign-in, channel connection, one request, message approval, and the final result. Send users your server’s homepage link. Their [setup guide](setup.md) covers every route and separates provider prompts from Litecom’s click counts.
+
+## What users do
+
+**Google → one approval channel → workspace.** They can find people and send contact requests immediately. Connecting their own agent is optional: **Agents → Connect local agent → Copy command → paste and run**. The command connects that browser account, configures MCP, and starts the background worker.
+
+The installer fetches a version-matched GitHub release through cargo-dist. Before sharing a deployment, verify its native release assets are published and accessible to those users. Private repository downloads require repository access; public onboarding requires public assets. The checked-in source and a successful server deployment alone do not publish them.
 
 ## Choose a host
 
@@ -40,7 +68,7 @@ The Compose route below adds HTTPS for a server you manage yourself. Public cont
 
 ## Start with Docker Compose
 
-You need this checkout, Docker with Compose, and a server with a domain pointing to it. Allow inbound ports **80 and 443**. You also need an AgentPhone account with a sender enabled for the countries you support. [Provider setup](approval-channels.md) covers the required account values and optional Slack/email delivery.
+You need this checkout, Docker with Compose, and a server with a domain pointing to it. Allow inbound ports **80 and 443**. You also need Google OAuth credentials and at least one configured approval provider. [Provider setup](approval-channels.md) covers the required account values and optional Slack/email delivery.
 
 From the repository folder:
 
@@ -49,7 +77,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Edit `.env`. Set your domain in `LITECOM_HOST`, your certificate contact address in `ACME_EMAIL`, and the four AgentPhone values from [phone setup](approval-channels.md#phone). Leave the SMTP and Slack values empty until you want those approval channels.
+Edit `.env`. Set your domain in `LITECOM_HOST`, your certificate contact address in `ACME_EMAIL`, the Google values above, and your chosen approval channel values. Leave unused channels empty; a phone number is not required for a Google + Slack or Email deployment.
 
 ```sh
 docker compose up -d --build
@@ -58,11 +86,7 @@ docker compose ps
 
 The relay should become **healthy** and the HTTPS service should be running. The initial build takes longer than later starts. Caddy obtains and renews HTTPS certificates for your domain; the relay's internal port is not published. [Caddy's domain requirements](https://caddyserver.com/docs/automatic-https)
 
-Open `https://YOUR-DOMAIN` using the domain you configured. Sign in with your phone, then connect a client:
-
-```sh
-litecom setup --relay https://YOUR-DOMAIN
-```
+Open `https://YOUR-DOMAIN` using the domain you configured. Sign in with Google, choose your approval channel, then use **Connect local agent** to obtain the complete client command.
 
 Ask your own agent for a short reply. Approve once in a connected channel, then receive the result. Seeing that reply verifies the useful path beyond container health. Real message delivery and your chosen agent's login must work for this check to pass.
 

@@ -4,6 +4,9 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
+#[path = "onboarding_tests.rs"]
+mod onboarding_tests;
+
 #[path = "channel_reply_tests.rs"]
 mod channel_reply_tests;
 

@@ -15,10 +15,7 @@ fn live_backup_restores_data_without_reviving_access_or_running_actions() {
     store.enable_phone(&a).unwrap();
     store.enable_phone(&b).unwrap();
     let agent = store.agents(&b, &b.user_id).unwrap()[0].id.clone();
-    let device = store.begin_device("backup test worker").unwrap();
-    store
-        .authorize_device(&b, &device.user_code, &agent)
-        .unwrap();
+    let device = store.begin_local_connection(&b, &agent).unwrap();
     let worker_token = store
         .poll_device(&device.device_code)
         .unwrap()

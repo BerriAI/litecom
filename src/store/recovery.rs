@@ -6,7 +6,8 @@ impl Store {
     pub(crate) fn quarantine_restored_state(&self) -> Result<()> {
         self.transaction(|| {
             self.db.execute_batch("UPDATE credentials SET revoked=1;
-                DELETE FROM otp; DELETE FROM devices; DELETE FROM channel_challenges;
+                DELETE FROM otp; DELETE FROM local_pairings; DELETE FROM devices; DELETE FROM channel_challenges;
+                DELETE FROM login_states;
                 DELETE FROM oauth_links; DELETE FROM channel_actions; DELETE FROM deliveries; DELETE FROM channels;
                 DELETE FROM cloud_jobs; DELETE FROM tool_permissions;
                 UPDATE agents SET config=NULL,last_seen_at=NULL;

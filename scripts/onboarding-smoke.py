@@ -101,7 +101,11 @@ done
             terminal = Terminal(command, env, work)
             terminal.until('Where do you want to approve requests?')
             if args.approval=='email':
-                os.write(terminal.master,b'\x1b[B\x1b[B')
+                os.write(terminal.master,b'\x1b[B')
+            terminal.enter()
+            terminal.until('Which agent should handle your requests?')
+            terminal.enter()
+            terminal.until('Folder your agent can work in')
             terminal.enter()
             output = terminal.until('?approve='+args.approval)
             url = re.search(re.escape(args.url)+r'/connect/[A-Za-z0-9-]+\?approve='+args.approval,output).group(0)
@@ -111,16 +115,17 @@ done
             phone = '+1202'+str(int(time.time()))[-6:]+'7'
             page.get_by_label('Your name').fill('Onboarding test')
             page.get_by_label('Phone number').fill(phone)
+            email=connection+'@example.test'
+            if args.approval=='email':
+                page.get_by_label('Email for approvals').fill(email)
             page.get_by_role('button',name='Send sign-in code').click()
             expect(page.get_by_label('Sign-in code')).to_be_visible()
             code = re.findall(re.escape(phone)+r': Your Litecom sign-in code is (\d{6})', args.dev_log.read_text())[-1]
+            page.reload()
+            expect(page.get_by_label('Sign-in code')).to_be_visible()
             page.get_by_label('Sign-in code').fill(code)
             page.get_by_role('button',name='Continue',exact=True).click()
             if args.approval=='email':
-                expect(page.get_by_label('Email address')).to_be_visible()
-                email=connection+'@example.test'
-                page.get_by_label('Email address').fill(email)
-                page.get_by_role('button',name='Send email code').click()
                 expect(page.get_by_label('Email code')).to_be_visible()
                 email_code=re.findall(re.escape(email)+r': Your Litecom email code is (\d{6})',args.dev_log.read_text())[-1]
                 page.reload()
@@ -129,10 +134,6 @@ done
                 page.get_by_role('button',name='Connect email',exact=True).click()
             expect(page.get_by_role('heading',name='Connect this agent?')).to_be_visible()
             page.get_by_role('button',name='Connect agent',exact=True).click()
-            terminal.until('Which agent should handle your requests?')
-            terminal.enter()
-            terminal.until('Folder your agent can work in')
-            terminal.enter()
             terminal.until('Add a person:')
             terminal.finish()
             terminal.close()
@@ -210,7 +211,7 @@ done
             terminal = None
             assert (root/'config'/'connections'/f'{connection}.json').exists()
             print('PASS: phone-first terminal setup, one channel choice, native detection, default folder, repeat setup, self request, one request approval, automatic delivery, verified download, revoked-connection recovery; fake agent and local delivery.')
-            print('Measured setup: 3 terminal confirmations + '+('5 browser buttons + 5 typed fields' if args.approval=='email' else '3 browser buttons + 3 typed fields')+'. Installation, server address, code reading and selection navigation are additional prerequisites/work.')
+            print('Measured setup: 3 terminal confirmations + '+('4 browser buttons + 5 typed fields' if args.approval=='email' else '3 browser buttons + 3 typed fields')+'. Installation, server address, code reading and selection navigation are additional prerequisites/work.')
             if args.with_service:
                 print('PASS: actual macOS background startup and queue heartbeat; temporary service removed in cleanup.')
         except Exception:

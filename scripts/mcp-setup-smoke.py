@@ -15,10 +15,12 @@ import tomllib
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--agent', choices=['codex', 'claude', 'opencode', 'pi'], required=True)
+parser.add_argument('--agent', choices=['codex', 'claude', 'opencode', 'pi', 'openclaw'], required=True)
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
 parser.add_argument('--path', action='append', default=[], help='Additional installed agent bin directory')
+parser.add_argument('--empty-config', action='store_true', help='Start with no MCP servers')
 args = parser.parse_args()
+expected_name = 'litecom' if args.empty_config else 'litecom_2'
 binary = args.binary.resolve()
 
 with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
@@ -30,12 +32,18 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                XDG_CACHE_HOME=str(root/'cache'), XDG_STATE_HOME=str(root/'state'),
                OPENCODE_CONFIG_DIR=str(root/'opencode'), PI_CODING_AGENT_DIR=str(root/'pi'),
                CODEX_HOME=str(root/'codex'), CLAUDE_CONFIG_DIR=str(root/'claude'),
+               OPENCLAW_CONFIG_PATH=str(root/'openclaw.json'), OPENCLAW_STATE_DIR=str(root/'openclaw'),
+               OPENCLAW_HIDE_BANNER='1', OPENCLAW_SUPPRESS_NOTES='1',
                PATH=os.pathsep.join(args.path+[os.environ['PATH']]))
     # A conflicting, disabled server must survive setup and never be launched.
     if args.agent == 'opencode':
         config = root/'config/opencode/opencode.json'
         initial = {'mcp': {'litecom': {'type': 'local', 'command': ['do-not-run'], 'enabled': False}}}
         key = 'mcp'
+    elif args.agent == 'openclaw':
+        config = root/'openclaw.json'
+        initial = {'servers': {'litecom': {'command': 'do-not-run', 'enabled': False}}}
+        key = 'servers'
     elif args.agent == 'pi':
         config = root/'pi/mcp.json'
         initial = {'mcpServers': {'litecom': {'command': 'do-not-run', 'enabled': False}}}
@@ -48,11 +56,19 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
         config = root/'claude/.claude.json'
         initial = {'mcpServers': {'litecom': {'type': 'stdio', 'command': 'do-not-run', 'args': [], 'env': {}}}}
         key = 'mcpServers'
+    if args.empty_config:
+        initial[key] = {}
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text('[mcp_servers.litecom]\ncommand = "do-not-run"\nenabled = false\n' if args.agent == 'codex' else json.dumps(initial))
+    if args.agent == 'codex':
+        config.write_text('' if args.empty_config else '[mcp_servers.litecom]\ncommand = "do-not-run"\nenabled = false\n')
+    elif args.agent == 'openclaw':
+        config.write_text('{}' if args.empty_config else json.dumps({'mcp': initial}))
+    else:
+        config.write_text(json.dumps(initial))
 
     def read_config():
-        return tomllib.loads(config.read_text()) if args.agent == 'codex' else json.loads(config.read_text())
+        value = tomllib.loads(config.read_text()) if args.agent == 'codex' else json.loads(config.read_text())
+        return value.get('mcp', {'servers': {}}) if args.agent == 'openclaw' else value
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
@@ -116,8 +132,9 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
             assert setup.returncode == 0, output
             saved = config.read_text()
             servers = read_config()[key]
-            assert servers['litecom'] == initial[key]['litecom'], servers
-            assert 'litecom_2' in servers, servers
+            if not args.empty_config:
+                assert servers['litecom'] == initial[key]['litecom'], servers
+            assert expected_name in servers, servers
             # Repeated setup should verify/reuse, not rewrite, the native config.
             repeated = subprocess.run(command, env=env, cwd=work, stdin=subprocess.DEVNULL,
                                       capture_output=True, text=True, timeout=50)
@@ -127,9 +144,11 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
             if args.agent == 'opencode':
                 client_command.insert(1, '--pure')
             elif args.agent == 'claude':
-                client_command = ['claude', 'mcp', 'get', 'litecom_2']
+                client_command = ['claude', 'mcp', 'get', expected_name]
             elif args.agent == 'codex':
-                client_command = ['codex', 'mcp', 'get', 'litecom_2', '--json']
+                client_command = ['codex', 'mcp', 'get', expected_name, '--json']
+            elif args.agent == 'openclaw':
+                client_command = ['openclaw', 'mcp', 'probe', expected_name, '--json']
             checked = subprocess.run(client_command, env=env, cwd=work, stdin=subprocess.DEVNULL,
                                      capture_output=True, text=True, timeout=40)
             assert checked.returncode == 0, checked.stdout+checked.stderr
@@ -137,21 +156,26 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
             if args.agent == 'codex':
                 actual = json.loads(checked.stdout)
                 assert actual['enabled'] is True
-                assert actual['transport']['command'] == servers['litecom_2']['command']
-                assert actual['transport']['args'] == servers['litecom_2']['args']
+                assert actual['transport']['command'] == servers[expected_name]['command']
+                assert actual['transport']['args'] == servers[expected_name]['args']
             elif args.agent == 'claude':
                 assert re.search(r'Status: [✓✔] Connected', plain), plain
                 assert 'Scope: User config' in plain, plain
+            elif args.agent == 'openclaw':
+                result = json.loads(plain)
+                assert result['diagnostics'] == [], result
+                for name in ['litecom_ask', 'litecom_receive', 'litecom_contacts', 'litecom_download']:
+                    assert expected_name + '__' + name in result['tools'], result
             else:
-                assert re.search(r'litecom_2[^\n]*connected', plain, re.I), plain
+                assert re.search(re.escape(expected_name)+r'[^\n]*connected', plain, re.I), plain
 
             if args.agent in ('codex', 'claude'):
                 # A disabled existing connection must not produce an enabled duplicate.
                 if args.agent == 'codex':
-                    config.write_text(saved.replace('[mcp_servers.litecom_2]', '[mcp_servers.litecom_2]\nenabled = false'))
+                    config.write_text(saved.replace(f'[mcp_servers.{expected_name}]', f'[mcp_servers.{expected_name}]\nenabled = false'))
                 else:
                     disabled = read_config()
-                    disabled.setdefault('projects', {}).setdefault(str(work.resolve()), {})['disabledMcpServers'] = ['litecom_2']
+                    disabled.setdefault('projects', {}).setdefault(str(work.resolve()), {})['disabledMcpServers'] = [expected_name]
                     config.write_text(json.dumps(disabled))
                 disabled_servers = read_config()[key]
                 blocked = subprocess.run(command, env=env, cwd=work, stdin=subprocess.DEVNULL,
@@ -167,7 +191,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                 assert failed.returncode != 0
                 assert config.read_text() == malformed
             evidence = 'saved native configuration verified' if args.agent == 'codex' else 'native client connected'
-            print(f'PASS: real {args.agent} guided MCP setup, preserved collision, idempotent repeat, {evidence}; no model calls.')
+            print(f'PASS: real {args.agent} guided MCP setup, {"empty config" if args.empty_config else "preserved collision"}, idempotent repeat, {evidence}; no model calls.')
         finally:
             browser.close()
             for process in reversed(processes):

@@ -2,6 +2,14 @@
 
 The complete product requirements remain in [the design](design/README.md). A green unit test suite alone is not a release.
 
+## Current onboarding changes
+
+The source implements Google-first signup, a host-configured approval-channel picker, workspace people/agent discovery with mutual contact requests, and a copied terminal command that installs/connects a local agent and configures MCP without a second sign-in. Google identity is independent of phone delivery; it uses the stable Google subject, not email-based account merging.
+
+Verified locally: signed OIDC token rejection cases; browser-bound one-use login state; optional phone linking and ownership isolation; private workspace directory fields; one-use local connection and credential-specific readiness; migration from schema v2 while preserving accounts, relationships, files, and pending email verification. Google/Phone/Email/Slack browser journeys pass with provider fixtures at 320/390/1100 px. A real macOS background service and native Codex MCP configuration pass the copied-command test with an already-installed binary and deterministic agent output. The exact registered MCP command asks an accepted contact (Ishaan) and its own agent; the self-request stays idle before approval and returns the exact file afterward. The current Rust suite passes 93 tests with one ignored; Clippy and formatting pass. Dependency checks pass with the documented, non-reachable RSA private-key advisory exception in SECURITY.md.
+
+Not yet verified or rolled out: live Google consent, production Slack/Email, fresh public installer download, and Linux/Windows one-command startup. The deployed Render service still runs the earlier build; outbound phone delivery awaits carrier registration. No native release is published yet. Connecting an existing phone-only account to Google, instead of creating a separate account, remains unimplemented; never auto-merge by email.
+
 Litecom connects to existing agents. It does not ship its own reasoning agent or model tool loop. The required agent set is OpenCode, Codex, pi, Claude Code, Cursor, Devin, OpenClaw, and Hermes; individual evidence must support each claim.
 
 | Requirement | Evidence needed | State |
@@ -12,11 +20,11 @@ Litecom connects to existing agents. It does not ship its own reasoning agent or
 | GitHub Write access example | Ordinary request through the selected agent's existing GitHub tools; exact recipient/repository approval and truthful grant/invitation result | Pending live harness demonstration; no GitHub-specific Litecom connector or action handler is in scope |
 | Terminal setup | Phone/Slack/Email choice, saved progress, main harness, sources, measured controls | Phone path, native detection, folder, saved progress, reconnect, repeat setup and macOS startup pass; Email linking tested locally; Slack/provider validation and clean consumer install pending |
 | Phone signup and approval | Real OTP, delivery, opt-out, new-device authentication, mobile review | Real inbound SMS and signed callback pass; outgoing sign-in and approval await carrier registration |
-| Slack linking and approval | Phone identity, real app install, signed button approval, original message update | Confidential OAuth, session-bound linking, signed callbacks, token refresh and message-update fixture tests pass; real workspace flow pending |
-| Email linking and approval | Phone identity, notification email verification, real mail delivery and reply approval | Local terminal/browser email setup, reply authorization, MIME parsing and IMAP restart/checkpoint tests pass; real SMTP/IMAP service validation pending |
+| Slack linking and approval | Google account, real app install, signed button approval, original message update | Confidential OAuth, session-bound linking, signed callbacks, token refresh and message-update fixture tests pass; real workspace flow pending |
+| Email linking and approval | Google account, notification email verification, real mail delivery and reply approval | Local terminal/browser email setup, reply authorization, MIME parsing and IMAP restart/checkpoint tests pass; real SMTP/IMAP service validation pending |
 | Multiple approval channels | Account linking, concurrent decisions and synchronization | Signed SMS/Slack callbacks, email reply capabilities, stale/duplicate/foreign decisions, and shared state tests pass; actual provider delivery pending |
 | Easy contacts | Share link, mutual acceptance, name lookup and ambiguity handling | Core and browser flow pass; live multi-device onboarding pending |
-| One phone identity across agents | Verified phone account, independently revocable agent connections, shared contacts/requests from every harness | Pending |
+| One account across agents | Verified Google identity with optional phone, independently revocable agent connections, shared contacts/requests from every harness | Pending |
 | Named local and cloud agents | “Get Moe” resolves his default; “get Moe’s Devin” selects Devin; real cloud execution while laptop is offline | Devin transport, relay worker, connection UI and persisted jobs implemented; restart, privacy, failed-launch and cancellation fixtures pass. Live account and generic A2A dispatch pending |
 | MCP | Official client integration and supported harness matrix | Official SDK launch/tools probe and real Codex/Claude/OpenCode/Pi setup pass. Remaining live harness matrix pending |
 | A2A | Released SDK interoperability, task/artifact/auth lifecycle | Official A2A JavaScript SDK 1.3.0 discovery, request/retry, blocking completion, private artifacts, exact download and cancellation checks pass; full conformance remains pending |
@@ -128,6 +136,8 @@ Pi uses the unmodified, published `pi-acp` 0.0.34 package through the shared ACP
 The reviewed adapter preserves native Pi tools and extensions but does not inject ACP session MCP servers. It forwards extension confirmations, not every tool operation. Litecom declines ambiguous multiple-choice permission requests; free-text extension prompts are unsupported upstream. Upstream can map some Pi failures to ACP `end_turn`, so that status is not independent proof that an external action succeeded. Live provider/error recovery and native context checks remain required before declaring full Pi compatibility.
 
 OpenCode 1.18.29 negotiated ACP v1 and created a session in an isolated configuration without a model call. Cursor, OpenClaw, and Hermes have named ACP presets and native MCP setup implementations; live execution and native CLI validation remain pending. OpenClaw's configuration ownership can require stopping its gateway to add a server. Custom profile environments and gateway attachment access also need validation. See the [agent matrix](agents.md).
+
+Subsequent OpenClaw 2026.10.3 validation passed real terminal/browser setup, a native MCP probe, and an unchanged repeat setup with both empty and conflicting MCP configurations. An empty configuration exposed an outdated missing-key diagnostic assumption; setup now uses OpenClaw's dedicated `mcp list --json` command. These checks use an isolated profile and no running gateway or model, so gateway execution remains unverified.
 
 ## Source checkpoint
 

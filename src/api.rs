@@ -74,7 +74,9 @@ impl AppState {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
         {
-            return self.db()?.authenticate(token, Role::Agent);
+            let p = self.db()?.authenticate(token, Role::Agent)?;
+            self.check_workspace(&p)?;
+            return Ok(p);
         }
         let token = cookie(h, "litecom_session").ok_or(Error::Unauthorized)?;
         let db = self.db()?;
@@ -88,7 +90,22 @@ impl AppState {
                     .unwrap_or(""),
             )?;
         }
+        drop(db);
+        self.check_workspace(&p)?;
         Ok(p)
+    }
+    fn check_workspace(&self, p: &Principal) -> Result<()> {
+        if let Some(google) = &self.providers.google {
+            let identity = self.db()?.google_identity_for(&p.user_id)?;
+            require(
+                match identity {
+                    Some(identity) => google.permits(&identity),
+                    None => !google.restricts_workspace(),
+                },
+                "Sign in with a Google account from this server's approved workspace.",
+            )?;
+        }
+        Ok(())
     }
     fn cookie(&self, name: &str, value: &str, http_only: bool, age: i64) -> String {
         format!(
@@ -134,6 +151,27 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
         )
         .route("/api/capabilities", get(capabilities))
+        .route("/setup/slack", get(slack_app_setup))
+        .route(
+            "/install.sh",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    include_str!("install/connect.sh")
+                        .replace("@VERSION@", env!("CARGO_PKG_VERSION")),
+                )
+            }),
+        )
+        .route(
+            "/install.ps1",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    include_str!("install/connect.ps1")
+                        .replace("@VERSION@", env!("CARGO_PKG_VERSION")),
+                )
+            }),
+        )
         .route(
             "/webhooks/agentphone",
             post(crate::channel_replies::agentphone),
@@ -163,6 +201,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/me", get(me))
         .route("/api/channels", get(channels))
         .route("/api/channels/phone", post(enable_phone))
+        .route("/api/channels/phone/start", post(start_phone))
+        .route("/api/channels/phone/verify", post(verify_phone))
+        .route("/api/account", get(account))
+        .route("/api/auth/google", get(google_start))
+        .route("/api/auth/google/callback", get(google_callback))
+        .route("/api/channels/email/google", post(use_google_email))
         .route("/api/channels/email/start", post(start_email))
         .route("/api/channels/email/verify", post(verify_email))
         .route("/api/channels/slack/start", post(start_slack))
@@ -174,8 +218,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agents/{id}", delete(revoke_agent))
         .route("/api/agents/{id}/default", post(default_agent))
         .route("/api/connections", get(connections))
+        .route("/api/connections/local", post(start_local_connection))
+        .route(
+            "/api/connections/local/{code}",
+            get(local_connection_status),
+        )
+        .route("/api/connection/ready", post(local_connection_ready))
         .route("/api/connections/{id}", delete(revoke_connection))
         .route("/api/contacts", get(contacts).post(add_contact))
+        .route("/api/people", get(people))
+        .route("/api/people/{id}/contact", post(contact_person))
         .route("/api/contacts/{id}/accept", post(accept_contact))
         .route("/api/contacts/{id}/block", post(block_contact))
         .route("/api/invite/rotate", post(rotate_invite))
@@ -258,7 +310,13 @@ async fn authenticate_api(
     next: Next,
 ) -> Result<Response> {
     let path = request.uri().path();
-    if (path.starts_with("/api/") && path != "/api/capabilities") || path.starts_with("/a2a/") {
+    if (path.starts_with("/api/")
+        && !matches!(
+            path,
+            "/api/capabilities" | "/api/auth/google" | "/api/auth/google/callback"
+        ))
+        || path.starts_with("/a2a/")
+    {
         s.principal(
             request.headers(),
             !matches!(
@@ -290,10 +348,161 @@ async fn security_headers(request: axum::extract::Request, next: Next) -> Respon
     }
     response
 }
+async fn slack_app_setup(State(s): State<AppState>) -> axum::response::Redirect {
+    let manifest = json!({
+        "display_information":{"name":"Litecom","description":"Ask someone's agent. They approve. It gets done."},
+        "features":{"bot_user":{"display_name":"Litecom","always_online":false}},
+        "oauth_config":{"redirect_urls":[format!("{}/oauth/slack/callback",s.origin)],"scopes":{"bot":["chat:write","im:write"]}},
+        "settings":{"interactivity":{"is_enabled":true,"request_url":format!("{}/webhooks/slack",s.origin)},"socket_mode_enabled":false}
+    });
+    let mut url = url::Url::parse("https://api.slack.com/apps").expect("constant Slack URL");
+    url.query_pairs_mut()
+        .append_pair("new_app", "1")
+        .append_pair("manifest_json", &manifest.to_string());
+    axum::response::Redirect::to(url.as_str())
+}
 async fn capabilities(State(s): State<AppState>) -> Json<Value> {
     Json(
-        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.phone_provider().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
+        json!({"google":s.providers.google.is_some(),"phone_signin":s.providers.phone_available() && !s.providers.google.as_ref().is_some_and(|g|g.restricts_workspace()),"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.phone_provider().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
     )
+}
+#[derive(serde::Serialize, Deserialize)]
+struct GoogleLoginState {
+    pending: crate::google::PendingGoogle,
+    next: String,
+}
+#[derive(Deserialize)]
+struct GoogleStart {
+    next: Option<String>,
+}
+fn login_return(value: &str) -> String {
+    let base = url::Url::parse("https://litecom.invalid").expect("constant URL");
+    let Ok(url) = base.join(value) else {
+        return "/".into();
+    };
+    if url.origin() != base.origin() {
+        return "/".into();
+    }
+    let path = url.path();
+    if !matches!(
+        path,
+        "/" | "/workspace" | "/contacts" | "/agents" | "/settings"
+    ) && !["/connect/", "/request/", "/invite/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        return "/".into();
+    }
+    let channel = url.query_pairs().find(|(key, value)| {
+        key == "approve" && matches!(value.as_ref(), "phone" | "email" | "slack")
+    });
+    match channel {
+        Some((_, value)) => format!("{path}?approve={value}"),
+        None => path.into(),
+    }
+}
+async fn google_start(State(s): State<AppState>, Query(v): Query<GoogleStart>) -> Result<Response> {
+    s.limit("google-login", 30)?;
+    let google = s.providers.google.as_ref().ok_or_else(|| {
+        Error::Unavailable("Google sign-in is not configured on this server.".into())
+    })?;
+    let (state, browser) = (secret(), secret());
+    let (url, pending) = google.begin(&s.origin, &state);
+    s.db()?.save_login_state(
+        &state,
+        &browser,
+        &GoogleLoginState {
+            pending,
+            next: login_return(v.next.as_deref().unwrap_or("/")),
+        },
+    )?;
+    cookies(
+        axum::response::Redirect::to(url.as_str()).into_response(),
+        vec![
+            s.cookie("litecom_google", &browser, true, 600)
+                .replace("SameSite=Strict", "SameSite=Lax"),
+        ],
+    )
+}
+#[derive(Deserialize)]
+struct GoogleCallback {
+    state: String,
+    code: Option<String>,
+    error: Option<String>,
+}
+async fn google_callback(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Query(v): Query<GoogleCallback>,
+) -> Result<Response> {
+    let google = s.providers.google.as_ref().ok_or_else(|| {
+        Error::Unavailable("Google sign-in is not configured on this server.".into())
+    })?;
+    let login: GoogleLoginState = match s
+        .db()?
+        .take_login_state(&v.state, &cookie(&h, "litecom_google").unwrap_or_default())
+    {
+        Ok(login) => login,
+        Err(_) => {
+            return cookies(
+                axum::response::Redirect::to("/?signin=expired").into_response(),
+                vec![s.cookie("litecom_google", "", true, 0)],
+            );
+        }
+    };
+    if v.error.is_some() || v.code.as_deref().is_none_or(str::is_empty) {
+        return cookies(
+            axum::response::Redirect::to("/?signin=cancelled").into_response(),
+            vec![s.cookie("litecom_google", "", true, 0)],
+        );
+    }
+    let identity = match google
+        .exchange(
+            s.providers.http(),
+            &s.origin,
+            v.code.unwrap(),
+            &login.pending,
+        )
+        .await
+    {
+        Ok(identity) => identity,
+        Err(_) => {
+            return cookies(
+                axum::response::Redirect::to("/?signin=failed").into_response(),
+                vec![s.cookie("litecom_google", "", true, 0)],
+            );
+        }
+    };
+    let session = {
+        let db = s.db()?;
+        db.session_for(db.google_profile(&identity)?)?
+    };
+    cookies(
+        axum::response::Redirect::to(&login.next).into_response(),
+        vec![
+            s.cookie("litecom_google", "", true, 0),
+            s.cookie("litecom_session", &session.token, true, 30 * 86400),
+            s.cookie("litecom_csrf", &session.csrf, false, 30 * 86400),
+        ],
+    )
+}
+async fn account(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>> {
+    let p = s.principal(&h, false)?;
+    p.human()?;
+    let db = s.db()?;
+    Ok(Json(
+        json!({"google_email":db.google_identity(&p)?.map(|v|v.email),"has_phone":db.has_phone(&p)?}),
+    ))
+}
+async fn use_google_email(State(s): State<AppState>, h: HeaderMap) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    if !s.providers.email_available() {
+        return Err(Error::Unavailable(
+            "Email is not enabled on this server.".into(),
+        ));
+    }
+    s.db()?.connect_google_email(&p)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
 struct LoginInput {
@@ -307,6 +516,15 @@ async fn start_login(
 ) -> Result<Response> {
     s.origin(&h)?;
     s.limit("login-global", 30)?;
+    if s.providers
+        .google
+        .as_ref()
+        .is_some_and(|g| g.restricts_workspace())
+    {
+        return Err(Error::Forbidden(
+            "Sign in with Google to join this workspace.".into(),
+        ));
+    }
     if !s.providers.phone_available() {
         return Err(Error::Unavailable(
             "Phone delivery is not enabled on this server.".into(),
@@ -396,6 +614,32 @@ async fn device_info(
 #[derive(Deserialize)]
 struct AgentChoice {
     agent_id: String,
+}
+async fn start_local_connection(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<AgentChoice>,
+) -> Result<Json<crate::auth::DeviceCode>> {
+    let p = s.principal(&h, true)?;
+    s.limit(&format!("connect:{}", p.user_id), 10)?;
+    Ok(Json(s.db()?.begin_local_connection(&p, &v.agent_id)?))
+}
+async fn local_connection_status(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(code): Path<String>,
+) -> Result<Json<Value>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(
+        json!({"status":s.db()?.local_connection_status(&p, &code)?}),
+    ))
+}
+async fn local_connection_ready(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>> {
+    let p = s.principal(&h, true)?;
+    s.db()?.local_connection_ready(&p)?;
+    Ok(Json(
+        json!({"listening":s.db()?.local_connection_listening(&p)?}),
+    ))
 }
 async fn authorize_device(
     State(s): State<AppState>,
@@ -938,8 +1182,54 @@ async fn channels(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Value>
 }
 async fn enable_phone(State(s): State<AppState>, h: HeaderMap) -> Result<StatusCode> {
     let p = s.principal(&h, true)?;
+    if !s.providers.phone_available() {
+        return Err(Error::Unavailable(
+            "Phone is not enabled on this server.".into(),
+        ));
+    }
     s.db()?.enable_phone(&p)?;
     Ok(StatusCode::NO_CONTENT)
+}
+#[derive(Deserialize)]
+struct PhoneInput {
+    phone: String,
+}
+async fn start_phone(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<PhoneInput>,
+) -> Result<Json<crate::auth::OtpChallenge>> {
+    let p = s.principal(&h, true)?;
+    if !s.providers.phone_available() {
+        return Err(Error::Unavailable(
+            "Phone is not enabled on this server.".into(),
+        ));
+    }
+    s.limit(&format!("phone:{}", p.user_id), 5)?;
+    let (challenge, code) = s.db()?.begin_phone(&p, &v.phone)?;
+    s.providers.sms(&v.phone, &format!("Your Litecom phone code is {code}. You requested this text. It expires in 10 minutes. Never share this code. Reply STOP to unsubscribe.")).await?;
+    Ok(Json(challenge))
+}
+async fn verify_phone(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<EmailVerification>,
+) -> Result<StatusCode> {
+    let p = s.principal(&h, true)?;
+    s.db()?.verify_phone(&p, &v.id, &v.code)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn people(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Vec<Contact>>> {
+    let p = s.principal(&h, false)?;
+    Ok(Json(s.db()?.people(&p)?))
+}
+async fn contact_person(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Contact>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(s.db()?.request_contact_to(&p, &id)?))
 }
 #[derive(Deserialize)]
 struct EmailInput {

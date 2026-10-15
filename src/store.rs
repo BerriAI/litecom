@@ -14,6 +14,7 @@ use std::{
 mod channel_actions;
 mod cloud;
 mod files;
+mod identities;
 mod permissions;
 mod recovery;
 pub(crate) use cloud::CloudClaim;
@@ -58,7 +59,7 @@ impl Store {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;")?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         conflict(
-            version <= 2,
+            version <= 3,
             "This database was created by a newer Litecom version.",
         )?;
         db.execute_batch(include_str!("schema.sql"))?;
@@ -107,6 +108,33 @@ impl Store {
                 store.db.pragma_update(None, "user_version", 2)?;
                 Ok(())
             })?;
+        }
+        if version < 3 {
+            // SQLite cannot remove NOT NULL in place. Rebuild only the parent
+            // table with FK enforcement temporarily off, then verify all links.
+            store.db.pragma_update(None, "foreign_keys", false)?;
+            let result = store.transaction(|| {
+                let has_kind = store.db.prepare("PRAGMA table_info(channel_challenges)")?.query_map([], |r| r.get::<_, String>(1))?.collect::<std::result::Result<Vec<_>, _>>()?.iter().any(|name| name == "kind");
+                if !has_kind { store.db.execute_batch("ALTER TABLE channel_challenges ADD COLUMN kind TEXT NOT NULL DEFAULT 'email';")?; }
+                store.db.execute_batch(
+                    "CREATE TABLE profiles_v3 (
+                        id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_key TEXT UNIQUE,
+                        phone BLOB, invite_hash TEXT NOT NULL UNIQUE, invite BLOB NOT NULL
+                    );
+                    INSERT INTO profiles_v3 SELECT * FROM profiles;
+                    DROP TABLE profiles;
+                    ALTER TABLE profiles_v3 RENAME TO profiles;",
+                )?;
+                let invalid: bool = store.db.prepare("PRAGMA foreign_key_check")?.exists([])?;
+                conflict(
+                    !invalid,
+                    "Account migration could not preserve existing relationships.",
+                )?;
+                store.db.pragma_update(None, "user_version", 3)?;
+                Ok(())
+            });
+            store.db.pragma_update(None, "foreign_keys", true)?;
+            result?;
         }
         // Older builds abandoned delivery after eight attempts. Retry active
         // destinations, while preserving the user's choice to disconnect one.
@@ -178,11 +206,14 @@ impl Store {
         })
     }
     pub(crate) fn phone(&self, user_id: &str) -> Result<String> {
-        let data: Vec<u8> =
+        let data: Option<Vec<u8>> =
             self.db
                 .query_row("SELECT phone FROM profiles WHERE id=?", [user_id], |r| {
                     r.get(0)
                 })?;
+        let data = data.ok_or_else(|| {
+            Error::Conflict("Connect a phone number before enabling text approvals.".into())
+        })?;
         self.vault.open(&data, &format!("phone:{user_id}"))
     }
     pub fn invite_profile(&self, invite: &str) -> Result<(String, String)> {
@@ -274,7 +305,7 @@ impl Store {
             Ok(agent)
         })
     }
-    fn owned_agent(&self, p: &Principal, agent_id: &str) -> Result<Agent> {
+    pub(crate) fn owned_agent(&self, p: &Principal, agent_id: &str) -> Result<Agent> {
         let agent = self
             .db
             .query_row(
@@ -358,12 +389,17 @@ impl Store {
     }
     pub fn request_contact(&self, p: &Principal, invite: &str) -> Result<Contact> {
         p.human()?;
-        let (target, name) = self.invite_profile(invite)?;
+        let (target, _) = self.invite_profile(invite)?;
+        self.request_contact_to(p, &target)
+    }
+    pub fn request_contact_to(&self, p: &Principal, target: &str) -> Result<Contact> {
+        p.human()?;
+        let name = self.profile_by_id(target)?.name;
         validate(
             target != p.user_id,
             "This is your own link. Share it with someone else.",
         )?;
-        let (a, b) = Self::pair(&p.user_id, &target);
+        let (a, b) = Self::pair(&p.user_id, target);
         let status = self.transaction(|| {
             let status: Option<String> = self
                 .db
@@ -387,12 +423,55 @@ impl Store {
             Ok("pending".to_string())
         })?;
         Ok(Contact {
-            id: target,
+            id: target.into(),
             name,
             status,
             incoming: false,
             agents: vec![],
         })
+    }
+    /// Workspace discovery deliberately excludes private destinations and
+    /// invitation credentials. Discovery does not authorize agent requests.
+    pub fn people(&self, p: &Principal) -> Result<Vec<Contact>> {
+        p.human()?;
+        let ids = self
+            .db
+            .prepare("SELECT id,name FROM profiles WHERE id!=? ORDER BY name COLLATE NOCASE,id")?
+            .query_map([&p.user_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut people = Vec::new();
+        for (id, name) in ids {
+            let (a, b) = Self::pair(&p.user_id, &id);
+            let contact: Option<(String, String)> = self
+                .db
+                .query_row(
+                    "SELECT status,initiator FROM contacts WHERE a=? AND b=?",
+                    params![a, b],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if contact
+                .as_ref()
+                .is_some_and(|(status, _)| status == "blocked")
+            {
+                continue;
+            }
+            let agents = self.db.prepare("SELECT * FROM agents WHERE owner_id=? AND revoked=0 ORDER BY is_default DESC,name")?
+                .query_map([&id], Self::agent_row)?.collect::<std::result::Result<Vec<_>, _>>()?;
+            let (status, incoming) = contact
+                .map(|(status, initiator)| (status, initiator != p.user_id))
+                .unwrap_or(("available".into(), false));
+            people.push(Contact {
+                id,
+                name,
+                status,
+                incoming,
+                agents,
+            });
+        }
+        Ok(people)
     }
     pub fn accept_contact(&self, p: &Principal, other: &str) -> Result<()> {
         p.human()?;
@@ -659,6 +738,7 @@ impl Store {
         self.recover()?;
         self.transaction(|| {
             self.db.execute("UPDATE agents SET last_seen_at=? WHERE id=?",params![self.time(),agent_id])?;
+            self.db.execute("UPDATE local_pairings SET last_seen_at=? WHERE credential_id=?",params![self.time(),p.credential_id])?;
             let selected=self.db.query_row("SELECT id FROM tasks WHERE agent_id=? AND status IN ('queued','approved') ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id LIMIT 1",[agent_id],|r|r.get::<_,String>(0)).optional()?;
             let Some(task_id)=selected else{return Ok(None)};
             let mut task=self.task(&task_id)?;

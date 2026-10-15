@@ -10,6 +10,7 @@ pub struct Providers {
     agentphone: Option<crate::agentphone::AgentPhone>,
     email: Option<Email>,
     pub slack: Option<crate::slack::Slack>,
+    pub google: Option<crate::google::Google>,
     pub dev: bool,
     slack_signing: Option<String>,
     pub(crate) imap: Option<crate::email_replies::Inbox>,
@@ -31,6 +32,7 @@ impl Providers {
             agentphone: None,
             email: None,
             slack: None,
+            google: None,
             dev: true,
             slack_signing: None,
             imap: None,
@@ -93,6 +95,19 @@ impl Providers {
                 ));
             }
         };
+        let google = match (get("GOOGLE_CLIENT_ID"), get("GOOGLE_CLIENT_SECRET")) {
+            (Some(id), Some(secret)) => Some(crate::google::Google::new(
+                id,
+                secret,
+                &get("GOOGLE_ALLOWED_DOMAINS").unwrap_or_default(),
+            )),
+            (None, None) => None,
+            _ => {
+                return Err(Error::Invalid(
+                    "Set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.".into(),
+                ));
+            }
+        };
         Ok(Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(20))
@@ -102,6 +117,7 @@ impl Providers {
             agentphone,
             email,
             slack,
+            google,
             dev,
             slack_signing: get("SLACK_SIGNING_SECRET"),
             imap: crate::email_replies::Inbox::from_env()?,
