@@ -26,7 +26,7 @@ pub struct Run {
 }
 pub(crate) struct RunGuard {
     run: Run,
-    _lock: File,
+    lock: File,
 }
 impl RunGuard {
     pub(crate) fn start(
@@ -52,7 +52,7 @@ impl RunGuard {
                 session_id: None,
                 directory: dir.into(),
             },
-            _lock: lock,
+            lock,
         };
         this.save()?;
         Ok(this)
@@ -74,6 +74,9 @@ impl Drop for RunGuard {
             self.run.status = "interrupted".into();
             let _ = self.save();
         }
+        // Explicitly unlock: a concurrent process spawn can inherit the open
+        // file until exec, delaying a lock released only by closing this file.
+        let _ = fs2::FileExt::unlock(&self.lock);
     }
 }
 fn active(dir: &Path) -> Result<bool> {
@@ -87,7 +90,10 @@ fn active(dir: &Path) -> Result<bool> {
         Err(e) => return Err(e.into()),
     };
     match fs2::FileExt::try_lock_exclusive(&file) {
-        Ok(()) => Ok(false),
+        Ok(()) => {
+            fs2::FileExt::unlock(&file)?;
+            Ok(false)
+        }
         Err(e)
             if e.kind() == std::io::ErrorKind::WouldBlock
                 || e.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
@@ -320,8 +326,19 @@ mod tests {
         let listed = list_in(root.path()).unwrap();
         assert_eq!(listed[0].status, "running");
         assert_eq!(listed[0].session_id.as_deref(), Some("session-1"));
-        drop(lock);
+        // A clone models the descriptor briefly inherited during process spawn.
+        // Finishing the guard must unlock even while that descriptor is open.
+        let inherited = lock.try_clone().unwrap();
+        let guard = RunGuard { run, lock };
+        drop(guard);
+        assert!(!active(&dir).unwrap());
+        let mut stale: Run =
+            serde_json::from_slice(&fs::read(dir.join("run.json")).unwrap()).unwrap();
+        assert_eq!(stale.status, "interrupted");
+        stale.status = "running".into();
+        config::write_private(&dir.join("run.json"), &serde_json::to_vec(&stale).unwrap()).unwrap();
         assert_eq!(list_in(root.path()).unwrap()[0].status, "interrupted");
+        drop(inherited);
         assert!(select(root.path(), Some("../../other")).is_err());
     }
 }

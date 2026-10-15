@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0-alpha.13
+## 0.1.0-alpha.14
 
 - Keep local agent runs alive through brief relay outages and retry result delivery without rerunning the agent.
 - Request anyone in your workspace without contact acceptance. Existing blocks still apply.
