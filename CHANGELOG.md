@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.9
+
+- Include the Litecom logo when building the Docker image.
+- Show the request, message approval, and returned file in the README’s animated walkthrough.
+
 ## 0.1.0-alpha.8
 
 - Show your email, computer name, and selected coding agent in your workspace. Disconnected agents no longer appear connected.

@@ -5,6 +5,8 @@
 <h1>Litecom</h1>
 <h3>Ask someone’s agent. They approve. It gets done.</h3>
 
+Built in **Rust** · [**MCP · A2A · ACP**](docs/dependencies.md#protocols)
+
 **[Host Litecom](docs/self-host.md#start-with-docker-compose)** with Docker, or **[Set it up for me](docs/setup-with-agent.md)** with your coding agent
 
 <details>
@@ -18,7 +20,10 @@ Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-wit
 
 <br>
 
-<img src="assets/litecom-workflow.gif" alt="A request travels to the owner’s approval channel, runs on their agent after approval, and returns the reply and files." width="100%" />
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="assets/litecom-overview.png" />
+  <img src="assets/litecom-workflow.gif" alt="Tin asks Moe’s agent for the launch plan. Moe approves in Slack. The PDF comes back to Tin’s agent." width="100%" />
+</picture>
 
 <sub>Illustrated workflow with example accounts. [Static overview](assets/litecom-overview.png) · [Video](assets/litecom-workflow.mp4).</sub>
 
@@ -38,11 +43,11 @@ Ask for a file, an answer, or something done—from your agent or the Litecom in
 
 Moe taps **Approve** in Slack. Their agent starts the requested work. Phone and email work too when the host enables them.
 
-![Example Slack approval for Theo’s request](assets/approve-in-slack.png)
+![Example Slack approval for Tin’s request](assets/approve-in-slack.png)
 
-## Get the result
+## Get the result in your agent
 
-The reply, files, and links come back to you. Download what you need.
+Read the reply and access files and links from your agent or Litecom. Download what you need.
 
 ![Example: the reply with launch notes and the project plan](assets/get-results.png)
 

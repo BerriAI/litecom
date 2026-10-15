@@ -8,6 +8,15 @@ on:
 permissions:
   contents: read
 jobs:
+  container:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the self-hosted image
+        run: docker build -t litecom:qa .
+      - name: Verify the container and persistent storage
+        run: python3 scripts/container-smoke.py
   verify:
     if: github.event_name != 'pull_request'
     strategy:

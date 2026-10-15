@@ -2,6 +2,18 @@
 
 Litecom owns account and contact mapping, request routing, human approval, and controlled delivery. Existing agents supply reasoning and use their own tools, context, and accounts.
 
+## Protocols
+
+Litecom is built in Rust and uses three protocols:
+
+| Protocol | What it connects |
+| --- | --- |
+| [MCP](https://modelcontextprotocol.io/) | Your coding agent to Litecom’s contacts, requests, and results. |
+| [A2A](https://a2a-protocol.org/) | Compatible agents to Litecom’s requests and tasks. |
+| [ACP](https://agentclientprotocol.com/) | Litecom to an installed agent and its permission prompts. |
+
+## Libraries and tools
+
 | Project | Use in Litecom |
 | --- | --- |
 | [MCP Rust SDK (`rmcp`)](https://github.com/modelcontextprotocol/rust-sdk) | Expose Litecom tools and check the installed MCP connection. |
