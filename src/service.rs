@@ -215,26 +215,13 @@ pub fn install(connection: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Pass LITECOM_HOME as a CLI option: Task Scheduler does not retain the
-        // installing terminal's environment. No credentials enter task arguments.
-        let command = format!(
-            "\"{}\" --home \"{}\" --connection {} worker",
-            executable.display(),
-            home.display(),
-            connection
-        );
-        checked(Command::new("schtasks").args([
-            "/Create",
-            "/SC",
-            "ONLOGON",
-            "/TN",
-            &label(connection)?,
-            "/TR",
-            &command,
-            "/IT",
-            "/F",
+        checked(Command::new("powershell.exe").args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &windows_install_script(connection, &executable, &home)?,
         ]))?;
-        checked(Command::new("schtasks").args(["/Run", "/TN", &label(connection)?]))?;
     }
     Ok(())
 }
@@ -332,6 +319,51 @@ pub fn status(connection: &str) -> Result<bool> {
 }
 
 #[cfg(any(target_os = "windows", test))]
+fn windows_install_script(connection: &str, executable: &Path, home: &Path) -> Result<String> {
+    fn powershell_literal(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+    // Quote the single home argument for Windows argv parsing, including a
+    // trailing backslash. PowerShell quoting alone does not quote task arguments.
+    fn argument(value: &str) -> String {
+        let mut out = String::from("\"");
+        let mut slashes = 0;
+        for ch in value.chars() {
+            if ch == '\\' {
+                slashes += 1;
+                continue;
+            }
+            out.push_str(&"\\".repeat(if ch == '"' { slashes * 2 + 1 } else { slashes }));
+            slashes = 0;
+            out.push(ch);
+        }
+        out.push_str(&"\\".repeat(slashes * 2));
+        out.push('"');
+        out
+    }
+    let name = powershell_literal(&label(connection)?);
+    let executable = powershell_literal(&executable.to_string_lossy());
+    // Task Scheduler does not retain the installing terminal's environment.
+    // No credentials enter the task's arguments.
+    let arguments = powershell_literal(&format!(
+        "--home {} --connection {connection} worker",
+        argument(&home.to_string_lossy())
+    ));
+    Ok(format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name; \
+         $action = New-ScheduledTaskAction -Execute {executable} -Argument {arguments}; \
+         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user; \
+         $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited; \
+         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries \
+             -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable; \
+         Register-ScheduledTask -TaskName {name} -Action $action -Trigger $trigger \
+             -Principal $principal -Settings $settings -Force | Out-Null; \
+         Start-ScheduledTask -TaskName {name}"
+    ))
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn windows_status_script(connection: &str) -> Result<String> {
     // Task Scheduler's invariant numeric state distinguishes Running (4) from
     // Ready (3). schtasks /Query succeeds for both, and its labels are localized.
@@ -385,5 +417,23 @@ mod tests {
         assert!(script.contains("GetTask('org.litecom.qa-status').State"));
         assert!(script.contains("[int]"));
         assert!(windows_status_script("bad'; Write-Output '4").is_err());
+    }
+
+    #[test]
+    fn windows_startup_keeps_paths_literal_without_runtime_or_battery_restrictions() {
+        let script = windows_install_script(
+            "qa-startup",
+            Path::new(r"C:\Users\O'Brien\$agent\litecom.exe"),
+            Path::new(r"C:\Users\O'Brien\config folder\"),
+        )
+        .unwrap();
+        assert!(script.contains(r"-Execute 'C:\Users\O''Brien\$agent\litecom.exe'"));
+        assert!(script.contains(
+            r#"--home "C:\Users\O''Brien\config folder\\" --connection qa-startup worker"#
+        ));
+        assert!(script.contains("-ExecutionTimeLimit ([TimeSpan]::Zero)"));
+        assert!(script.contains("-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries"));
+        assert!(script.contains("-LogonType Interactive -RunLevel Limited"));
+        assert!(windows_install_script("bad';", Path::new("x"), Path::new("y")).is_err());
     }
 }

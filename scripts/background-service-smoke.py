@@ -144,6 +144,17 @@ def main():
                 assert running()
                 assert api("/api/connections/local/" + pairing["user_code"])["status"] == "connected"
                 assert not (work / "runs").exists(), "Agent ran during setup"
+                if os.name == "nt":
+                    settings = json.loads(subprocess.check_output([
+                        "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                        f"(Get-ScheduledTask -TaskName 'org.litecom.{connection}').Settings | "
+                        "Select-Object ExecutionTimeLimit,DisallowStartIfOnBatteries,"
+                        "StopIfGoingOnBatteries,MultipleInstances | ConvertTo-Json -Compress",
+                    ], text=True, timeout=15))
+                    assert settings["ExecutionTimeLimit"] == "PT0S", settings
+                    assert not settings["DisallowStartIfOnBatteries"], settings
+                    assert not settings["StopIfGoingOnBatteries"], settings
+                    assert settings["MultipleInstances"] == 2, settings  # IgnoreNew
                 assert "Listening for requests" in cli(*setup).stdout
                 print("PASS: setup, actual worker heartbeat, and repeated setup.", flush=True)
 

@@ -80,6 +80,8 @@ Repeating setup reuses an identical installed executable. When replacing a diffe
 
 macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows uses a sign-in task. Only macOS startup has been exercised locally. Native agent configuration is reused; environment-only provider secrets are not copied into startup definitions.
 
+The Windows task runs under your signed-in account without elevation. It permits battery power and has no fixed runtime cutoff. Closing the terminal does not stop it; signing out still does.
+
 To keep everything in the terminal:
 
 ```sh

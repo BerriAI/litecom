@@ -12,6 +12,8 @@ Not yet verified: live Google consent, production Slack/Email, fresh public inst
 
 The standalone `background-service-smoke.py` also passes on macOS: noninteractive account connection, actual OS-managed worker heartbeat, repeat setup, stopped queue, restart, approval before execution, exact file transfer, no repeat after another restart, and removal. It uses a real isolated relay and a deterministic Codex subprocess, with MCP configuration tested separately. Linux and Windows CI run this same test; their results must be checked before extending this evidence to those platforms.
 
+Windows task registration now explicitly removes Task Scheduler's default 72-hour runtime cutoff and battery restrictions, uses a non-elevated interactive principal, and ignores duplicate launches. The CI smoke test reads back those installed settings. Local tests cover literal Windows path quoting, including spaces, apostrophes, dollar signs, and a trailing backslash; an actual Windows run remains necessary.
+
 Litecom connects to existing agents. It does not ship its own reasoning agent or model tool loop. The required agent set is OpenCode, Codex, pi, Claude Code, Cursor, Devin, OpenClaw, and Hermes; individual evidence must support each claim.
 
 | Requirement | Evidence needed | State |
