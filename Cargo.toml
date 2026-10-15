@@ -1,11 +1,11 @@
 [package]
 name = "litecom"
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 edition = "2024"
 rust-version = "1.88"
 description = "Ask someone's agent. They approve. It gets done."
 repository = "https://github.com/BerriAI/litecom"
-license = "Apache-2.0"
+license = "MIT"
 readme = "README.md"
 
 [dependencies]

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.10
+
+- License Litecom under MIT. Third-party components retain their own licenses.
+- Show requests and returned files in agent conversations throughout the README.
+
 ## 0.1.0-alpha.9
 
 - Include the Litecom logo when building the Docker image.

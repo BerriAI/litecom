@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.9/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.10/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,10 +26,10 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.9/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.10/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.9).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.10).
 
 ## Build from source
 

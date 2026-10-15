@@ -80,6 +80,6 @@ Use Codex, Claude Code, OpenCode, Cursor, pi, OpenClaw, Hermes, or compatible AC
 
 <img src="assets/litecom-logo.png" width="48" height="48" alt="" />
 
-[Get started](docs/self-host.md) · [Documentation](docs/README.md) · [Security](SECURITY.md) · [Open-source components](docs/dependencies.md) · [Apache-2.0](LICENSE)
+[Get started](docs/self-host.md) · [Documentation](docs/README.md) · [Security](SECURITY.md) · [Open-source components](docs/dependencies.md) · [MIT](LICENSE)
 
 </div>
