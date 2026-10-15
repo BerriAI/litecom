@@ -24,10 +24,12 @@ args = parser.parse_args()
 docker = ['docker'] + (['--context', args.context] if args.context else [])
 repo = Path(__file__).resolve().parents[1]
 env = dict(os.environ, LITECOM_HOST='localhost', ACME_EMAIL='qa@example.com',
-           TWILIO_ACCOUNT_SID='ACfixture', TWILIO_AUTH_TOKEN='fixture',
-           TWILIO_MESSAGING_SERVICE_SID='MGfixture',
+           AGENTPHONE_API_KEY='fixture', AGENTPHONE_AGENT_ID='agt_fixture',
+           AGENTPHONE_NUMBER_ID='num_fixture', AGENTPHONE_WEBHOOK_SECRET='whsec_fixture',
            SMTP_HOST='', SMTP_FROM='', SMTP_PORT='465', SMTP_USERNAME='',
-           SMTP_PASSWORD='', SLACK_CLIENT_ID='', SLACK_CLIENT_SECRET='',
+           SMTP_PASSWORD='', SMTP_REPLY_TO='', IMAP_HOST='', IMAP_USERNAME='',
+           IMAP_PASSWORD='', IMAP_PORT='993', SLACK_SIGNING_SECRET='',
+           SLACK_CLIENT_ID='', SLACK_CLIENT_SECRET='',
            LITECOM_DATA_DIR='/data/relay')
 
 def run(command, **kwargs):

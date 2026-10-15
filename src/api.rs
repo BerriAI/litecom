@@ -134,7 +134,10 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
         )
         .route("/api/capabilities", get(capabilities))
-        .route("/webhooks/twilio", post(crate::channel_replies::twilio))
+        .route(
+            "/webhooks/agentphone",
+            post(crate::channel_replies::agentphone),
+        )
         .route("/webhooks/slack", post(crate::channel_replies::slack))
         .route(
             "/auth/start",
@@ -289,7 +292,7 @@ async fn security_headers(request: axum::extract::Request, next: Next) -> Respon
 }
 async fn capabilities(State(s): State<AppState>) -> Json<Value> {
     Json(
-        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.twilio_verification().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
+        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.phone_provider().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
     )
 }
 #[derive(Deserialize)]

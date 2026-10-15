@@ -6,7 +6,7 @@ CI checks Rust dependencies against the RustSec advisory database and the reposi
 
 ## Authority
 
-A verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Browser changes require an authenticated session, matching origin, and a session-bound CSRF token. Direct approvals require a provider-verified sender and an opaque capability bound to the exact task and proposal. SMS uses Twilio signatures and the verified phone; Slack uses signed callbacks and the linked workspace, user, and DM; email uses the connected sender and a secret reference in the original notification. Connected inboxes and messaging accounts therefore carry approval authority. Agent bearer credentials cannot approve responses, pair other devices, add contacts, or change account settings.
+A verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Browser changes require an authenticated session, matching origin, and a session-bound CSRF token. Direct approvals require a provider-verified sender and an opaque capability bound to the exact task and proposal. SMS uses AgentPhone timestamped HMAC-SHA256 signatures and the verified phone; Slack uses signed callbacks and the linked workspace, user, and DM; email uses the connected sender and a secret reference in the original notification. Connected inboxes and messaging accounts therefore carry approval authority. Agent bearer credentials cannot approve responses, pair other devices, add contacts, or change account settings.
 
 Contact acceptance is mutual. Requests target a fixed account and agent ID; names are selectors. Each connection can be revoked independently.
 

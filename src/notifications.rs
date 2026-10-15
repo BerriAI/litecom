@@ -156,17 +156,15 @@ pub async fn run(state: AppState) {
                     _ => {
                         let message = action
                             .as_ref()
-                            .filter(|_| state.providers.twilio_verification().is_some())
+                            .filter(|_| state.providers.phone_provider().is_some())
                             .map(|a| {
                                 format!(
                                     "{}\n\nReply APPROVE {} or DECLINE {}.\nDetails: {}/request/{}",
                                     a.body, a.code, a.code, state.origin, d.task_id
                                 )
                             });
-                        // Twilio's message-body limit is 1,600 characters. Never truncate consent.
-                        let message = message
-                            .filter(|v| v.encode_utf16().count() <= 1600)
-                            .unwrap_or(body);
+                        // Send the complete request; never truncate the scope being approved.
+                        let message = message.unwrap_or(body);
                         state.providers.sms(&d.destination, &message).await
                     }
                 };

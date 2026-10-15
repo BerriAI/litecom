@@ -1,6 +1,7 @@
 pub mod a2a;
 pub mod acp;
 pub mod agent_setup;
+pub mod agentphone;
 pub mod api;
 pub mod auth;
 pub mod backup;

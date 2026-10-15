@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+- AgentPhone handles phone sign-in, approval texts, and status messages.
+- Signed incoming replies bind approvals to the connected phone, configured agent, and sending number; callback receipts survive restart.
+- Group messages, reactions, voice transcripts, and outbound echoes cannot approve.
+- Shared-server setup and individual onboarding have separate instructions.
+
+
 ## 0.1.0-alpha.1
 
 - One phone account for contacts and local or cloud agents.

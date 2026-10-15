@@ -3,23 +3,16 @@ use lettre::{
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox,
     transport::smtp::authentication::Credentials,
 };
-use serde_json::Value;
 
 #[derive(Clone)]
 pub struct Providers {
     client: reqwest::Client,
-    twilio: Option<Twilio>,
+    agentphone: Option<crate::agentphone::AgentPhone>,
     email: Option<Email>,
     pub slack: Option<crate::slack::Slack>,
     pub dev: bool,
     slack_signing: Option<String>,
     pub(crate) imap: Option<crate::email_replies::Inbox>,
-}
-#[derive(Clone)]
-struct Twilio {
-    sid: String,
-    token: String,
-    service: String,
 }
 #[derive(Clone)]
 struct Email {
@@ -35,7 +28,7 @@ impl Providers {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| Error::Internal(e.into()))?,
-            twilio: None,
+            agentphone: None,
             email: None,
             slack: None,
             dev: true,
@@ -44,12 +37,8 @@ impl Providers {
         })
     }
     pub fn from_env(dev: bool) -> Result<Self> {
-        let get = |key| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
-        let twilio=match (get("TWILIO_ACCOUNT_SID"),get("TWILIO_AUTH_TOKEN"),get("TWILIO_MESSAGING_SERVICE_SID")) {
-            (Some(sid),Some(token),Some(service))=>Some(Twilio{sid,token,service}),
-            (None,None,None)=>None,
-            _=>return Err(Error::Unavailable("Set all three Twilio credentials: account SID, auth token, and messaging service SID.".into())),
-        };
+        let get = |key: &str| std::env::var(key).ok().filter(|s| !s.trim().is_empty());
+        let agentphone = crate::agentphone::AgentPhone::from_env(&get)?;
         let email = match (get("SMTP_HOST"), get("SMTP_FROM")) {
             (None, None) => None,
             (Some(host), Some(from)) => {
@@ -110,7 +99,7 @@ impl Providers {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|e| Error::Internal(e.into()))?,
-            twilio,
+            agentphone,
             email,
             slack,
             dev,
@@ -118,13 +107,12 @@ impl Providers {
             imap: crate::email_replies::Inbox::from_env()?,
         })
     }
-    pub(crate) fn twilio_verification(&self) -> Option<(&str, &str)> {
+    pub(crate) fn phone_provider(&self) -> Option<&crate::agentphone::AgentPhone> {
         if self.dev {
-            return None;
+            None
+        } else {
+            self.agentphone.as_ref()
         }
-        self.twilio
-            .as_ref()
-            .map(|p| (p.sid.as_str(), p.token.as_str()))
     }
     pub(crate) fn slack_signing_secret(&self) -> Option<&str> {
         if self.dev {
@@ -137,19 +125,15 @@ impl Providers {
         !self.dev && self.imap.is_some()
     }
     #[cfg(test)]
-    pub(crate) fn test_replies(twilio_sid: &str, twilio_token: &str, slack_secret: &str) -> Self {
+    pub(crate) fn test_replies(phone_api: &str, slack_secret: &str) -> Self {
         let mut value = Self::development().unwrap();
         value.dev = false;
-        value.twilio = Some(Twilio {
-            sid: twilio_sid.into(),
-            token: twilio_token.into(),
-            service: String::new(),
-        });
+        value.agentphone = Some(crate::agentphone::AgentPhone::test_api(phone_api));
         value.slack_signing = Some(slack_secret.into());
         value
     }
     pub fn phone_available(&self) -> bool {
-        self.dev || self.twilio.is_some()
+        self.dev || self.agentphone.is_some()
     }
     pub fn email_available(&self) -> bool {
         self.dev || self.email.is_some()
@@ -200,32 +184,9 @@ impl Providers {
             eprintln!("[LOCAL DEVELOPMENT — no SMS sent] {to}: {body}");
             return Ok("local-development".into());
         }
-        let provider=self.twilio.as_ref().ok_or_else(||Error::Unavailable("Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.".into()))?;
-        let result = self
-            .client
-            .post(format!(
-                "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-                provider.sid
-            ))
-            .basic_auth(&provider.sid, Some(&provider.token))
-            .form(&[
-                ("To", to),
-                ("MessagingServiceSid", provider.service.as_str()),
-                ("Body", body),
-            ])
-            .send()
-            .await
-            .map_err(|_| {
-                Error::Unavailable(
-                    "The phone provider could not be reached. Try again shortly.".into(),
-                )
-            })?;
-        if !result.status().is_success() {
-            return Err(Error::Unavailable("The phone provider did not accept this message. Check the number or ask the server owner to inspect delivery settings.".into()));
-        }
-        let body: Value = result.json().await.map_err(|e| Error::Internal(e.into()))?;
-        body["sid"].as_str().map(str::to_owned).ok_or_else(|| {
-            Error::Unavailable("The phone provider returned an incomplete response.".into())
-        })
+        let provider = self.agentphone.as_ref().ok_or_else(|| Error::Unavailable(
+            "Phone delivery is not enabled on this server. Ask its owner to connect AgentPhone.".into()
+        ))?;
+        provider.send(&self.client, to, body).await
     }
 }

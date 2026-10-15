@@ -91,3 +91,8 @@ CREATE TABLE IF NOT EXISTS channel_actions (
   target_key TEXT NOT NULL, data BLOB NOT NULL,
   UNIQUE(channel_id,task_id,target_key)
 );
+
+-- Hash the signed body, not the unsigned delivery-ID header, to reject callback replays.
+CREATE TABLE IF NOT EXISTS phone_events (
+  body_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL
+);

@@ -4,14 +4,7 @@ use crate::{
     error::{Error, Result, require},
     model::Decision,
 };
-use axum::{
-    Json,
-    body::Bytes,
-    extract::State,
-    http::{HeaderMap, header},
-    response::IntoResponse,
-};
-use base64::Engine;
+use axum::{Json, body::Bytes, extract::State, http::HeaderMap, response::IntoResponse};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::json;
@@ -106,33 +99,6 @@ pub(crate) fn verify_slack(headers: &HeaderMap, body: &[u8], secret: &str, now: 
     mac.verify_slice(&signature)
         .map_err(|_| Error::Unauthorized)
 }
-pub(crate) fn verify_twilio(
-    headers: &HeaderMap,
-    params: &[(String, String)],
-    url: &str,
-    secret: &str,
-) -> Result<()> {
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(text_header(headers, "x-twilio-signature")?)
-        .map_err(|_| Error::Unauthorized)?;
-    let mut params = params.to_vec();
-    params.sort();
-    params.dedup();
-    // Twilio signs all parameters, including newly added ones. Reject ambiguous repeated names.
-    require(
-        !params.windows(2).any(|p| p[0].0 == p[1].0),
-        "Ambiguous phone callback.",
-    )?;
-    let mut mac =
-        Hmac::<sha1::Sha1>::new_from_slice(secret.as_bytes()).map_err(|_| Error::Unauthorized)?;
-    mac.update(url.as_bytes());
-    for (key, value) in params {
-        mac.update(key.as_bytes());
-        mac.update(value.as_bytes());
-    }
-    mac.verify_slice(&signature)
-        .map_err(|_| Error::Unauthorized)
-}
 fn form(body: &[u8]) -> Vec<(String, String)> {
     url::form_urlencoded::parse(body).into_owned().collect()
 }
@@ -149,67 +115,67 @@ fn failure(error: Error) -> Result<String> {
         _=>Ok("This reply could not approve the request. It may have changed, been cancelled, or belong to another account. Check the latest Litecom message.".into()),
     }
 }
-pub(crate) async fn twilio(
+pub(crate) async fn agentphone(
     State(s): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse> {
-    let (sid, secret) = s
-        .providers
-        .twilio_verification()
-        .ok_or(Error::Unauthorized)?;
-    let params = form(&body);
-    verify_twilio(
-        &headers,
-        &params,
-        &format!("{}/webhooks/twilio", s.origin),
-        secret,
-    )?;
-    require(
-        field(&params, "AccountSid")? == sid,
-        "Wrong Twilio account.",
-    )?;
-    let sender = field(&params, "From")?;
-    let command = field(&params, "Body")?.trim();
-    let words = command.split_whitespace().collect::<Vec<_>>();
-    if command.eq_ignore_ascii_case("stop")
-        || params.iter().any(|(k, v)| k == "OptOutType" && v == "STOP")
-    {
-        s.db()?.stop_phone_notifications(sender)?;
-        return Ok((
-            [(header::CONTENT_TYPE, "application/xml")],
-            "<Response/>".to_owned(),
-        ));
+    let provider = s.providers.phone_provider().ok_or(Error::Unauthorized)?;
+    let Some(incoming) = provider.incoming(&headers, &body, crate::store::now())? else {
+        return Ok(Json(json!({"received":true})));
+    };
+    let receipt = crate::crypto::hash(&body);
+    let ignore = {
+        let db = s.db()?;
+        db.phone_event_seen(&receipt)? || !db.phone_notifications_enabled(&incoming.from)?
+    };
+    if ignore {
+        return Ok(Json(json!({"received":true})));
     }
-    let message = if let [word, code] = words.as_slice() {
+    let command = incoming.message.trim();
+    if ["stop", "stopall", "unsubscribe", "cancel", "end", "quit"]
+        .iter()
+        .any(|word| command.eq_ignore_ascii_case(word))
+    {
+        let db = s.db()?;
+        db.transaction(|| {
+            if !db.phone_event_seen(&receipt)? {
+                db.stop_phone_notifications(&incoming.from)?;
+                db.record_phone_event(&receipt)?;
+            }
+            Ok(())
+        })?;
+        return Ok(Json(json!({"received":true})));
+    }
+    let words = command.split_whitespace().collect::<Vec<_>>();
+    let feedback = if let [word, code] = words.as_slice() {
         if let Some(decision) = decision(word) {
-            match s
-                .db()?
-                .channel_decide(&ChannelActor::Phone(sender.into()), code, decision)
-            {
-                Ok(outcome) => outcome.message().into(),
-                Err(error) => failure(error)?,
+            let result =
+                s.db()?
+                    .channel_decide(&ChannelActor::Phone(incoming.from.clone()), code, decision);
+            match result {
+                // The committed outbox sends the update to every connected channel.
+                // A replay returns the existing decision; it cannot claim another run.
+                Ok(ReplyOutcome::Decided(_)) => None,
+                Ok(outcome) => Some(outcome.message().to_owned()),
+                Err(error) => Some(failure(error)?),
             }
         } else {
-            "Reply APPROVE followed by the code in your request, or DECLINE followed by that code."
-                .into()
+            Some(phone_help())
         }
     } else {
-        "Reply APPROVE followed by the code in your request, or DECLINE followed by that code."
-            .into()
+        Some(phone_help())
     };
-    Ok((
-        [(header::CONTENT_TYPE, "application/xml")],
-        format!("<Response><Message>{}</Message></Response>", xml(&message)),
-    ))
+    if let Some(message) = feedback {
+        // AgentPhone's webhook response body does not send an SMS. Use its message API
+        // for help/stale replies. A send failure returns 503 so their webhook retry can recover.
+        s.providers.sms(&incoming.from, &message).await?;
+    }
+    s.db()?.record_phone_event(&receipt)?;
+    Ok(Json(json!({"received":true})))
 }
-fn xml(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+fn phone_help() -> String {
+    "Reply APPROVE followed by the code in your request, or DECLINE followed by that code.".into()
 }
 #[derive(Deserialize)]
 struct SlackId {

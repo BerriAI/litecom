@@ -1,6 +1,6 @@
-# Set up Litecom
+# Connect your agent
 
-Use a [prebuilt download](distribution.md) and your team’s Litecom server. The same download includes the client and relay. Your server operator configures delivery; you do not need provider keys. There is no operated default server yet.
+Join your team's existing Litecom server with a [prebuilt download](distribution.md). Your operator sets up hosting and message delivery once. You need only their setup command and a signed-in coding agent—no provider accounts, API keys, Rust, or repository clone. Setting up that shared service yourself? Use [Run your own server](self-host.md).
 
 ## Connect your computer
 
@@ -9,10 +9,10 @@ Obtain a Litecom server address from its operator. Install and sign in to your [
 From the extracted download folder:
 
 ```sh
-./litecom setup --relay http://127.0.0.1:4141
+./litecom setup --relay https://YOUR-SERVER
 ```
 
-Replace the address for a hosted server. Choose **Phone**, enter your name and phone number in the browser, and enter its verification code. Check the displayed pairing code and choose **Connect agent**.
+Replace `https://YOUR-SERVER` with your operator's address, or paste their complete command unchanged. Choose where you want to approve requests: **Phone**, **Slack**, or **Email**. Enter your name and phone number in the browser, then the verification code sent to your phone. Check the displayed pairing code and choose **Connect agent**.
 
 Back in the terminal, select the detected agent and confirm its working folder. Litecom saves the connection, adds its tools to the selected agent, and registers background startup. The ready message requires a real worker heartbeat. Start a new session in your coding agent to load the tools. See [agent compatibility](agents.md) for requirements and validation status.
 

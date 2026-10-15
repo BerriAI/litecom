@@ -4,15 +4,15 @@ Litecom is packaged as one native executable. The client, background worker, MCP
 
 ## Download
 
-[Release files and checksums](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.1):
+[Release files and checksums](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.2):
 
 | Computer | Download |
 | --- | --- |
-| Mac with Apple Silicon | [macOS ARM](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-aarch64-apple-darwin.tar.gz) |
-| Mac with Intel | [macOS Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-x86_64-apple-darwin.tar.gz) |
-| Windows Intel/AMD | [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-x86_64-pc-windows-msvc.zip) |
-| Linux Intel/AMD | [Linux x86-64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-x86_64-unknown-linux-gnu.tar.gz) |
-| Linux ARM | [Linux ARM64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-aarch64-unknown-linux-gnu.tar.gz) |
+| Mac with Apple Silicon | [macOS ARM](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-aarch64-apple-darwin.tar.gz) |
+| Mac with Intel | [macOS Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-apple-darwin.tar.gz) |
+| Windows Intel/AMD | [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-pc-windows-msvc.zip) |
+| Linux Intel/AMD | [Linux x86-64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-unknown-linux-gnu.tar.gz) |
+| Linux ARM | [Linux ARM64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-aarch64-unknown-linux-gnu.tar.gz) |
 
 Sign in to GitHub with repository access, download your archive, and extract it. Open a terminal in the extracted folder:
 

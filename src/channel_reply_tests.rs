@@ -9,9 +9,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use base64::Engine;
 use hmac::{Hmac, Mac};
-use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 fn destination(f: &Fixture, kind: &str) -> Delivery {
@@ -306,105 +304,318 @@ fn direct_tool_approval_is_once_only_and_cannot_approve_the_next_tool() {
     );
 }
 
-fn sms(body: &str, sender: &str) -> (String, String) {
-    let mut params = vec![
-        ("AccountSid", "ACtest"),
-        ("Body", body),
-        ("From", sender),
-        ("FutureParameter", "included"),
-    ];
-    params.sort();
-    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(b"twilio-secret").unwrap();
-    mac.update(b"https://relay.example/webhooks/twilio");
-    let mut form = url::form_urlencoded::Serializer::new(String::new());
-    for (key, value) in params {
-        mac.update(key.as_bytes());
-        mac.update(value.as_bytes());
-        form.append_pair(key, value);
-    }
-    (
-        form.finish(),
-        base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes()),
-    )
+type PhoneMessages = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+async fn phone_server() -> (String, PhoneMessages, tokio::task::JoinHandle<()>) {
+    let messages: PhoneMessages = Default::default();
+    let saved = messages.clone();
+    let app = axum::Router::new().route(
+        "/v1/messages",
+        axum::routing::post(
+            move |headers: axum::http::HeaderMap,
+                  axum::Json(body): axum::Json<serde_json::Value>| {
+                let saved = saved.clone();
+                async move {
+                    assert_eq!(headers["authorization"], "Bearer phone-key");
+                    assert_eq!(body["agent_id"], "agt_test");
+                    assert_eq!(body["number_id"], "num_test");
+                    saved.lock().unwrap().push(body);
+                    axum::Json(
+                        serde_json::json!({"id":"msg_test","status":"sent","channel":"imessage"}),
+                    )
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (url, messages, task)
+}
+fn phone_event(command: &str, sender: &str) -> serde_json::Value {
+    serde_json::json!({"event":"agent.message","agentId":"agt_test","channel":"sms",
+        "timestamp":"2026-10-15T18:00:00Z", "data":{"numberId":"num_test", "from":sender,
+        "to":"+14155550999","message":command,"direction":"inbound","receivedAt":"2026-10-15T18:00:00Z"}})
+}
+fn signed_phone_request(event: &serde_json::Value, time: i64) -> Request<Body> {
+    let body = event.to_string();
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"phone-secret").unwrap();
+    mac.update(format!("{time}.{body}").as_bytes());
+    Request::post("/webhooks/agentphone")
+        .header("content-type", "application/json")
+        .header("x-webhook-timestamp", time.to_string())
+        .header("x-webhook-id", "delivery-fixture")
+        .header(
+            "x-webhook-signature",
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes())),
+        )
+        .body(Body::from(body))
+        .unwrap()
 }
 #[tokio::test]
 async fn phone_callback_needs_signature_sender_and_exact_code() {
+    let (url, messages, server) = phone_server().await;
     let f = Fixture::new();
     let mut d = destination(&f, "phone");
+    f.store.enable_phone(&f.a).unwrap();
     let task = f.draft("phone-http", Some(action()));
     d.task_id = task.id.clone();
     let a = f.store.channel_action(&d).unwrap().unwrap();
     let state = AppState::new(
         f.store,
         "https://relay.example".into(),
-        Providers::test_replies("ACtest", "twilio-secret", "slack-secret"),
+        Providers::test_replies(&url, "slack-secret"),
     );
     let app = router(state.clone());
-    for (command, sender, signature_ok, expected) in [
+    let event = phone_event(&format!("APPROVE {}", a.code), "+14155550102");
+    let mut request = signed_phone_request(&event, crate::store::now());
+    request
+        .headers_mut()
+        .insert("x-webhook-signature", "sha256=abcd".parse().unwrap());
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    for event in [
+        phone_event(&format!("APPROVE {}", a.code), "+14155550101"),
+        phone_event("Approve", "+14155550102"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(signed_phone_request(&event, crate::store::now()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(count(&state.db().unwrap(), &task.id), 0);
+    }
+    // Invalid replies receive helpful text through the actual provider transport, not the HTTP response body.
+    assert_eq!(messages.lock().unwrap().len(), 2);
+    assert!(
+        messages.lock().unwrap()[1]["body"]
+            .as_str()
+            .unwrap()
+            .contains("APPROVE")
+    );
+    for _ in 0..2 {
+        let response = app
+            .clone()
+            .oneshot(signed_phone_request(&event, crate::store::now()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(count(&state.db().unwrap(), &task.id), 1);
+    }
+    assert_eq!(
+        messages.lock().unwrap().len(),
+        2,
+        "Successful approval uses the committed notification outbox"
+    );
+    let work = state.db().unwrap().claim(&f.bw, &f.agent).unwrap().unwrap();
+    state
+        .db()
+        .unwrap()
+        .stage_result(
+            &f.bw,
+            &task.id,
+            &work.lease,
+            DraftInput {
+                text: "Done".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        state.db().unwrap().get_task(&f.a, &task.id).unwrap().status,
+        Status::Completed
+    );
+    assert_eq!(count(&state.db().unwrap(), &task.id), 1);
+    // A fresh reply after completion reports the earlier decision without repeating work.
+    let mut repeat = event.clone();
+    repeat["timestamp"] = "2026-10-15T18:01:00Z".into();
+    app.clone()
+        .oneshot(signed_phone_request(&repeat, crate::store::now()))
+        .await
+        .unwrap();
+    assert!(
+        messages.lock().unwrap().last().unwrap()["body"]
+            .as_str()
+            .unwrap()
+            .contains("already approved")
+    );
+    let stop = phone_event("STOP", "+14155550102");
+    assert_eq!(
+        app.clone()
+            .oneshot(signed_phone_request(&stop, crate::store::now()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(!state.db().unwrap().channels(&f.b).unwrap()[0].verified);
+    state.db().unwrap().enable_phone(&f.b).unwrap();
+    // Replayed STOP must not disable a channel the human has deliberately reconnected.
+    app.oneshot(signed_phone_request(&stop, crate::store::now()))
+        .await
+        .unwrap();
+    assert!(state.db().unwrap().channels(&f.b).unwrap()[0].verified);
+    server.abort();
+}
+#[tokio::test]
+async fn phone_rejects_cross_agent_expired_group_voice_reactions_and_tampered_replies() {
+    let (url, messages, server) = phone_server().await;
+    let f = Fixture::new();
+    let mut d = destination(&f, "phone");
+    let task = f.draft("phone-boundaries", Some(action()));
+    d.task_id = task.id.clone();
+    let a = f.store.channel_action(&d).unwrap().unwrap();
+    let state = AppState::new(
+        f.store,
+        "https://relay.example".into(),
+        Providers::test_replies(&url, "slack-secret"),
+    );
+    let app = router(state.clone());
+    let original = phone_event(&format!("APPROVE {}", a.code), "+14155550102");
+    for age in [-301, 301] {
+        let response = app
+            .clone()
+            .oneshot(signed_phone_request(&original, crate::store::now() + age))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    for (pointer, value, status) in [
         (
-            format!("APPROVE {}", a.code),
-            "+14155550102",
-            false,
+            "/agentId",
+            serde_json::json!("agt_other"),
             StatusCode::UNAUTHORIZED,
         ),
         (
-            format!("APPROVE {}", a.code),
-            "+14155550101",
-            true,
+            "/data/numberId",
+            serde_json::json!("num_other"),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            "/data/from",
+            serde_json::json!("moe@example.com"),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            "/data/direction",
+            serde_json::json!("outbound"),
             StatusCode::OK,
         ),
-        ("Approve".into(), "+14155550102", true, StatusCode::OK),
+        ("/channel", serde_json::json!("voice"), StatusCode::OK),
+        ("/channel", serde_json::json!("whatsapp"), StatusCode::OK),
+        (
+            "/event",
+            serde_json::json!("agent.reaction"),
+            StatusCode::OK,
+        ),
     ] {
-        let (body, signature) = sms(&command, sender);
-        let response = app
-            .clone()
-            .oneshot(
-                Request::post("/webhooks/twilio")
-                    .header(
-                        "x-twilio-signature",
-                        if signature_ok {
-                            signature.as_str()
-                        } else {
-                            "fake"
-                        },
-                    )
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .body(Body::from(body))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), expected);
-        assert_eq!(count(&state.db().unwrap(), &task.id), 0);
+        let mut event = original.clone();
+        *event.pointer_mut(pointer).unwrap() = value;
+        assert_eq!(
+            app.clone()
+                .oneshot(signed_phone_request(&event, crate::store::now()))
+                .await
+                .unwrap()
+                .status(),
+            status,
+            "{pointer}"
+        );
     }
-    let (body, signature) = sms(&format!("APPROVE {}", a.code), "+14155550102");
-    let response = app
-        .clone()
-        .oneshot(
-            Request::post("/webhooks/twilio")
-                .header("x-twilio-signature", signature)
-                .body(Body::from(body))
-                .unwrap(),
-        )
+    for group in [
+        serde_json::json!({"isGroup":true}),
+        serde_json::json!({"isGroup":false}),
+        serde_json::json!({}),
+    ] {
+        let mut event = original.clone();
+        event["data"]["group"] = group;
+        assert_eq!(
+            app.clone()
+                .oneshot(signed_phone_request(&event, crate::store::now()))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+    let mut event = original.clone();
+    event["data"]["senderIdentifier"] = "+14155550102".into();
+    app.clone()
+        .oneshot(signed_phone_request(&event, crate::store::now()))
+        .await
+        .unwrap();
+    let mut tampered = signed_phone_request(&original, crate::store::now());
+    *tampered.body_mut() = Body::from(event.to_string());
+    assert_eq!(
+        app.clone().oneshot(tampered).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(count(&state.db().unwrap(), &task.id), 0);
+    assert!(messages.lock().unwrap().is_empty());
+    // iMessage uses the same verified phone account and exact request code.
+    let mut imessage = original;
+    imessage["channel"] = "imessage".into();
+    app.oneshot(signed_phone_request(&imessage, crate::store::now()))
+        .await
+        .unwrap();
+    assert_eq!(count(&state.db().unwrap(), &task.id), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn phone_receipts_survive_restart_and_disabled_channels_receive_no_replies() {
+    let (url, messages, server) = phone_server().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("relay.db");
+    let store = Store::open(&path, [7; 32]).unwrap();
+    let (human, _) = user(&store, "Moe", "+14155550102");
+    store.enable_phone(&human).unwrap();
+    let state = AppState::new(
+        store,
+        "https://relay.example".into(),
+        Providers::test_replies(&url, "slack-secret"),
+    );
+    let stop = phone_event("STOP", "+14155550102");
+    let response = router(state.clone())
+        .oneshot(signed_phone_request(&stop, crate::store::now()))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(
-        String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes())
-            .contains("Approved.")
+    assert!(!state.db().unwrap().channels(&human).unwrap()[0].verified);
+    let help = phone_event("Hello", "+14155550102");
+    router(state.clone())
+        .oneshot(signed_phone_request(&help, crate::store::now()))
+        .await
+        .unwrap();
+    assert!(messages.lock().unwrap().is_empty());
+    state.db().unwrap().enable_phone(&human).unwrap();
+    drop(state);
+    let state = AppState::new(
+        Store::open(&path, [7; 32]).unwrap(),
+        "https://relay.example".into(),
+        Providers::test_replies(&url, "slack-secret"),
     );
-    assert_eq!(count(&state.db().unwrap(), &task.id), 1);
-    let (body, signature) = sms("STOP", "+14155550102");
-    app.oneshot(
-        Request::post("/webhooks/twilio")
-            .header("x-twilio-signature", signature)
-            .body(Body::from(body))
-            .unwrap(),
-    )
-    .await
-    .unwrap();
-    assert!(!state.db().unwrap().channels(&f.b).unwrap()[0].verified);
+    let mut replay = signed_phone_request(&stop, crate::store::now());
+    // This unsigned header cannot make a previously handled body new again.
+    replay
+        .headers_mut()
+        .insert("x-webhook-id", "changed-delivery-id".parse().unwrap());
+    router(state.clone()).oneshot(replay).await.unwrap();
+    assert!(state.db().unwrap().channels(&human).unwrap()[0].verified);
+    router(state.clone())
+        .oneshot(signed_phone_request(&help, crate::store::now()))
+        .await
+        .unwrap();
+    assert_eq!(messages.lock().unwrap().len(), 1);
+    router(state)
+        .oneshot(signed_phone_request(&help, crate::store::now()))
+        .await
+        .unwrap();
+    assert_eq!(messages.lock().unwrap().len(), 1);
+    server.abort();
 }
+
 #[tokio::test]
 async fn slack_callback_requires_signed_fresh_exact_user_and_channel() {
     let f = Fixture::new();
@@ -415,7 +626,7 @@ async fn slack_callback_requires_signed_fresh_exact_user_and_channel() {
     let state = AppState::new(
         f.store,
         "https://relay.example".into(),
-        Providers::test_replies("ACtest", "twilio-secret", "slack-secret"),
+        Providers::test_replies("http://127.0.0.1:1", "slack-secret"),
     );
     let app = router(state.clone());
     for (age, user, channel, ok) in [
@@ -484,40 +695,4 @@ fn email_requires_reply_capability_and_connected_sender() {
     assert!(crate::email_replies::process(&state, message.as_bytes()).unwrap());
     assert!(crate::email_replies::process(&state, message.as_bytes()).unwrap());
     assert_eq!(count(&state.db().unwrap(), &task.id), 1);
-}
-
-#[test]
-fn twilio_signature_matches_published_reference_vector() {
-    // https://www.twilio.com/docs/usage/security#explore-the-algorithm-yourself
-    let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
-        "x-twilio-signature",
-        "L/OH5YylLD5NRKLltdqwSvS0BnU=".parse().unwrap(),
-    );
-    let params = [
-        ("Digits", "1234"),
-        ("To", "+18005551212"),
-        ("From", "+14158675310"),
-        ("Caller", "+14158675310"),
-        ("CallSid", "CA1234567890ABCDE"),
-    ]
-    .into_iter()
-    .map(|(a, b)| (a.to_owned(), b.to_owned()))
-    .collect::<Vec<_>>();
-    crate::channel_replies::verify_twilio(
-        &headers,
-        &params,
-        "https://example.com/myapp.php?foo=1&bar=2",
-        "12345",
-    )
-    .unwrap();
-    assert!(
-        crate::channel_replies::verify_twilio(
-            &headers,
-            &params,
-            "https://attacker.example/myapp.php?foo=1&bar=2",
-            "12345"
-        )
-        .is_err()
-    );
 }

@@ -26,25 +26,43 @@ These counts exclude obtaining the binary and server address, reading codes, and
 
 ## Configure the relay
 
-End users do not configure providers or run a receiving mailbox. The operator does this once. Both Litecom components are open source; Twilio and Slack are services. Email uses standard SMTP and IMAP, including self-hosted servers.
+End users do not configure providers or run a receiving mailbox. The operator does this once. Both Litecom components are open source; AgentPhone and Slack are services. Email uses standard SMTP and IMAP, including self-hosted servers.
 
 Keep provider credentials in the relay environment. `--dev` prints local notices and disables incoming provider callbacks and mailbox polling; it sends no messages.
 
 ### Phone
 
-Set:
+Use [AgentPhone](https://agentphone.ai) for sign-in codes, approval messages, and status updates. End users keep the same **Phone** choice; they never need an AgentPhone account.
 
-```text
-TWILIO_ACCOUNT_SID
-TWILIO_AUTH_TOKEN
-TWILIO_MESSAGING_SERVICE_SID
-```
+1. Get an API key from AgentPhone. Create a dedicated **Litecom** agent with `voiceMode: "webhook"`, and attach a two-way phone number. The [AgentPhone quickstart](https://docs.agentphone.ai/welcome) includes the create, provision, and attach commands. Save the agent ID and number ID shown in their details. Litecom uses messaging only; it does not use AgentPhone's hosted AI or voice calls.
+2. Register the callback below once, replacing the API key, agent ID, and relay host below with your values:
 
-In the Twilio Messaging Service's **Integration** settings, select **Send a webhook** for incoming messages. Set the request URL to `https://YOUR_RELAY_HOST/webhooks/twilio`, with method **POST**, replacing the host with the relay's public HTTPS address. Use that exact address without a trailing slash or query parameters.
+   ```sh
+   export AGENTPHONE_API_KEY='your_api_key'
+   curl --fail-with-body https://api.agentphone.ai/v1/agents/YOUR_AGENT_ID/webhook \
+     -H "Authorization: Bearer $AGENTPHONE_API_KEY" \
+     -H 'Content-Type: application/json' \
+     -d '{"url":"https://YOUR_RELAY_HOST/webhooks/agentphone","contextLimit":0}'
+   ```
 
-Attach a two-way SMS sender and complete the required registration for the countries you serve. Alphanumeric senders that cannot receive replies cannot support text approval. Configure Twilio's opt-out handling. A signed `STOP` callback disables Litecom's phone channel too; reconnect it in Settings after restoring consent with the provider.
+   Save the returned `secret`. Creating or updating this webhook rotates that secret; do not repeat this command as a health check.
+3. Set these relay environment values, then restart the relay:
 
-Litecom verifies [Twilio's signature](https://www.twilio.com/docs/usage/security), account SID, sender number, and the request code. The code selects a request; it is not sufficient without the verified sender. Provider acceptance is recorded separately from actual delivery. Delivery-status callbacks are not implemented.
+   ```dotenv
+   AGENTPHONE_API_KEY=your_api_key
+   AGENTPHONE_AGENT_ID=agt_your_agent
+   AGENTPHONE_NUMBER_ID=num_your_number
+   AGENTPHONE_WEBHOOK_SECRET=whsec_your_secret
+   ```
+
+   For Docker Compose, put them in `.env` and run `docker compose up -d`. All four belong to the same AgentPhone project and sender. The explicit number keeps outgoing messages on the same line that receives approvals.
+4. Sign in to Litecom, request a short reply from your own agent, and reply to its approval text. Confirm that the result arrives and that a repeated approval does not run it again. AgentPhone's webhook test checks connectivity; it does not prove phone delivery or an approval.
+
+AgentPhone chooses iMessage where supported and otherwise uses its cellular fallback. Complete the provider's registration for the countries and channels you serve; US outbound SMS requires 10DLC registration. See [AgentPhone messaging](https://docs.agentphone.ai/documentation/guides/messages). Litecom sends the full request without a local character cutoff.
+
+Litecom verifies the [webhook signature and timestamp](https://docs.agentphone.ai/documentation/guides/webhooks), configured agent and number, connected sender, and exact request code. Calls, reactions, outbound echoes, and group messages cannot approve. Signed `STOP` replies disable the phone channel and invalidate its outstanding approval codes; reconnect in Settings after restoring consent with the provider. Callback receipts survive relay restarts.
+
+Provider acceptance is recorded separately from actual delivery. Delivery-status callbacks are not implemented. AgentPhone credentials are required for live validation; the automated tests use a local HTTP fixture and send no real messages.
 
 ### Email
 

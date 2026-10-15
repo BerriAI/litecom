@@ -201,6 +201,26 @@ impl Store {
         Ok(ReplyOutcome::Decided(decision))
     }
 
+    pub(crate) fn phone_notifications_enabled(&self, phone: &str) -> Result<bool> {
+        let key = self.vault.fingerprint("phone", phone.as_bytes());
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM channels c JOIN profiles p ON p.id=c.user_id WHERE p.phone_key=? AND c.kind='phone' AND c.verified=1)", [key], |r| r.get(0))?)
+    }
+
+    pub(crate) fn phone_event_seen(&self, body_hash: &str) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM phone_events WHERE body_hash=?)",
+            [body_hash],
+            |r| r.get(0),
+        )?)
+    }
+    pub(crate) fn record_phone_event(&self, body_hash: &str) -> Result<()> {
+        self.db.execute(
+            "INSERT OR IGNORE INTO phone_events(body_hash,created_at) VALUES(?,?)",
+            params![body_hash, self.time()],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn stop_phone_notifications(&self, phone: &str) -> Result<()> {
         let mut found = None;
         let rows = self

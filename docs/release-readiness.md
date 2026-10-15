@@ -144,3 +144,14 @@ The current native/ACP/Devin request flow uses one approval for execution and au
 - A 180-second single-approval soak completed 4,445 rounds, 67,627 HTTP checks, 2,778 exact transfers, 1,110 automatic deliveries, 556 relay restarts, and a real lease-expiry check without a failure. No model calls or provider messages were made.
 - Repeating setup while a native fixture is running preserved its process and the real macOS background service. Queue polling and active execution now both update the same agent heartbeat.
 - Dependency advisory, license and source checks pass with the new mailbox dependencies. Actual carrier/Slack/mail delivery and live agent runs under the new single-approval flow remain unverified.
+
+
+## AgentPhone and hosting handoff
+
+AgentPhone replaces the initial Twilio transport. The relay uses one explicitly configured agent and sending number for sign-in codes, complete approval texts, and status updates. Incoming callbacks verify HMAC-SHA256 over the raw body and timestamp, the agent/number, and the connected phone. Reactions, calls, outbound echoes, and group messages cannot approve. Persisted body hashes prevent a repeated callback from replaying a STOP after the user reconnects.
+
+- `cargo test --locked`: 84 passed, one explicitly ignored slow-transfer test. New coverage exercises signed callbacks, changed/expired signatures, sender/agent/number mismatch, iMessage approval, one approval through completion, callback replay across restart, disabled-channel silence, complete UTF-8 messages beyond the former character cutoff, HTTP failures, malformed provider responses, and refusing authenticated redirects.
+- `cargo clippy --all-targets --locked -- -D warnings` and dependency advisory/license/source checks pass. Third-party notices were regenerated after removing the Twilio-only SHA-1 dependency.
+- The local first-use preview and accessibility checks passed again; the browser editing check passed after updating its obsolete heading selector. See [interface review](ui-review.md).
+- The [operator guide](self-host.md) separates service/number/webhook/storage setup from each person's agent connection. It supports a native process or Docker on any suitable host; the product has no Render dependency.
+- No AgentPhone number has been purchased and no real phone message sent during these checks. Live provider delivery and the requested hosted instance remain unverified.

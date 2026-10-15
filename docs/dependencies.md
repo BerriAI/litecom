@@ -26,4 +26,4 @@ Litecom owns account and contact mapping, request routing, human approval, and c
 
 [Third-party notices](../THIRD-PARTY-NOTICES.html) contain license text and links to the exact dependency sources. [Maintainer checks](../CONTRIBUTING.md#dependency-checks-and-notices) explain how to regenerate them.
 
-Twilio, Slack, and Devin are external service integrations, not open-source dependencies. Litecom does not include a separate reasoning agent or service-specific GitHub action layer.
+AgentPhone, Slack, and Devin are external service integrations, not open-source dependencies. Litecom does not include a separate reasoning agent or service-specific GitHub action layer.

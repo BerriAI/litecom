@@ -79,6 +79,25 @@ output.write_text(json.dumps({'text':'Here is the sample file you requested.', '
             audits.append({'screen': name, 'violations': result['violations'], 'passes': len(result['passes'])})
             (screenshots/'accessibility.json').write_text(json.dumps(audits, indent=2))
             assert not result['violations'], [(v['id'], v['help'], [n['target'] for n in v['nodes']]) for v in result['violations']]
+            page.locator('.skip-link').focus()
+            page.keyboard.press('Enter')
+            assert page.evaluate("document.activeElement.id === 'app'")
+            page.keyboard.press('Tab')
+            assert page.evaluate("document.querySelector('main').contains(document.activeElement)")
+            summaries = page.locator('main details > summary:visible')
+            if summaries.count():
+                summary = summaries.first
+                was_open = summary.evaluate('(el) => el.parentElement.open')
+                summary.focus()
+                page.keyboard.press('Enter')
+                assert summary.evaluate('(el) => el.parentElement.open') != was_open
+                page.keyboard.press('Enter')
+                assert summary.evaluate('(el) => el.parentElement.open') == was_open
+            buttons = page.locator('main button:visible')
+            if buttons.count():
+                buttons.first.focus()
+                assert buttons.first.evaluate('(el) => parseFloat(getComputedStyle(el).outlineWidth) > 0')
+            page.locator('main').focus()
             page.screenshot(path=str(screenshots/(name+'-audit.png')), full_page=True)
 
         try:
@@ -112,7 +131,11 @@ output.write_text(json.dumps({'text':'Here is the sample file you requested.', '
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             audit('request')
             page.screenshot(path=str(screenshots/'run-mobile.png'),full_page=True)
-            page.get_by_role('button',name='Approve',exact=True).click()
+            if args.axe:
+                page.get_by_role('button',name='Approve',exact=True).focus()
+                page.keyboard.press('Enter')
+            else:
+                page.get_by_role('button',name='Approve',exact=True).click()
             expect(page.get_by_role('button',name='Revoke access',exact=True)).to_be_visible(timeout=20000)
             assert len(calls.read_text().splitlines())==1
             assert page.request.get(origin+'/api/tasks/'+task_id).json()['response'] is not None

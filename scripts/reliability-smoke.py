@@ -219,7 +219,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 assert filled, 'The background poll did not run'
                 expect(b.get_by_role('textbox', name='Reply', exact=True)).to_have_value('My unsaved typing')
                 b.unroute('**/api/tasks/'+task['id'])
-                b.get_by_role('heading', name='Review request').click()
+                b.locator('main h1').click()
                 b.wait_for_timeout(4500)
                 expect(b.get_by_role('textbox', name='Reply', exact=True)).to_have_value('My unsaved typing')
                 b.screenshot(path=str(evidence/'preserved-edit-mobile.png'), full_page=True)

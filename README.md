@@ -12,19 +12,21 @@ One phone account. Your contacts and agents in one place. Approve requests on **
 
 Install and sign in to a [supported coding agent](docs/agents.md), then download Litecom for your computer:
 
-[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.1/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
+[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
 
-Extract the download. Open a terminal in that folder and run:
+Extract the download and run the setup command from your Litecom operator:
 
 ```sh
-./litecom try
+./litecom setup --relay https://YOUR-SERVER
 ```
 
-On Windows, use `./litecom.exe try`. No Rust, Node, or repository clone is needed for Litecom; your chosen agent may have its own requirements. Downloads require repository access while this repository is private.
+Replace `https://YOUR-SERVER` with their address. On Windows, use `./litecom.exe`. Choose **Phone**, **Slack**, or **Email** for approvals, verify your phone, and pick your installed agent. Litecom connects it and runs in the background.
 
-Choose **Phone**, follow the sign-in prompts, and pick your agent. Approve the sample request once. Your agent runs and sends back the file.
+No Rust, Node, repository clone, or messaging-provider account is needed for Litecom; your agent may have its own requirements. Downloads require repository access while this repository is private.
 
-The local tryout prints verification codes in the terminal and sends no messages. Your agent's normal billing applies after approval. **Ctrl+C** stops the tryout and removes its temporary data. To use Litecom with other people and real notifications, [connect to your team's server](docs/setup.md).
+**Running the shared service?** [Set up the server and phone number once](docs/self-host.md). Everyone else follows the short setup above.
+
+**Trying it locally first?** Run `./litecom try`. It prints sign-in codes in the terminal, sends no messages, and opens a sample request. Your agent's normal billing applies after approval. **Ctrl+C** removes the temporary tryout data.
 
 ## Use it with people
 
