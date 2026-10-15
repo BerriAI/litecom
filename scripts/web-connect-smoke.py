@@ -137,6 +137,25 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()
             assert Path(download.value.path()).read_bytes()==(work/'notes.txt').read_bytes()
+            # A fresh agent session can read and download the same result through MCP.
+            mcp=subprocess.Popen([entry['command'],*entry['args']],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+            try:
+                rpc(101,'initialize',{'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'result-test','version':'1'}})
+                mcp.stdin.write(json.dumps({'jsonrpc':'2.0','method':'notifications/initialized'})+'\n'); mcp.stdin.flush()
+                status=rpc(102,'tools/call',{'name':'litecom_status','arguments':{'task_id':task['id']}})
+                assert not status.get('isError'),status
+                response=status['structuredContent']['response']
+                assert response['text']=='Here are your notes.'
+                attachment=response['attachments'][0]
+                downloaded=rpc(103,'tools/call',{'name':'litecom_download','arguments':{'task_id':task['id'],'artifact_id':attachment['id']}})
+                assert not downloaded.get('isError'),downloaded
+                assert downloaded['structuredContent']['verified']
+                assert Path(downloaded['structuredContent']['path']).read_bytes()==(work/'notes.txt').read_bytes()
+                received=rpc(104,'tools/call',{'name':'litecom_receive','arguments':{'task_id':task['id']}})
+                assert not received.get('isError'),received
+                print('PASS: a new MCP session reads the reply, downloads verified file bytes, and acknowledges receipt.')
+            finally:
+                mcp.terminate(); mcp.wait(timeout=10)
             # A named second agent must receive its own connection command,
             # not silently connect another worker to the first agent.
             first_config=(root/'config/connections'/f'{connection}.json').read_bytes()
