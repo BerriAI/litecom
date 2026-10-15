@@ -40,6 +40,7 @@ External prerequisites will be recorded when they become relevant. They must not
 - README source commands replace the removed TypeScript scaffold. Rust is the product implementation; browser assets are bundled static files.
 - Filename edge cases now retain the original response metadata while saving portable names within filesystem limits. CLI downloads publish atomically and never replace an existing file. Truncated/corrupt HTTP responses create neither a local file nor a receipt.
 - Browser fault tests reproduce and cover lost download acknowledgments and background updates arriving during editing. A verified download remains successful when its receipt cannot be confirmed; unsaved edits survive background polling. Stale approvals and late conflicting decisions cannot release a changed or declined response.
+- Download headers preserve spaces, literal plus signs, stars, and Unicode through the standard encoded filename field. Native execution, ACP, and agent configuration commands set `PWD` to the selected folder instead of inheriting the launch terminal's folder. The ACP subprocess assertion and a fresh real Codex run pass after this correction.
 
 Still absent: a deployed hosted endpoint, published installers, actual delivery verification, live Slack/email verification, live cloud-provider and remaining ACP adapter validation, Gmail retrieval, GitHub grants, cross-network tests, and full release validation. Codex has live file-operation evidence; successful Claude execution and broader native context/tool compatibility remain unverified. The full requirement set above remains in scope.
 
@@ -67,6 +68,8 @@ Still absent: a deployed hosted endpoint, published installers, actual delivery 
 The test passed again after correcting the native launch setting to `approval_policy="never"`. No desktop permission prompt was required. This validates one local file workflow, not all native skills, hooks, tools, or external actions. Phone authentication and notifications used local development delivery.
 
 The same test with Claude Code 2.1.296 reached its configured provider, which returned a spending-limit error. No successful Claude model execution is claimed, and the test did not change providers or bypass the limit. Structured provider errors now appear in the owner's private failure receipt, including errors returned with a nonzero process exit. Requesters retain the generic failure view.
+
+The live OpenCode 1.18.29 attempt failed while initializing its configured tools. A direct OpenCode run independently reported a missing custom tool file in the existing user configuration. Litecom did not alter that configuration or switch accounts to pass the test. Successful live OpenCode execution remains unverified.
 
 ## Channel evidence
 

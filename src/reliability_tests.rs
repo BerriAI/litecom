@@ -196,7 +196,7 @@ async fn downloads_publish_only_verified_bytes_with_portable_filenames() {
     let names = [
         format!("{}.txt", "a".repeat(251)),
         format!("{}.txt", "é".repeat(125)),
-        "report: Q4 <draft>?*.txt".into(),
+        "report: Q4 + <draft>?*.txt".into(),
         "trailing dots... ".into(),
     ];
     let payload = b"The exact approved bytes.\n";
@@ -297,6 +297,17 @@ async fn downloads_publish_only_verified_bytes_with_portable_filenames() {
         );
     }
     mode.store(2, Ordering::SeqCst);
+    let response = reqwest::Client::new()
+        .get(format!("{}/api/files/{}", client.config.relay, files[2].id))
+        .bearer_auth(&client.config.token)
+        .send()
+        .await
+        .unwrap();
+    let disposition = response.headers()["content-disposition"].to_str().unwrap();
+    assert!(
+        disposition.ends_with("filename*=UTF-8''report%3A%20Q4%20%2B%20%3Cdraft%3E%3F%2A.txt"),
+        "{disposition}"
+    );
     for file in files {
         let path = client
             .download(&task.id, &file.id, output.path())

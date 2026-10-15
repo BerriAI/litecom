@@ -729,7 +729,12 @@ async fn download(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!(
             "attachment; filename=\"{safe_name}\"; filename*=UTF-8''{}",
-            url::form_urlencoded::byte_serialize(file.name.as_bytes()).collect::<String>()
+            url::form_urlencoded::byte_serialize(file.name.as_bytes())
+                .collect::<String>()
+                // Extended header values use percent-encoded spaces and stars,
+                // unlike application/x-www-form-urlencoded bodies.
+                .replace('+', "%20")
+                .replace('*', "%2A")
         ))
         .map_err(|e| Error::Internal(e.into()))?,
     );

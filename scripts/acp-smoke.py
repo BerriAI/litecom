@@ -34,6 +34,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-acp-qa-') as directory:
     fake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
 from pathlib import Path
 assert 'LITECOM_TOKEN' not in os.environ
+assert Path(os.environ['PWD']).resolve() == Path.cwd(), 'PWD must match the approved working folder'
 assert sys.argv[1:] == ([] if Path(sys.argv[0]).name in ['acp-fixture','pi-acp'] else ['acp'])
 def send(value):
     print(json.dumps(value), flush=True)

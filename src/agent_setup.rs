@@ -139,6 +139,7 @@ async fn run(executable: &Path, cwd: &Path, args: &[String]) -> Result<Output> {
     command
         .args(args)
         .current_dir(cwd)
+        .env("PWD", cwd)
         .env_remove("LITECOM_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

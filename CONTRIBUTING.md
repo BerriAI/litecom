@@ -84,13 +84,15 @@ Pi requires both `pi` and `pi-acp` on PATH; use `--path /absolute/bin/directory`
 
 ## Live agent checks
 
-With an installed, signed-in Codex or Claude Code and the Python environment above:
+With an installed, signed-in Codex, Claude Code, or OpenCode and the Python environment above:
 
 ```sh
 cargo build --locked
 .litecom/qa/bin/python scripts/live-agent-smoke.py --agent codex
 # Or, using your Claude Code account:
 .litecom/qa/bin/python scripts/live-agent-smoke.py --agent claude
+# Or OpenCode through its ACP interface:
+.litecom/qa/bin/python scripts/live-agent-smoke.py --agent opencode
 ```
 
 These tests call a real model through the agent's existing configuration and incur its normal usage. They create two local test accounts, request a calculation in a temporary folder, approve execution, review the result, and verify the downloaded bytes. They check project instructions and privacy between the two approvals. No messages are sent, no MCP settings or startup services are installed, and temporary data is removed afterward.

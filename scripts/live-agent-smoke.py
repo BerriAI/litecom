@@ -23,7 +23,7 @@ import uuid
 from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--agent', choices=['codex', 'claude', 'codex-acp'], required=True)
+parser.add_argument('--agent', choices=['codex', 'claude', 'codex-acp', 'opencode'], required=True)
 parser.add_argument('--path', type=Path, help='Prepend an isolated agent installation to PATH')
 parser.add_argument('--review-permissions', action='store_true', help='For Codex ACP: start read-only, save permission proposals, and wait for a .decision file containing approve or decline')
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
@@ -198,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
                         print(f'Review permission: {proposal}\nWrite approve or decline to {proposal.with_suffix(".decision")}', flush=True)
                         permissions_seen.add(permission_id)
                     decision_path = evidence / f'permission-{permission_id}.decision'
-                    if args.review_permissions and decision_path.exists() and permission_id not in permissions_reviewed:
+                    if decision_path.exists() and permission_id not in permissions_reviewed:
                         decision = decision_path.read_text().strip()
                         assert decision in ('approve', 'decline'), 'Permission decision must be approve or decline'
                         action = 'approve-permission' if decision == 'approve' else 'decline-permission'

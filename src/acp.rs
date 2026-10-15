@@ -136,6 +136,7 @@ pub(crate) async fn reply(
     command
         .args(&settings.arguments)
         .current_dir(&settings.workspace)
+        .env("PWD", &settings.workspace)
         .env_remove("LITECOM_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

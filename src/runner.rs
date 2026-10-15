@@ -290,6 +290,7 @@ async fn native_reply(
     config::write_private(&stderr_path, b"")?;
     let mut cmd = Command::new(&settings.executable);
     cmd.current_dir(&settings.workspace)
+        .env("PWD", &settings.workspace)
         .stdin(Stdio::piped())
         .stdout(std::fs::File::create(&stdout_path)?)
         .stderr(std::fs::File::create(&stderr_path)?)
