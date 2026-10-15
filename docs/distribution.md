@@ -4,27 +4,29 @@ Litecom is packaged as one native executable. The client, background worker, MCP
 
 ## Download
 
-[Release files and checksums](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.4):
+No native release has been published yet. The [Releases page](https://github.com/BerriAI/litecom/releases) is the download destination once release validation is complete. The browser's install command requires those published, anonymously accessible assets; it does not yet work for a new user without an existing Litecom binary.
+
+The packaging workflow builds these archives:
 
 | Computer | Download |
 | --- | --- |
-| Mac with Apple Silicon | [macOS ARM](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-apple-darwin.tar.gz) |
-| Mac with Intel | [macOS Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-apple-darwin.tar.gz) |
-| Windows Intel/AMD | [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-pc-windows-msvc.zip) |
-| Linux Intel/AMD | [Linux x86-64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-unknown-linux-gnu.tar.gz) |
-| Linux ARM | [Linux ARM64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-unknown-linux-gnu.tar.gz) |
+| Mac with Apple Silicon | `litecom-aarch64-apple-darwin.tar.gz` |
+| Mac with Intel | `litecom-x86_64-apple-darwin.tar.gz` |
+| Windows Intel/AMD | `litecom-x86_64-pc-windows-msvc.zip` |
+| Linux Intel/AMD | `litecom-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM | `litecom-aarch64-unknown-linux-gnu.tar.gz` |
 
-Sign in to GitHub with repository access, download your archive, and extract it. Open a terminal in the extracted folder:
+Maintainers with repository access can download completed artifacts from the [Build downloads workflow](https://github.com/BerriAI/litecom/actions/workflows/packages.yml). Extract the artifact bundle, then extract your platform's archive. Open a terminal in the extracted folder:
 
 ```sh
 ./litecom try
 ```
 
-On Windows use `./litecom.exe try`. Choose Phone, use the verification code printed in the terminal, and select your agent. Approve once and download the sample file. **Ctrl+C** removes the temporary tryout data. [Measured setup actions](setup.md#how-much-work-is-setup).
+On Windows use `./litecom.exe try`. Choose Phone, use the verification code printed in the terminal, and select your agent. Approve once and download the sample file. **Ctrl+C** removes the temporary tryout data. [Setup details](setup.md#existing-installations-and-terminal-setup).
 
-For ongoing use, run `./litecom setup --relay https://YOUR-SERVER`, replacing the address with the one your server operator provides. There is no hosted default yet. Setup connects the chosen agent and starts the worker in the background.
+For ongoing use, run `./litecom setup --relay https://YOUR-SERVER`, replacing the address with the one your server operator provides. Setup connects the chosen agent and starts the worker in the background.
 
-The release also contains cargo-dist shell and PowerShell installers. Their unauthenticated download URLs require a public repository; use the authenticated archive downloads until this repository is public. Operating-system signing/notarization and clean consumer-machine validation remain separate release work. Do not disable operating-system security globally to open a download.
+Packaging also produces cargo-dist shell and PowerShell installers. Their unauthenticated download URLs require accessible release assets; CI artifact downloads are for maintainer testing. Operating-system signing/notarization and clean consumer-machine validation remain separate release work. Do not disable operating-system security globally to open a download.
 
 ## Self-hosting uses the same download
 
