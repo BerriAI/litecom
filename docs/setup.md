@@ -17,6 +17,7 @@ Your workspace opens when the channel is connected. Only options enabled by your
 1. Click **Connect local agent** in your workspace.
 2. Click **Copy command**.
 3. Open Terminal on macOS/Linux or PowerShell on Windows in the folder your agent should work in. Paste the command and press Enter.
+4. If several agents are found, use the arrow keys and Enter to choose one.
 
 Litecom installs itself, detects your agent, adds MCP, and starts in the background. Wait for **Connected** in the browser and **Listening for requests** in the terminal. You can then close the terminal.
 
@@ -52,6 +53,6 @@ From the Litecom homepage through connecting your local agent:
 | Slack | **4** | Choose your Google account and **Allow** in Slack. |
 | Phone | **6** | Choose your Google account; enter your phone number and code. |
 
-Every route also needs **one command pasted into a terminal, then Enter**. These counts assume your coding agent is installed and signed in. Opening the terminal in your working folder, provider sign-in/consent, workspace selection, and administrator approval may add steps. Sending and approving the first request comes after setup.
+Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. These counts assume your coding agent is installed and signed in. Opening the terminal in your working folder, provider sign-in/consent, workspace selection, and administrator approval may add steps. Sending and approving the first request comes after setup.
 
-[Setup help and agent settings](local-agent.md) · [Approving requests](approval-channels.md) · [Supported agents](agents.md)
+[Uninstall](local-agent.md#uninstall) · [Setup help and agent settings](local-agent.md) · [Approving requests](approval-channels.md) · [Supported agents](agents.md)

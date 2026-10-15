@@ -5,6 +5,7 @@ Use --public-release to exercise anonymous GitHub downloads from a clean install
 import argparse, hashlib, json, os, re, shutil, socket, subprocess, tempfile, time, select, tomllib
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from terminal_qa import run_terminal
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--binary',type=Path,default=Path('target/debug/litecom'))
@@ -29,7 +30,9 @@ Path('ran').write_text('yes')
 out=sys.argv[sys.argv.index('--output-last-message')+1]
 Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Path('notes.txt').resolve())]}}))
 '''); fixture.chmod(0o700)
-    env=dict(os.environ,LITECOM_HOME=str(root/'config'),CODEX_HOME=str(root/'codex'),PATH=str(programs)+os.pathsep+os.environ['PATH'])
+    env=dict(os.environ,LITECOM_HOME=str(root/'config'),CODEX_HOME=str(root/'codex'),XDG_CONFIG_HOME=str(root/'xdg'),PATH=str(programs)+os.pathsep+os.environ['PATH'])
+    # Always exercise the multi-agent picker, independent of the test machine.
+    (programs/'claude').symlink_to(fixture)
     if fresh_install:
         # Preserve the user's shell profile and installer receipt. Only the
         # download boundary is mirrored; cargo-dist installs the real archive.
@@ -75,7 +78,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             connections.append(connection)
             page.reload(); expect(page.get_by_label('Terminal command')).to_have_value(command)
             page.screenshot(path=str(shots/'command-mobile.png'),full_page=True)
-            result=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
+            result=run_terminal(command,env,work,answers=[('Which agent should handle your requests?',b'\r')],timeout=180)
             assert result.returncode==0,(result.stdout,result.stderr)
             assert 'Listening for requests' in result.stdout
             if fresh_install: assert (root/'installed/litecom').is_file()
@@ -168,7 +171,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             second_connection=re.search(r"--connection '([^']+)'",second_command).group(1)
             connections.append(second_connection)
             second_agent=next(a for a in page.request.get(origin+'/api/agents').json() if a['name']=='Second computer')
-            result=subprocess.run(second_command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
+            result=run_terminal(second_command,env,work,answers=[('Which agent should handle your requests?',b'\r')],timeout=180)
             assert result.returncode==0,(result.stdout,result.stderr)
             expect(page.locator('#connect-status')).to_contain_text('Connected.',timeout=20000)
             second_config=json.loads((root/'config/connections'/f'{second_connection}.json').read_text())
@@ -183,8 +186,45 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 page.screenshot(path=str(shots/f'named-agent-{width}.png'),full_page=True)
             print('PASS: named agent creation connects that exact agent; reconnect targets it; first connection preserved; 320/1100px.')
+            # Uninstall one of two real connections through the terminal picker.
+            page.goto(origin+'/settings')
+            page.get_by_text('Uninstall from this computer',exact=True).click()
+            uninstall_command=page.get_by_label('Uninstall command').input_value()
+            assert uninstall_command==f"curl -fsSL '{origin}/uninstall.sh' | sh"
+            page.screenshot(path=str(shots/'uninstall-mobile.png'),full_page=True)
+            ordered=sorted(connections)
+            first, remaining=ordered
+            kept=(root/'config/connections'/f'{remaining}.json').read_bytes()
+            uninstall=uninstall_command if args.public_release else str(binary)+' uninstall'
+            cancelled=run_terminal(uninstall,env,work,answers=[('Which connections do you want to uninstall?',b'\r')],timeout=180)
+            assert cancelled.returncode==0,cancelled.stdout
+            assert 'Nothing selected' in cancelled.stdout
+            removed=run_terminal(uninstall,env,work,answers=[('Which connections do you want to uninstall?',b' \r')],timeout=180)
+            assert removed.returncode==0,removed.stdout
+            assert str(work) in removed.stdout and 'Codex' in removed.stdout
+            assert not (root/'config/connections'/f'{first}.json').exists()
+            assert (root/'config/connections'/f'{remaining}.json').read_bytes()==kept
+            remaining_config=tomllib.loads((root/'codex/config.toml').read_text())
+            assert len(remaining_config['mcp_servers'])==1
+            assert (root/'config/bin/litecom').exists()
+            assert len(page.request.get(origin+'/api/connections').json())==1
+            # Remove the last connection; downloads, unrelated MCP config and work survive.
+            with (root/'codex/config.toml').open('a') as config_file:
+                config_file.write('\n[mcp_servers.keep_me]\ncommand = "unrelated"\n')
+            removed=run_terminal(uninstall,env,work,answers=[('Which connections do you want to uninstall?',b' \r')],timeout=180)
+            assert removed.returncode==0,removed.stdout
+            assert 'Litecom uninstalled' in removed.stdout
+            assert not (root/'config/bin/litecom').exists()
+            assert list(tomllib.loads((root/'codex/config.toml').read_text())['mcp_servers'])==['keep_me']
+            assert not page.request.get(origin+'/api/connections').json()
+            assert (work/'notes.txt').exists()
+            assert Path(downloaded['structuredContent']['path']).is_file()
+            if fresh_install:
+                assert not (root/'installed/litecom').exists()
+                assert not (root/'xdg/litecom/litecom-receipt.json').exists()
+            print('PASS: uninstall picker cancels safely, removes only selected connections, revokes credentials, preserves other MCP entries/files, and removes binaries after the last connection.')
             source='Anonymous public release install. ' if args.public_release else 'Fresh cargo-dist install (mirrored downloads). ' if args.fresh_installer else ''
-            print(source+'PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
+            print(source+'PASS: copied command with agent selection; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
         finally:
             for connection in connections:
                 subprocess.run([binary,'--connection',connection,'service','remove'],env=env,capture_output=True,timeout=30)

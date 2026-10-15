@@ -2,7 +2,7 @@
 
 For your first connection, follow [Get started](setup.md). Use this page to change a connection, manage background startup, or fix a problem.
 
-[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Troubleshooting](#if-something-needs-attention)
+[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Uninstall](#uninstall) · [Troubleshooting](#if-something-needs-attention)
 
 Keep the browser-generated command private. If setup fails after pairing, rerun it on the same computer to resume. If it expires before pairing, click **Connect local agent** for a new command.
 
@@ -44,6 +44,26 @@ To keep everything in the terminal:
 litecom --connection NAME setup --relay https://YOUR-SERVER --no-background
 litecom --connection NAME worker
 ```
+
+## Uninstall
+
+Open **Settings → Uninstall from this computer**, click **Copy command**, then paste it into your terminal and press Enter. Select the connections to remove with Space, then press Enter. The list shows each agent and its working folder.
+
+For the hosted workspace on macOS or Linux:
+
+```sh
+curl -fsSL https://litecom.onrender.com/uninstall.sh | sh
+```
+
+On Windows, paste into PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://litecom.onrender.com/uninstall.ps1)))
+```
+
+Wait for **Selected connections uninstalled** or **Litecom uninstalled**. This disconnects your selections and removes their background startup and MCP entries. Removing the last connection also removes the installed binaries. Your coding agents, working files, downloads, workspace account, and hosted data stay. Shared shell PATH settings stay too.
+
+If a connection cannot be removed, the command explains what needs attention. Resolve it and rerun the same command. On Windows, close agent sessions using Litecom first. For a custom configuration folder, run `litecom --home PATH uninstall`.
 
 ## If something needs attention
 

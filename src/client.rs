@@ -38,6 +38,29 @@ impl Client {
                 .build()?,
         })
     }
+    /// Revoke only this connection, using the existing logout endpoint.
+    pub async fn disconnect(&self) -> Result<()> {
+        let response = self
+            .http
+            .post(format!(
+                "{}/auth/logout",
+                self.config.relay.trim_end_matches('/')
+            ))
+            .bearer_auth(&self.config.token)
+            .send()
+            .await
+            .context(
+                "Cannot disconnect from the server. Reconnect to the internet and rerun uninstall.",
+            )?;
+        if response.status().is_success() || response.status() == reqwest::StatusCode::UNAUTHORIZED
+        {
+            return Ok(());
+        }
+        bail!(
+            "The server could not disconnect this agent (HTTP {}). Rerun uninstall after checking the server.",
+            response.status()
+        );
+    }
     pub async fn call<T: DeserializeOwned>(
         &self,
         method: Method,

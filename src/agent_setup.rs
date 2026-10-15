@@ -583,9 +583,191 @@ pub async fn install(settings: &RunnerConfig, connection: &Connection) -> Result
     Ok(name)
 }
 
+/// Remove only commands pointing at this exact Litecom home and connection.
+/// Native CLIs own their formats. JSON-only agents use the same lossless CST as Cursor.
+pub async fn remove(settings: &RunnerConfig, connection: &Connection) -> Result<()> {
+    let expected = connection.entry(settings.agent);
+    let home = directories::BaseDirs::new()
+        .context("Cannot find your home directory.")?
+        .home_dir()
+        .to_owned();
+    match settings.agent {
+        NativeAgent::Claude => remove_json(&claude_config_path()?, &["mcpServers"], &expected)?,
+        NativeAgent::Pi => remove_json(
+            &std::env::var_os("PI_CODING_AGENT_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".pi/agent"))
+                .join("mcp.json"),
+            &["mcpServers"],
+            &expected,
+        )?,
+        NativeAgent::Cursor => {
+            remove_json(&home.join(".cursor/mcp.json"), &["mcpServers"], &expected)?
+        }
+        NativeAgent::OpenCode => {
+            let config = std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".config"))
+                .join("opencode");
+            // Both released OpenCode layouts; also handle older project-scoped installs.
+            for directory in [config, settings.workspace.clone()] {
+                for file in [
+                    "opencode.json",
+                    "opencode.jsonc",
+                    ".opencode/opencode.json",
+                    ".opencode/opencode.jsonc",
+                ] {
+                    let path = directory.join(file);
+                    remove_json(&path, &["mcp", "servers"], &expected)?;
+                    remove_json(&path, &["mcp"], &expected)?;
+                }
+            }
+        }
+        NativeAgent::Codex | NativeAgent::Hermes | NativeAgent::OpenClaw => {
+            let mut settings = settings.clone();
+            if !settings.workspace.is_dir() {
+                settings.workspace = home;
+            }
+            if !settings.executable.is_file() {
+                settings.executable =
+                    find_executable(settings.agent.command()).with_context(|| {
+                        format!(
+                            "Reinstall {} to remove its MCP settings, then rerun uninstall.",
+                            settings.agent.name()
+                        )
+                    })?;
+            }
+            let servers = read_cli(&settings).await?;
+            let names = servers
+                .iter()
+                .filter(|(_, entry)| equivalent(entry, &expected))
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            for name in names {
+                let args = match settings.agent {
+                    NativeAgent::Codex => strings(&["mcp", "remove", &name]),
+                    NativeAgent::OpenClaw => strings(&["mcp", "unset", &name]),
+                    NativeAgent::Hermes => {
+                        strings(&["config", "unset", &format!("mcp_servers.{name}")])
+                    }
+                    _ => unreachable!(),
+                };
+                let output = run(&settings.executable, &settings.workspace, &args).await?;
+                if !output.status.success() {
+                    bail!(
+                        "{} could not remove its Litecom MCP entry. Check its configuration and rerun uninstall.",
+                        settings.agent.name()
+                    );
+                }
+                if read_cli(&settings)
+                    .await?
+                    .get(&name)
+                    .is_some_and(|v| equivalent(v, &expected))
+                {
+                    bail!(
+                        "{} still has its Litecom MCP entry. Rerun uninstall after checking its configuration.",
+                        settings.agent.name()
+                    );
+                }
+            }
+        }
+        _ => {} // ACP-only adapters receive ephemeral session configuration.
+    }
+    Ok(())
+}
+
+fn remove_json(path: &Path, keys: &[&str], expected: &Value) -> Result<()> {
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let (before, _) = read_document(path, true)?;
+    let root = CstRootNode::parse(&before, &ParseOptions::default())?;
+    let mut object = root
+        .object_value()
+        .context("MCP configuration must be an object.")?;
+    for key in keys {
+        if object
+            .properties()
+            .iter()
+            .filter(|p| p.decoded_name().as_deref() == Some(key))
+            .count()
+            > 1
+        {
+            bail!(
+                "{} has duplicate configuration keys. Its settings were preserved.",
+                path.display()
+            );
+        }
+        let Some(next) = object.object_value(key) else {
+            return Ok(());
+        };
+        object = next;
+    }
+    let mut changed = false;
+    for property in object.properties() {
+        if property
+            .value()
+            .and_then(|v| v.to_serde_value())
+            .is_some_and(|v| equivalent(&v, expected))
+        {
+            property.remove();
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+    let target = path.canonicalize()?;
+    let mut temporary = tempfile::NamedTempFile::new_in(
+        target.parent().context("Missing configuration directory")?,
+    )?;
+    temporary
+        .as_file()
+        .set_permissions(std::fs::metadata(&target)?.permissions())?;
+    temporary.write_all(root.to_string().as_bytes())?;
+    temporary.as_file().sync_all()?;
+    if std::fs::read_to_string(&target)? != before {
+        bail!(
+            "{} changed during uninstall. Rerun uninstall to preserve those changes.",
+            path.display()
+        );
+    }
+    temporary.persist(target)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uninstall_json_preserves_comments_changed_entries_and_other_connections() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mcp.json");
+        let expected = entry();
+        let different =
+            json!({"command":"/a path/litecom","args":["--connection","another","mcp"]});
+        let changed = json!({"command":"/a path/litecom","args":["--connection","test","mcp"],"env":{"KEEP":"yes"}});
+        let before = format!(
+            "{{\n// keep my comment\n\"mcpServers\":{{\"owned\":{},\"another\":{},\"changed\":{}}},\"custom\":true,\n}}",
+            expected, different, changed
+        );
+        std::fs::write(&path, &before).unwrap();
+        remove_json(&path, &["mcpServers"], &expected).unwrap();
+        let (after, value) = read_document(&path, true).unwrap();
+        assert!(after.contains("// keep my comment"));
+        assert!(value["mcpServers"].get("owned").is_none());
+        assert_eq!(value["mcpServers"]["another"], different);
+        assert_eq!(value["mcpServers"]["changed"], changed);
+        assert_eq!(value["custom"], true);
+        remove_json(&path, &["mcpServers"], &expected).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+        for before in ["broken", "{\"mcpServers\":{},\"mcpServers\":{}}"] {
+            std::fs::write(&path, before).unwrap();
+            assert!(remove_json(&path, &["mcpServers"], &expected).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        }
+    }
 
     fn entry() -> Value {
         json!({"command":"/a path/litecom","args":["--connection","test","mcp"]})

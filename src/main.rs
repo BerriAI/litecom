@@ -55,6 +55,12 @@ enum Command {
         #[command(subcommand)]
         action: ServiceCommand,
     },
+    /// Remove this computer’s Litecom connections, startup tasks and installation.
+    Uninstall {
+        /// Remove every local connection without showing the picker.
+        #[arg(long)]
+        all: bool,
+    },
     /// Run a self-hosted Litecom relay.
     Relay {
         #[arg(long, default_value = "127.0.0.1:4141")]
@@ -224,6 +230,7 @@ async fn run(cli: Cli) -> Result<()> {
                 data.display()
             );
         }
+        Command::Uninstall { all } => litecom::uninstall::run(all).await?,
         Command::Setup(options) => litecom::onboarding::setup(options, &cli.connection).await?,
         Command::Service { action } => match action {
             ServiceCommand::Start => litecom::service::install(&cli.connection)?,

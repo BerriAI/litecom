@@ -410,7 +410,7 @@ fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
                 .into_iter()
                 .find(|(a, _)| a.command() == requested.as_str())
                 .context("That agent was not found. Install it and run setup again.")?
-        } else if detected.len() == 1 || options.connect_code.is_some() {
+        } else if detected.len() == 1 {
             println!("Using {}.", detected[0].0.name());
             detected[0].clone()
         } else {
@@ -419,7 +419,10 @@ fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
                 .with_prompt("Which agent should handle your requests?")
                 .items(&names)
                 .default(0)
-                .interact()?;
+                .interact()
+                .context(
+                    "Choose an agent in a terminal, or add --agent <name> to the setup command.",
+                )?;
             detected[choice].clone()
         };
         let workspace = match &options.workspace {

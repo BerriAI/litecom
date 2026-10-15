@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.11
+
+- Choose from installed agents when connecting your computer. Repeated setup keeps your choice.
+- Copy an uninstall command from Settings and select the connections to remove. Other connections, agents, and working files stay.
+- Revoke removed connections and clean up their background startup and MCP settings. Remove the shared installation when its last connection is removed.
+
 ## 0.1.0-alpha.10
 
 - License Litecom under MIT. Third-party components retain their own licenses.

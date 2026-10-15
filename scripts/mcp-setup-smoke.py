@@ -214,6 +214,16 @@ with tempfile.TemporaryDirectory(prefix='litecom-mcp-setup-') as folder:
                 assert config.read_text() == malformed
                 if args.agent == 'hermes':
                     assert "Hermes's settings could not be validated" in failed.stderr, failed.stderr
+            # Restore the deliberately broken fixture, then exercise native cleanup.
+            config.write_text(saved)
+            uninstalled = subprocess.run([binary, 'uninstall', '--all'], env=env, cwd=work,
+                                         capture_output=True, text=True, timeout=60)
+            assert uninstalled.returncode == 0, uninstalled.stdout+uninstalled.stderr
+            assert expected_name not in read_config()[key]
+            if not args.empty_config:
+                assert read_config()[key]['litecom'] == initial[key]['litecom']
+            assert not (root/'litecom/connections/default.json').exists()
+            print(f'PASS: {args.agent} uninstall removes only the owned MCP connection.')
             evidence = 'saved native configuration verified' if args.agent == 'codex' else 'native client connected'
             print(f'PASS: real {args.agent} guided MCP setup, {"empty config" if args.empty_config else "preserved collision"}, idempotent repeat, {evidence}; no model calls.')
         finally:

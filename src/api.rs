@@ -173,6 +173,26 @@ pub fn router(state: AppState) -> Router {
             }),
         )
         .route(
+            "/uninstall.sh",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    include_str!("install/uninstall.sh")
+                        .replace("@VERSION@", env!("CARGO_PKG_VERSION")),
+                )
+            }),
+        )
+        .route(
+            "/uninstall.ps1",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                    include_str!("install/uninstall.ps1")
+                        .replace("@VERSION@", env!("CARGO_PKG_VERSION")),
+                )
+            }),
+        )
+        .route(
             "/webhooks/agentphone",
             post(crate::channel_replies::agentphone),
         )

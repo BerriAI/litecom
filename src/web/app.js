@@ -580,7 +580,7 @@ function showLocalCommand() {
   const command = windows
     ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
     : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
-  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your installed agent and adds MCP. The agent runs in the background. Requests need your approval.</p><p>If several agents are installed, Litecom uses the first detected agent. You can change it later with setup.</p></details></section>`;
+  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder. Choose an agent if several are found.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your chosen agent and adds MCP. The agent runs in the background. Requests need your approval.</p></details></section>`;
 }
 async function pollLocalConnection() {
   if (!localPairing || !document.getElementById("connect-status") || busy)
@@ -673,7 +673,10 @@ async function settingsPage() {
       return `<div class="list-row">${icon(kind)}<div class="row-content"><h3>${labels[kind]}</h3><p class="muted">${channel ? "Connected" : "Not connected"}</p>${channel?.delivery_status === "failed" ? `<p class="error">${deliveryLabels.failed}</p>` : ""}</div>${channel ? `<details class="row-menu"><summary aria-label="Manage ${labels[kind]}">Manage</summary>${kind !== "phone" ? `<button data-action="${addAction}">Reconnect ${labels[kind]}</button>` : ""}<button class="danger" data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>${channel.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="muted subtitle">${deliveryLabels[channel.delivery_status]}</p>` : ""}</details>` : `<button data-action="${addAction}">Connect ${labels[kind]}</button>`}</div>`;
     })
     .join("");
-  app.innerHTML = `${pageHeading("Settings")}<section class="section"><h2>Approval channels</h2><p class="muted">One approval updates every channel.</p><div class="list">${rows || '<p class="empty">No channels enabled. Ask your host to connect one.</p>'}</div>${capabilities.development ? '<p class="muted subtitle">Development mode · Notifications appear in the terminal.</p>' : ""}</section><section class="section"><h2>Connected apps</h2><div class="list">${connections.map((c) => `<div class="list-row"><div class="row-content">${esc(c.label)}</div><button class="quiet danger" data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("") || '<p class="muted">No connected apps.</p>'}</div></section><section class="section account-row"><div>${avatar(profile.name)}<span>${esc(profile.name)}</span></div><button class="quiet" data-action="logout">Sign out</button></section>`;
+  const uninstallCommand = /Windows/i.test(navigator.userAgent)
+    ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/uninstall.ps1")})))`
+    : `curl -fsSL ${shellQuote(location.origin + "/uninstall.sh")} | sh`;
+  app.innerHTML = `${pageHeading("Settings")}<section class="section"><h2>Approval channels</h2><p class="muted">One approval updates every channel.</p><div class="list">${rows || '<p class="empty">No channels enabled. Ask your host to connect one.</p>'}</div>${capabilities.development ? '<p class="muted subtitle">Development mode · Notifications appear in the terminal.</p>' : ""}</section><section class="section"><h2>Connected apps</h2><div class="list">${connections.map((c) => `<div class="list-row"><div class="row-content">${esc(c.label)}</div><button class="quiet danger" data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("") || '<p class="muted">No connected apps.</p>'}</div></section><section class="section"><details><summary>Uninstall from this computer</summary><p>Run in your terminal, then select the connections to remove. Your agents, files and workspace account stay.</p><div class="row"><label class="command-label row-content">Uninstall command<input id="uninstall-command" readonly spellcheck="false" value="${esc(uninstallCommand)}"></label><button class="quiet" data-action="copy-uninstall">Copy command</button></div></details></section><section class="section account-row"><div>${avatar(profile.name)}<span>${esc(profile.name)}</span></div><button class="quiet" data-action="logout">Sign out</button></section>`;
 }
 
 document.addEventListener("submit", async (e) => {
@@ -893,9 +896,9 @@ document.addEventListener("click", async (e) => {
   try {
     const { action, id } = button.dataset;
     if (action === "connect-local") return await connectLocal(id);
-    if (action === "copy-connect") {
+    if (action === "copy-connect" || action === "copy-uninstall") {
       await navigator.clipboard.writeText(
-        document.getElementById("connect-command").value,
+        document.getElementById(action === "copy-connect" ? "connect-command" : "uninstall-command").value,
       );
       return notice("Command copied. Paste it into your terminal and run it.");
     }

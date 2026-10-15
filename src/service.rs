@@ -10,7 +10,7 @@ fn label(connection: &str) -> Result<String> {
     config::ClientConfig::path(connection)?; // Validate before putting it in a service name.
     Ok(format!("org.litecom.{connection}"))
 }
-fn binary() -> Result<PathBuf> {
+pub(crate) fn binary() -> Result<PathBuf> {
     Ok(config::home()?.join("bin").join(if cfg!(windows) {
         "litecom.exe"
     } else {
@@ -286,7 +286,63 @@ pub fn remove(connection: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         stop(connection)?;
-        checked(Command::new("schtasks").args(["/Delete", "/TN", &label(connection)?, "/F"]))?;
+        checked(Command::new("powershell.exe").args([
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            &format!("$ErrorActionPreference = 'Stop'; Get-ScheduledTask -TaskName '{}' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false", label(connection)?),
+        ]))?;
+    }
+    Ok(())
+}
+/// A named service can belong to another --home. Never remove it by name alone.
+pub(crate) fn remove_owned(connection: &str) -> Result<()> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let path = service_path(connection)?;
+        if !path.try_exists()? {
+            return Ok(());
+        }
+        let content = std::fs::read_to_string(&path)?;
+        let home = config::home()?.canonicalize()?;
+        #[cfg(target_os = "macos")]
+        let owned = content.contains(&format!(
+            "<key>LITECOM_HOME</key><string>{}</string>",
+            xml(&home.to_string_lossy())
+        ));
+        #[cfg(target_os = "linux")]
+        let owned = content.contains(&format!(
+            "Environment={}",
+            systemd_quote(&format!("LITECOM_HOME={}", home.display()))
+        ));
+        if !owned {
+            bail!(
+                "{} belongs to another Litecom installation. It was preserved.",
+                path.display()
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Missing jobs are fine, but failure to stop a running job is not.
+            if status(connection)? {
+                stop(connection)?;
+            }
+        }
+        #[cfg(target_os = "linux")]
+        checked(Command::new("systemctl").args([
+            "--user",
+            "disable",
+            "--now",
+            &format!("{}.service", label(connection)?),
+        ]))?;
+        remove(connection)?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let executable = binary()?.to_string_lossy().replace('\'', "''");
+        checked(Command::new("powershell.exe").args([
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            &format!("$ErrorActionPreference = 'Stop'; $task = Get-ScheduledTask -TaskName '{}' -ErrorAction SilentlyContinue; if ($task -and ($task.Actions.Execute -ne '{}')) {{ throw 'The startup task belongs to another Litecom installation.' }}", label(connection)?, executable),
+        ]))?;
+        remove(connection)?;
     }
     Ok(())
 }
