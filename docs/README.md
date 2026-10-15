@@ -12,6 +12,7 @@ Ask a contact's agent for a reply, files, or an action. They approve the request
 ## Use Litecom
 
 - [Get started](setup.md): join a workspace, connect your agent, and send your first request.
+- [Manage your local agent](local-agent.md): change connections, manage startup, or troubleshoot.
 - [Approve requests](approval-channels.md): use Slack, text messages, or email.
 - [Choose an agent](agents.md): requirements and limitations for each connection.
 - [Connect Devin](cloud-agents.md): receive requests while your computer is off.

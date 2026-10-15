@@ -1,0 +1,68 @@
+# Manage your local agent
+
+For your first connection, follow [Get started](setup.md). Use this page to change a connection, manage background startup, or fix a problem.
+
+[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Troubleshooting](#if-something-needs-attention)
+
+Keep the browser-generated command private. If setup fails after pairing, rerun it on the same computer to resume. If it expires before pairing, click **Connect local agent** for a new command.
+
+Commands below use `NAME` for the value after `--connection` in your copied setup command or terminal output. If you set up without that flag, use `default`.
+
+## Set up from the terminal
+
+The browser-generated command is the shortest route. Existing installations can also run:
+
+```sh
+litecom --connection NAME setup --relay https://YOUR-SERVER
+```
+
+Replace the address with your host’s URL. This alternative selects an approval channel and opens browser pairing. A returning valid connection reuses saved settings. `--requester-only` configures sending without a receiving worker; `--connection NAME` gives another harness its own revocable connection.
+
+## Background operation
+
+The worker runs as your signed-in OS user. Closing the terminal or coding app does not stop it. Sleeping, signing out, or shutting down the computer makes its local agent unavailable. Requests remain queued. Devin sessions are monitored by the relay and can continue while your computer is off. See [cloud agents](cloud-agents.md) for connection requirements.
+
+| To… | Run |
+| --- | --- |
+| Check your connection | `litecom --connection NAME doctor` |
+| Check the background worker | `litecom --connection NAME service status` |
+| Start or restart it | `litecom --connection NAME service start` |
+| Stop it | `litecom --connection NAME service stop` |
+| Remove automatic startup | `litecom --connection NAME service remove` |
+
+`service remove` removes automatic startup and preserves your account and settings. It does not revoke remote credentials. Use **Settings → Connected apps → Disconnect** to revoke a connection.
+
+Repeating setup reuses an identical installed executable. When replacing a different build on Windows, stop Litecom's workers and close agent sessions using its MCP connection first, then rerun setup.
+
+macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows uses a sign-in task. Native agent configuration is reused. Secrets exported only in your terminal are not copied to the background service; save credentials through your agent’s supported sign-in flow. Linux and Windows background startup remain experimental; use foreground mode below if startup fails.
+
+The Windows task runs under your signed-in account without elevation. It permits battery power and has no fixed runtime cutoff. Closing the terminal does not stop it; signing out still does.
+
+To keep everything in the terminal:
+
+```sh
+litecom --connection NAME setup --relay https://YOUR-SERVER --no-background
+litecom --connection NAME worker
+```
+
+## If something needs attention
+
+| What you see | Next action |
+| --- | --- |
+| Server cannot be reached | Retry `litecom --connection NAME setup` when the server is available; saved settings remain intact. |
+| Connection expired or disconnected | Run `litecom --connection NAME setup`; it opens pairing again. `litecom --connection NAME setup --reconnect` also starts this explicitly. |
+| No coding agents found | Install and sign in to a supported coding agent, then rerun `litecom --connection NAME setup`. Your existing account is preserved. |
+| Folder unavailable | Reconnect the volume, or run `litecom --connection NAME setup --workspace /absolute/folder`. |
+| MCP server name already exists | Setup preserves the other server and selects an unused name. A matching, enabled Litecom connection is reused. |
+| Matching Litecom server is disabled | Enable that connection in your coding agent, then retry setup. |
+| OpenClaw cannot save the connection | Stop its gateway through its service manager, rerun setup, then restart the gateway. If your configuration is managed, its owner must add the connection. |
+| Background startup failed | Run `litecom --connection NAME worker` in a terminal while checking the reported service error. |
+| Agent or folder changed after approval | Create a new request and approve the new settings. |
+| Agent stopped or execution is uncertain | Check the external effects and private diagnostic path shown to the owner before retrying. Litecom will not rerun the action. |
+| A tool was denied | Adjust the native agent's permissions yourself if appropriate, then submit a new request. |
+| File is outside the selected folder | Move the intended file into that folder or select the right working folder, then submit a new request. |
+
+Use `--home PATH` to store private configuration somewhere else. After a fix, run `litecom --connection NAME doctor` and send a small request to your own agent.
+
+Litecom removes successful run diagnostics after preparing the result. Failed runs keep private local diagnostics for troubleshooting. There is no automatic cleanup of failed-run diagnostics or relay payloads.
+
