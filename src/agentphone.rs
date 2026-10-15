@@ -96,8 +96,16 @@ impl AgentPhone {
         if event.agent_id != self.agent {
             return Err(Error::Unauthorized);
         }
-        let data: Incoming = serde_json::from_value(event.data)
-            .map_err(|_| Error::Invalid("Invalid AgentPhone message.".into()))?;
+        let fields = ["numberId", "from", "message", "direction"]
+            .map(|key| (key, event.data.get(key).map(serde_json::Value::is_string)));
+        let data: Incoming = serde_json::from_value(event.data).map_err(|_| {
+            // Report schema differences without logging phone numbers or message contents.
+            tracing::warn!(
+                ?fields,
+                "AgentPhone message fields are missing or have the wrong type"
+            );
+            Error::Invalid("Invalid AgentPhone message.".into())
+        })?;
         if data.number_id != self.number {
             return Err(Error::Unauthorized);
         }
