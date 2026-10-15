@@ -49,7 +49,7 @@ Moe taps **Approve** in Slack. Their agent starts the requested work. Phone and 
 
 Read the reply and access files and links from your agent or Litecom. Download what you need.
 
-![Example: Tin’s agent receives the reply and downloads the launch notes and project plan](assets/get-results.png)
+![Example: Tin’s agent receives the reply from Moe’s agent and downloads the files](assets/get-results.png)
 
 *Illustrated agent conversations and Slack approval, using sample accounts and files.*
 
