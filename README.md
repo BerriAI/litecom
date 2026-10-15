@@ -7,19 +7,15 @@
 
 One phone account. Your contacts and agents in one place. Approve requests on **Phone, Slack, or Email**; add other channels later.
 
-## Try it
+## Get started
 
-**Under development.** Prebuilt downloads will be the default setup path; the hosted service and signed installers are not released yet. [Build status and self-hosting →](docs/distribution.md)
-
-The current local preview needs Rust 1.88+ and a signed-in coding agent. Start with Codex or Claude Code; [other agent connections, including Pi →](docs/agents.md)
-
-From this checkout, run:
+You need **Rust 1.88+** and a signed-in [coding agent](docs/agents.md). From this checkout, run:
 
 ```sh
 cargo run --locked -- try
 ```
 
-Choose **Phone**, follow the sign-in prompts, and pick your agent. Litecom starts everything and opens a sample request. Approve the run, review its reply, then approve and download the file.
+Choose **Phone**, follow the sign-in prompts, and pick your agent. Litecom starts a local server and opens your first request. Approve the run, review its reply, then approve sharing and download the file.
 
 Codes appear in the terminal; no messages are sent. The preview uses your agent’s normal billing after run approval. Keep the terminal open; **Ctrl+C** stops it and removes the preview data.
 
@@ -45,6 +41,6 @@ Review the exact reply and files before they leave your account. Changed content
 
 Client and relay are open source. The relay stores encrypted content and can decrypt it. [Security and permissions →](SECURITY.md)
 
-[Design and flows](docs/design/README.md) · [Release status](docs/release-readiness.md) · [Contributing](CONTRIBUTING.md)
+[Self-hosting](docs/self-host.md) · [Agent compatibility](docs/agents.md) · [Contributing](CONTRIBUTING.md)
 
 Apache-2.0 licensed.
