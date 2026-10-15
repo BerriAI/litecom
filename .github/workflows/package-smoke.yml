@@ -1,0 +1,42 @@
+name: Test an existing package
+on:
+  workflow_dispatch:
+    inputs:
+      release_run:
+        description: Release workflow run containing the native archives
+        required: true
+      os:
+        type: choice
+        options: [windows-2022, ubuntu-22.04]
+        default: windows-2022
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*
+          path: target/distrib
+          merge-multiple: true
+          run-id: ${{ inputs.release_run }}
+          github-token: ${{ github.token }}
+      - name: Start the Linux user service manager
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Verify Windows package and background service
+        if: runner.os == 'Windows'
+        run: python scripts/check-package.py target/distrib/litecom-x86_64-pc-windows-msvc.zip --background-service
+      - name: Verify Linux package and background service
+        if: runner.os == 'Linux'
+        run: python scripts/check-package.py target/distrib/litecom-x86_64-unknown-linux-gnu.tar.gz --background-service

@@ -167,7 +167,8 @@ def main():
                 })
                 task_path = "/api/tasks/" + task["id"]
                 time.sleep(1)
-                assert api(task_path)["status"] == "queued", "Stopped worker claimed new work"
+                stopped_task = api(task_path)
+                assert stopped_task["status"] == "queued", f"Stopped worker advanced new work to {stopped_task['status']}"
                 cli("service", "start")
                 task = wait_for("request approval", lambda: api(task_path),
                                 lambda value: value["status"] == "awaiting_approval")
@@ -198,6 +199,17 @@ def main():
                 wait_for("removed service", running, lambda value: not value)
                 print(f"PASS: no duplicate execution and startup removal on {sys.platform}.", flush=True)
             except Exception:
+                if os.name == "nt":
+                    diagnostics = subprocess.run([
+                        "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                        f"Get-ScheduledTask -TaskName 'org.litecom.{connection}' | "
+                        "Select-Object State | ConvertTo-Json -Compress; "
+                        f"Get-ScheduledTaskInfo -TaskName 'org.litecom.{connection}' | "
+                        "Select-Object LastTaskResult | ConvertTo-Json -Compress; "
+                        "Get-CimInstance Win32_Process -Filter \"Name = 'litecom.exe'\" | "
+                        "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress",
+                    ], capture_output=True, text=True, timeout=15)
+                    print(diagnostics.stdout, file=sys.stderr)
                 for path in (home / "runs").glob("**/stderr.log"):
                     print(path.read_text(errors="replace"), file=sys.stderr)
                 raise
