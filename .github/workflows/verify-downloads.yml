@@ -41,4 +41,15 @@ jobs:
           path: target/distrib
           merge-multiple: true
       - name: Test the extracted executable without Rust or Node on PATH
+        if: runner.os == 'macOS'
         run: python scripts/check-package.py target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }}
+      - name: Start the Linux user service manager
+        if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Verify extracted package, background startup, and approved transfer
+        if: runner.os != 'macOS'
+        run: python scripts/check-package.py target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }} --background-service

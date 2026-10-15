@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -18,6 +19,8 @@ import zipfile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('archive', type=Path)
+parser.add_argument('--background-service', action='store_true',
+                    help='Also verify real OS startup and an approved transfer')
 args = parser.parse_args()
 archive = args.archive.resolve()
 expected_hash = Path(str(archive) + '.sha256').read_text().split()[0]
@@ -91,3 +94,6 @@ with tempfile.TemporaryDirectory(prefix='litecom-package-') as directory:
                 process.kill()
                 process.wait(timeout=10)
     print(f'{version}: checksum, standalone CLI, relay, database, and bundled UI passed.')
+    if args.background_service:
+        subprocess.run([sys.executable, str(Path(__file__).with_name('background-service-smoke.py')),
+                        '--binary', str(binary)], check=True)

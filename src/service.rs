@@ -204,9 +204,10 @@ pub fn install(connection: &str) -> Result<()> {
         checked(Command::new("systemctl").args([
             "--user",
             "enable",
-            "--now",
             &format!("{}.service", label(connection)?),
         ]))?;
+        // Restart also starts an inactive service. Using enable --now here
+        // would start it twice and consume systemd's restart burst allowance.
         checked(Command::new("systemctl").args([
             "--user",
             "restart",

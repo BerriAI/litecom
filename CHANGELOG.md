@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-alpha.6
+
+- Start the Linux background worker once per command so repeated starts do not exhaust systemd's restart allowance.
+
 ## 0.1.0-alpha.5
 
 - Sign in with Google, choose an approval channel, and find contacts in your workspace.
