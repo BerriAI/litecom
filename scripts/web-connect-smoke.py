@@ -81,6 +81,13 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             if fresh_install: assert (root/'installed/litecom').is_file()
             expect(page.locator('#connect-status')).to_contain_text('Connected.',timeout=20000)
             assert not (work/'ran').exists(), 'Agent ran before approval'
+            first_agent=next(a for a in page.request.get(origin+'/api/agents').json() if a['is_default'])
+            assert first_agent['connected'] and first_agent['local']['harness']=='Codex'
+            assert first_agent['name']==first_agent['local']['device_name']
+            expect(page.locator('#your-agents')).to_contain_text(first_agent['name']+' · Codex')
+            page.get_by_role('link',name='Ask '+first_agent['name']+' · Codex',exact=True).click()
+            expect(page.get_by_label('Agent',exact=True)).to_have_value(first_agent['id'])
+            page.goto(origin+'/workspace')
             page.screenshot(path=str(shots/'connected-mobile.png'),full_page=True)
             repeated=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
             assert repeated.returncode==0,(repeated.stdout,repeated.stderr)

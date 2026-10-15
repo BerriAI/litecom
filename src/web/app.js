@@ -429,7 +429,11 @@ async function inbox() {
     )
     .join(
       "",
-    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
+    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
+  const requestedAgent = new URLSearchParams(location.search).get("agent");
+  if (agents.some((agent) => agent.id === requestedAgent)) {
+    document.querySelector('#ask select[name="agent"]').value = requestedAgent;
+  }
   const last = tasks.at(-1);
   if (query || tasks.length === 100) {
     const paging = document.createElement("nav");
@@ -495,6 +499,24 @@ async function taskPage(id, update, previous) {
     (replacement || app).focus({ preventScroll: true });
   }
 }
+function agentLabel(agent) {
+  const name = agent.name === "Default" ? "Local agent" : agent.name;
+  return agent.local?.harness ? `${name} · ${agent.local.harness}` : name;
+}
+function agentSummary(agents) {
+  return agents.filter((agent) => agent.connected).map((agent) => esc(agentLabel(agent))).join(" / ") || "No agents connected";
+}
+function agentStatus(agent) {
+  if (!agent.connected) return "Not connected";
+  if (agent.kind !== "local") return "Connected";
+  return agent.last_seen_at >= Date.now() / 1000 - 60
+    ? "Online"
+    : "Offline · last seen " + new Date(agent.last_seen_at * 1000).toLocaleString();
+}
+function yourAgents(agents) {
+  const connected = agents.filter((agent) => agent.connected);
+  return connected.length ? `<div class="list">${connected.map((agent) => `<article class="list-row">${icon("agents")}<div class="row-content"><h3>${esc(agentLabel(agent))}${agent.is_default ? '<span class="inline-meta">Default</span>' : ""}</h3><p class="muted">${esc(agentStatus(agent))}</p></div><a class="button" href="/?ask=me&agent=${encodeURIComponent(agent.id)}" aria-label="Ask ${esc(agentLabel(agent))}">Ask agent</a></article>`).join("")}</div>` : '<p class="muted">No agents connected</p>';
+}
 async function workspacePage() {
   try {
     localPairing = JSON.parse(sessionStorage.getItem("local-pairing"));
@@ -505,19 +527,14 @@ async function workspacePage() {
     api("/api/people"),
     api("/api/agents"),
   ]);
-  app.innerHTML = `${pageHeading("Your workspace", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list"><article class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2><p class="muted">${
-    agents
-      .filter((a) => a.last_seen_at || a.kind === "devin")
-      .map((a) => esc(a.name))
-      .join(" · ") || "No agents connected"
-  }</p></div><a class="button" href="/?ask=me">Ask my agent</a></article></div></section><section class="section"><h2 class="section-label">People</h2><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${person.agents.length ? person.agents.map((a) => esc(a.name)).join(" · ") : "No agents connected"}</p></div>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Add contact</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : person.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a>` : '<span class="muted">Request sent</span>'}</article>`).join("") || '<div class="empty"><p>No one else is here yet.</p><a href="/contacts">Invite someone</a></div>'}</div></section>`;
+  app.innerHTML = `${pageHeading("Your workspace", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><h2 class="section-label">People</h2><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Add contact</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : person.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a>` : '<span class="muted">Request sent</span>'}</article>`).join("") || '<div class="empty"><p>No one else is here yet.</p><a href="/contacts">Invite someone</a></div>'}</div></section>`;
   showLocalCommand();
   await pollLocalConnection();
 }
 
 async function contactsPage() {
   const contacts = await api("/api/contacts");
-  app.innerHTML = `${pageHeading("Contacts", '<button class="primary" data-action="copy-invite">Copy invite link</button>')}<div class="list">${contacts.map((c) => `<article class="list-row">${avatar(c.name)}<div class="row-content"><h2>${esc(c.name)}</h2><p class="muted">${c.status === "accepted" ? c.agents.map((a) => esc(a.name)).join(" · ") || "No agents connected" : c.status === "pending" ? (c.incoming ? "Wants to connect" : "Request sent") : esc(c.status)}</p></div><div class="row-actions">${c.status === "pending" && c.incoming ? `<button data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(c.id)}">Ask ${esc(c.name)}</a><details class="row-menu"><summary aria-label="Manage ${esc(c.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button></details>` : ""}</div></article>`).join("") || '<div class="empty"><p>Your contacts will appear here.</p><a href="/workspace">Find someone in your workspace</a></div>'}</div><details class="disclosure"><summary>Add with a contact link</summary><form id="contact"><label>Contact link<input name="link" type="url" placeholder="Paste their Litecom link" required></label><button>Connect</button></form></details>`;
+  app.innerHTML = `${pageHeading("Contacts", '<button class="primary" data-action="copy-invite">Copy invite link</button>')}<div class="list">${contacts.map((c) => `<article class="list-row">${avatar(c.name)}<div class="row-content"><h2>${esc(c.name)}</h2><p class="muted">${c.status === "accepted" ? agentSummary(c.agents) : c.status === "pending" ? (c.incoming ? "Wants to connect" : "Request sent") : esc(c.status)}</p></div><div class="row-actions">${c.status === "pending" && c.incoming ? `<button data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(c.id)}">Ask ${esc(c.name)}</a><details class="row-menu"><summary aria-label="Manage ${esc(c.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button></details>` : ""}</div></article>`).join("") || '<div class="empty"><p>Your contacts will appear here.</p><a href="/workspace">Find someone in your workspace</a></div>'}</div><details class="disclosure"><summary>Add with a contact link</summary><form id="contact"><label>Contact link<input name="link" type="url" placeholder="Paste their Litecom link" required></label><button>Connect</button></form></details>`;
 }
 
 async function agentsPage() {
@@ -527,7 +544,7 @@ async function agentsPage() {
   } catch {
     sessionStorage.removeItem("local-pairing");
   }
-  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2>${esc(a.name)}${a.is_default && a.name.toLowerCase() !== "default" ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : "Not connected"}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${a.kind === "local" ? `<button data-action="connect-local" data-id="${esc(a.id)}" aria-label="Connect ${esc(a.name)}">Connect</button>` : ""}${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
+  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2 data-agent-name="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${esc(agentStatus(a))}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${a.kind === "local" ? `<button data-action="connect-local" data-id="${esc(a.id)}" aria-label="Connect ${esc(a.name)}">Connect</button>` : ""}${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
   showLocalCommand();
   await pollLocalConnection();
 }
@@ -547,7 +564,7 @@ async function connectLocal(agentId) {
     );
   localPairing = await api("/api/connections/local", { agent_id: agent.id });
   localPairing.agent_id = agent.id;
-  localPairing.agent_name = agent.name;
+  localPairing.agent_name = agent.name === "Default" ? "this computer" : agent.name;
   localPairing.started = Date.now();
   sessionStorage.setItem("local-pairing", JSON.stringify(localPairing));
   showLocalCommand();
@@ -607,7 +624,13 @@ async function pollLocalConnection() {
         const row = [...document.querySelectorAll("[data-agent-status]")].find(
           (el) => el.dataset.agentStatus === current.agent_id,
         );
-        if (row) row.textContent = "Connected · listening for requests";
+        const agents = await api("/api/agents");
+        const connected = agents.find((agent) => agent.id === current.agent_id);
+        if (row && connected) row.textContent = agentStatus(connected);
+        const heading = document.querySelector(`[data-agent-name="${CSS.escape(current.agent_id)}"]`);
+        if (heading && connected) heading.innerHTML = `${esc(agentLabel(connected))}${connected.is_default ? '<span class="inline-meta">Default</span>' : ""}`;
+        const own = document.getElementById("your-agents");
+        if (own) own.innerHTML = yourAgents(agents);
       }
     }
   } catch (e) {
@@ -621,7 +644,7 @@ async function connectPage(code) {
     api(`/api/device/${encodeURIComponent(code)}`),
     api("/api/agents"),
   ]);
-  app.innerHTML = `<section class="narrow"><h1>Connect this agent?</h1><p><strong>${esc(device.label)}</strong> wants to join your Litecom account.</p><div class="card"><p class="muted">Check that this code matches the one in your terminal.</p><p class="code">${esc(code)}</p><form id="device" data-code="${esc(code)}"><label>Connect as<select name="agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.is_default ? " (default)" : ""}</option>`).join("")}</select></label><p class="muted subtitle">It can ask your contacts, access your inbox, and prepare work for this agent. Only you can approve.</p><button class="primary">Connect agent</button></form></div></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Connect this agent?</h1><p><strong>${esc(device.label)}</strong> wants to join your Litecom account.</p><div class="card"><p class="muted">Check that this code matches the one in your terminal.</p><p class="code">${esc(code)}</p><form id="device" data-code="${esc(code)}"><label>Connect as<select name="agent">${agents.map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? " (default)" : ""}</option>`).join("")}</select></label><p class="muted subtitle">It can ask your contacts, access your inbox, and prepare work for this agent. Only you can approve.</p><button class="primary">Connect agent</button></form></div></section>`;
 }
 async function invitePage(code) {
   const p = await api(`/api/invite/${encodeURIComponent(code)}`);
@@ -824,7 +847,7 @@ document.addEventListener("change", async (e) => {
       select.innerHTML =
         '<option value="">Default agent</option>' +
         agents
-          .map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`)
+          .map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}</option>`)
           .join("");
     } catch (err) {
       if (form.isConnected && form.elements.owner.value === owner) error(err);

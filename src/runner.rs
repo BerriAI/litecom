@@ -530,6 +530,19 @@ pub async fn run(client: Client, settings: RunnerConfig, once: bool) -> Result<(
         .get("/api/me")
         .await
         .context("This connection needs attention. Run `litecom setup`. ")?;
+    // Display metadata must not prevent work when connecting to an older relay.
+    if let Err(error) = client
+        .post::<Value>(
+            "/api/connection/identity",
+            serde_json::to_value(LocalAgentIdentity {
+                device_name: computer_name(),
+                harness: settings.agent.name().into(),
+            })?,
+        )
+        .await
+    {
+        eprintln!("Could not update this agent's display name: {error}");
+    }
     eprintln!(
         "Litecom is listening · {} · {}",
         settings.agent.name(),
@@ -571,6 +584,27 @@ pub async fn run(client: Client, settings: RunnerConfig, once: bool) -> Result<(
         }
         tokio::time::sleep(Duration::from_secs(retry_delay)).await;
     }
+}
+
+fn computer_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Ok(output) = std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        && output.status.success()
+        && let Ok(name) = String::from_utf8(output.stdout)
+        && !name.trim().is_empty()
+    {
+        return name.trim().into();
+    }
+    if let Ok(output) = std::process::Command::new("hostname").output()
+        && output.status.success()
+        && let Ok(name) = String::from_utf8(output.stdout)
+        && !name.trim().is_empty()
+    {
+        return name.trim().trim_end_matches(".local").into();
+    }
+    "This computer".into()
 }
 
 #[cfg(test)]

@@ -1,3 +1,5 @@
+<img src="src/web/logo.png" width="80" height="80" alt="Litecom logo" />
+
 # Litecom
 
 **Ask someone’s agent. They approve. It gets done.**

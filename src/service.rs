@@ -249,7 +249,13 @@ pub fn stop(connection: &str) -> Result<()> {
         &format!("{}.service", label(connection)?),
     ]))?;
     #[cfg(target_os = "windows")]
-    checked(Command::new("schtasks").args(["/End", "/TN", &label(connection)?]))?;
+    checked(Command::new("powershell.exe").args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &windows_stop_script(connection)?,
+    ]))?;
     Ok(())
 }
 pub fn remove(connection: &str) -> Result<()> {
@@ -279,7 +285,7 @@ pub fn remove(connection: &str) -> Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = stop(connection);
+        stop(connection)?;
         checked(Command::new("schtasks").args(["/Delete", "/TN", &label(connection)?, "/F"]))?;
     }
     Ok(())
@@ -358,11 +364,36 @@ fn windows_install_script(connection: &str, executable: &Path, home: &Path) -> R
          $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited; \
          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries \
              -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable; \
-         $existing = Get-ScheduledTask -TaskName {name} -ErrorAction SilentlyContinue; \
-         if ($existing) {{ Stop-ScheduledTask -InputObject $existing; }} \
+         {stop} \
          Register-ScheduledTask -TaskName {name} -Action $action -Trigger $trigger \
              -Principal $principal -Settings $settings -Force | Out-Null; \
-         Start-ScheduledTask -TaskName {name}"
+         Start-ScheduledTask -TaskName {name}",
+        stop = windows_stop_script(connection)?
+    ))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_stop_script(connection: &str) -> Result<String> {
+    let name = label(connection)?;
+    // Task Scheduler can report Ready before its process exits. Hold handles to
+    // this task's workers before stopping so restart/removal waits for release of
+    // the executable and files, without affecting another Litecom connection.
+    Ok(format!(
+        "$ErrorActionPreference = 'Stop'; \
+         $existing = Get-ScheduledTask -TaskName '{name}' -ErrorAction SilentlyContinue; \
+         if ($existing) {{ \
+             $workers = @(Get-CimInstance Win32_Process -Filter \"Name = 'litecom.exe'\" | \
+                 Where-Object {{ $_.ExecutablePath -in $existing.Actions.Execute -and \
+                     $_.CommandLine -like '*--connection {connection} worker' }} | \
+                 ForEach-Object {{ \
+                     $worker = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; \
+                     if ($worker) {{ $null = $worker.Handle; $worker; }} \
+                 }}); \
+             Stop-ScheduledTask -InputObject $existing; \
+             foreach ($worker in $workers) {{ \
+                 if (-not $worker.WaitForExit(30000)) {{ throw 'The background worker has not stopped. Retry before updating or removing it.'; }} \
+             }} \
+         }}"
     ))
 }
 

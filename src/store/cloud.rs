@@ -56,6 +56,8 @@ impl Store {
                     is_default: false,
                     revoked: false,
                     last_seen_at: None,
+                    connected: false,
+                    local: None,
                 };
                 self.insert_agent(&agent)?;
                 agent

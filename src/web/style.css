@@ -59,6 +59,9 @@ header {
   padding: 24px 32px;
 }
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   color: var(--foreground);
   font-size: 1.25rem;
   font-weight: 500;
@@ -666,7 +669,6 @@ ul.files li {
     border-right: 1px solid var(--line);
   }
   .workspace-shell .wordmark {
-    display: inline-block;
     margin: 0 12px 40px;
   }
   .workspace-shell nav {
@@ -686,7 +688,6 @@ ul.files li {
     border-bottom: 1px solid var(--line);
   }
   .workspace-shell .wordmark {
-    display: inline-block;
     margin-bottom: 16px;
   }
   nav {

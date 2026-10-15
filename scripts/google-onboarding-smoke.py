@@ -9,9 +9,9 @@ origin='http://litecom.test'
 with sync_playwright() as p:
     browser=p.chromium.launch(channel='chrome',headless=True)
     try:
-        for width in [320,390,1100]:
+        for width in [320,390,768,1100]:
             for selected in ['email','phone','slack']:
-                state={'signed':False,'channel':False,'starts':0,'email_confirmations':0}
+                state={'signed':False,'channel':False,'starts':0,'email_confirmations':0,'agents':[{'id':'own-agent','name':'Default','kind':'local','last_seen_at':123,'connected':False}]}
                 context=browser.new_context(viewport={'width':width,'height':900})
                 errors=[]
                 def route(request):
@@ -34,9 +34,9 @@ with sync_playwright() as p:
                     elif path=='/api/channels/slack/finish': state['channel']=True; data={}
                     elif path=='/fixture-slack':
                         request.fulfill(content_type='text/html',body='<h1>Fixture Slack consent</h1><a href="/slack/connected?state=fixture">Allow</a>'); return
-                    elif path=='/api/agents': data=[{'id':'own-agent','name':'Default','kind':'local'}]
-                    elif path=='/api/people': data=[{'id':'ishaan','name':'Ishaan','status':'available','agents':[{'name':'Devin'}]}]
-                    elif path=='/app.js' or path=='/style.css' or path.startswith('/fonts/'):
+                    elif path=='/api/agents': data=state['agents']
+                    elif path=='/api/people': data=[{'id':'ishaan','name':'Ishaan','status':'available','agents':[{'name':'Devin','kind':'devin','connected':True}]}]
+                    elif path=='/app.js' or path=='/style.css' or path=='/logo.png' or path.startswith('/fonts/'):
                         request.fulfill(path=str(web/path.lstrip('/'))); return
                     elif not path.startswith('/api/'):
                         request.fulfill(path=str(web/'index.html'),content_type='text/html'); return
@@ -65,6 +65,20 @@ with sync_playwright() as p:
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not errors,errors
                 page.screenshot(path=str(shots/f'workspace-{selected}-{width}.png'),full_page=True)
+                expect(page.get_by_text('moe@example.com',exact=True)).to_be_visible()
+                expect(page.locator('#your-agents')).to_have_text('No agents connected')
+                assert page.locator('.wordmark img').evaluate('(image) => image.complete && image.naturalWidth > 0')
+                state['agents']=[
+                    {'id':'mac','name':'MacBook Pro','kind':'local','is_default':True,'connected':True,'last_seen_at':9999999999,'local':{'device_name':'MacBook Pro','harness':'Codex'}},
+                    {'id':'cloud','name':'Devin','kind':'devin','connected':True},
+                ]
+                page.reload()
+                expect(page.get_by_role('heading',name='MacBook Pro · CodexDefault',exact=True)).to_be_visible()
+                expect(page.get_by_role('heading',name='Devin',exact=True)).to_be_visible()
+                assert page.get_by_role('link',name='Ask MacBook Pro · Codex',exact=True).get_attribute('href')=='/?ask=me&agent=mac'
+                assert page.get_by_role('link',name='Ask Devin',exact=True).get_attribute('href')=='/?ask=me&agent=cloud'
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                page.screenshot(path=str(shots/f'workspace-agents-{width}.png'),full_page=True)
                 context.close()
-        print('PASS: Google-first UI → Email / Phone / Slack → workspace; no required agent or phone for email/Slack; refresh/resume; 320/390/1100px. Identity/provider APIs are fixtures.')
+        print('PASS: Google-first UI → Email / Phone / Slack → workspace; no required agent or phone for email/Slack; refresh/resume; 320/390/768/1100px; email and agent identity, stale disconnected state, logo. Identity/provider APIs are fixtures.')
     finally: browser.close()

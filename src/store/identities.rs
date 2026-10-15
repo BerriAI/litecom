@@ -2,6 +2,60 @@ use super::*;
 use crate::google::Identity;
 
 impl Store {
+    pub(crate) fn agent_list(&self, owner_id: &str) -> Result<Vec<Agent>> {
+        let agents = self
+            .db
+            .prepare(
+                "SELECT * FROM agents WHERE owner_id=? AND revoked=0 ORDER BY is_default DESC,name",
+            )?
+            .query_map([owner_id], Self::agent_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        agents.into_iter().map(|mut agent| {
+            let config: Option<Vec<u8>> = self.db.query_row("SELECT config FROM agents WHERE id=?", [&agent.id], |r| r.get(0))?;
+            agent.connected = if agent.kind == AgentKind::Local {
+                agent.local = config.map(|data| self.vault.open(&data, &format!("agent-config:{}", agent.id))).transpose()?;
+                agent.last_seen_at.is_some() && self.db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM credentials WHERE agent_id=? AND role='agent' AND revoked=0 AND expires_at>?)",
+                    params![agent.id, self.time()], |r| r.get::<_,bool>(0),
+                )?
+            } else { config.is_some() };
+            Ok(agent)
+        }).collect()
+    }
+
+    /// A worker can identify only the local agent bound to its credential.
+    pub(crate) fn identify_local_agent(
+        &self,
+        p: &Principal,
+        identity: &LocalAgentIdentity,
+    ) -> Result<()> {
+        require(
+            p.role == Role::Agent,
+            "Use this computer's agent connection.",
+        )?;
+        let agent = self.owned_agent(p, p.agent_id.as_deref().ok_or(Error::Unauthorized)?)?;
+        require(agent.kind == AgentKind::Local, "This is not a local agent.")?;
+        for value in [&identity.device_name, &identity.harness] {
+            validate(
+                !value.trim().is_empty() && !value.chars().any(char::is_control),
+                "Provide the computer and agent names.",
+            )?;
+        }
+        self.transaction(|| {
+            if matches!(agent.name.as_str(), "Default" | "This computer") {
+                let mut name = identity.device_name.clone();
+                let mut suffix = 2;
+                while self.db.query_row("SELECT EXISTS(SELECT 1 FROM agents WHERE owner_id=? AND name=? COLLATE NOCASE AND id!=?)", params![p.user_id, name, agent.id], |r| r.get::<_,bool>(0))? {
+                    name = format!("{} ({suffix})", identity.device_name);
+                    suffix += 1;
+                }
+                self.db.execute("UPDATE agents SET name=? WHERE id=?", params![name, agent.id])?;
+            }
+            self.db.execute("UPDATE agents SET config=? WHERE id=?", params![self.vault.seal(identity, &format!("agent-config:{}", agent.id))?, agent.id])?;
+            Ok(())
+        })
+    }
+
     pub(crate) fn has_phone(&self, p: &Principal) -> Result<bool> {
         p.human()?;
         Ok(self.db.query_row(
@@ -63,7 +117,7 @@ impl Store {
                 let profile = Profile { id: id(), name: identity.name.clone(), invite: secret() };
                 self.db.execute("INSERT INTO profiles(id,name,invite_hash,invite) VALUES(?,?,?,?)",
                     params![profile.id, profile.name, hash(&profile.invite), self.vault.seal(&profile.invite, &format!("invite:{}", profile.id))?])?;
-                self.insert_agent(&Agent { id: id(), owner_id: profile.id.clone(), name: "Default".into(), kind: AgentKind::Local, is_default: true, revoked: false, last_seen_at: None })?;
+                self.insert_agent(&Agent { id: id(), owner_id: profile.id.clone(), name: "This computer".into(), kind: AgentKind::Local, is_default: true, revoked: false, last_seen_at: None, connected: false, local: None })?;
                 profile
             };
             self.db.execute("INSERT INTO login_identities(provider,subject_key,user_id,data) VALUES('google',?,?,?) ON CONFLICT(provider,subject_key) DO UPDATE SET data=excluded.data",

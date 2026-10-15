@@ -60,6 +60,17 @@ pub struct Agent {
     pub is_default: bool,
     pub revoked: bool,
     pub last_seen_at: Option<i64>,
+    #[serde(default)]
+    pub connected: bool,
+    #[serde(default)]
+    pub local: Option<LocalAgentIdentity>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalAgentIdentity {
+    pub device_name: String,
+    pub harness: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

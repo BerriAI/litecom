@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.8
+
+- Show your email, computer name, and selected coding agent in your workspace. Disconnected agents no longer appear connected.
+- Add the Litecom logo to navigation and the README.
+- Wait for Windows workers to exit before restarting or removing their background task.
+
 ## 0.1.0-alpha.7
 
 - Stop the existing Windows background task before replacing its configuration during repeated setup.

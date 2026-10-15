@@ -207,6 +207,7 @@ def main():
                         f"Get-ScheduledTaskInfo -TaskName 'org.litecom.{connection}' | "
                         "Select-Object LastTaskResult | ConvertTo-Json -Compress; "
                         "Get-CimInstance Win32_Process -Filter \"Name = 'litecom.exe'\" | "
+                        f"Where-Object {{ $_.CommandLine -like '*--connection {connection} *' }} | "
                         "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress",
                     ], capture_output=True, text=True, timeout=15)
                     print(diagnostics.stdout, file=sys.stderr)

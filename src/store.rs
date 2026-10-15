@@ -180,7 +180,7 @@ impl Store {
         self.transaction(|| {
             let profile = Profile { id: id(), name: name.trim().into(), invite: secret() };
             self.db.execute("INSERT INTO profiles(id,name,phone_key,phone,invite_hash,invite) VALUES(?,?,?,?,?,?)", params![profile.id, profile.name, fingerprint, self.vault.seal(&phone, &format!("phone:{}",profile.id))?, hash(&profile.invite), self.vault.seal(&profile.invite, &format!("invite:{}",profile.id))?])?;
-            let agent = Agent { id: id(), owner_id: profile.id.clone(), name: "Default".into(), kind: AgentKind::Local, is_default: true, revoked: false, last_seen_at: None };
+            let agent = Agent { id: id(), owner_id: profile.id.clone(), name: "This computer".into(), kind: AgentKind::Local, is_default: true, revoked: false, last_seen_at: None, connected: false, local: None };
             self.insert_agent(&agent)?;
             Ok(profile)
         })
@@ -268,6 +268,8 @@ impl Store {
             is_default: r.get("is_default")?,
             revoked: r.get("revoked")?,
             last_seen_at: r.get("last_seen_at")?,
+            connected: false,
+            local: None,
         })
     }
     pub fn register_agent(
@@ -300,6 +302,8 @@ impl Store {
                 is_default: make_default,
                 revoked: false,
                 last_seen_at: None,
+                connected: false,
+                local: None,
             };
             self.insert_agent(&agent)?;
             Ok(agent)
@@ -343,13 +347,7 @@ impl Store {
                 "Connect with this person first.",
             )?;
         }
-        Ok(self
-            .db
-            .prepare(
-                "SELECT * FROM agents WHERE owner_id=? AND revoked=0 ORDER BY is_default DESC,name",
-            )?
-            .query_map([owner_id], Self::agent_row)?
-            .collect::<std::result::Result<Vec<_>, _>>()?)
+        self.agent_list(owner_id)
     }
     pub fn revoke_agent(&self, p: &Principal, agent_id: &str) -> Result<()> {
         p.human()?;
@@ -458,8 +456,7 @@ impl Store {
             {
                 continue;
             }
-            let agents = self.db.prepare("SELECT * FROM agents WHERE owner_id=? AND revoked=0 ORDER BY is_default DESC,name")?
-                .query_map([&id], Self::agent_row)?.collect::<std::result::Result<Vec<_>, _>>()?;
+            let agents = self.agent_list(&id)?;
             let (status, incoming) = contact
                 .map(|(status, initiator)| (status, initiator != p.user_id))
                 .unwrap_or(("available".into(), false));

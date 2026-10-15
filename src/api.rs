@@ -224,6 +224,7 @@ pub fn router(state: AppState) -> Router {
             get(local_connection_status),
         )
         .route("/api/connection/ready", post(local_connection_ready))
+        .route("/api/connection/identity", post(local_agent_identity))
         .route("/api/connections/{id}", delete(revoke_connection))
         .route("/api/contacts", get(contacts).post(add_contact))
         .route("/api/people", get(people))
@@ -272,6 +273,15 @@ pub fn router(state: AppState) -> Router {
                 (
                     [(header::CONTENT_TYPE, "font/woff2")],
                     include_bytes!("web/fonts/geist-mono.woff2").as_slice(),
+                )
+            }),
+        )
+        .route(
+            "/logo.png",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "image/png")],
+                    include_bytes!("web/logo.png").as_slice(),
                 )
             }),
         )
@@ -640,6 +650,15 @@ async fn local_connection_ready(State(s): State<AppState>, h: HeaderMap) -> Resu
     Ok(Json(
         json!({"listening":s.db()?.local_connection_listening(&p)?}),
     ))
+}
+async fn local_agent_identity(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(identity): Json<LocalAgentIdentity>,
+) -> Result<Json<Value>> {
+    let p = s.principal(&h, true)?;
+    s.db()?.identify_local_agent(&p, &identity)?;
+    Ok(Json(json!({"updated":true})))
 }
 async fn authorize_device(
     State(s): State<AppState>,

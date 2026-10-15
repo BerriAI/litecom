@@ -177,6 +177,57 @@ fn local_connection_is_owner_bound_and_waits_for_its_own_worker() {
 }
 
 #[test]
+fn local_identity_preserves_custom_names_and_disconnect_is_not_a_heartbeat() {
+    let f = Fixture::new();
+    let identity = LocalAgentIdentity {
+        device_name: "Moe’s MacBook Pro".into(),
+        harness: "Codex".into(),
+    };
+    assert!(f.store.identify_local_agent(&f.b, &identity).is_err());
+    f.store.identify_local_agent(&f.bw, &identity).unwrap();
+    let agent = f.store.agents(&f.b, &f.b.user_id).unwrap().remove(0);
+    assert_eq!(agent.name, identity.device_name);
+    assert_eq!(agent.local.unwrap().harness, "Codex");
+    assert!(!agent.connected);
+    f.store.claim(&f.bw, &f.agent).unwrap();
+    assert!(f.store.agents(&f.b, &f.b.user_id).unwrap()[0].connected);
+    f.store
+        .revoke_connection(&f.b, &f.bw.credential_id)
+        .unwrap();
+    let agent = f.store.agents(&f.b, &f.b.user_id).unwrap().remove(0);
+    assert!(agent.last_seen_at.is_some());
+    assert!(!agent.connected);
+
+    let custom = f
+        .store
+        .register_agent(&f.b, "Work laptop", AgentKind::Local, false)
+        .unwrap();
+    let code = f.store.begin_local_connection(&f.b, &custom.id).unwrap();
+    let token = f.store.poll_device(&code.device_code).unwrap().unwrap();
+    let worker = f.store.authenticate(&token.token, Role::Agent).unwrap();
+    f.store.identify_local_agent(&worker, &identity).unwrap();
+    assert_eq!(
+        f.store.owned_agent(&f.b, &custom.id).unwrap().name,
+        "Work laptop"
+    );
+    assert!(f.store.owned_agent(&worker, &f.agent).is_err());
+    let mut updated = identity;
+    updated.harness = "Claude Code".into();
+    f.store.identify_local_agent(&worker, &updated).unwrap();
+    let agent = f
+        .store
+        .agents(&f.b, &f.b.user_id)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.id == custom.id)
+        .unwrap();
+    assert_eq!(agent.local.unwrap().harness, "Claude Code");
+    assert_eq!(agent.name, "Work laptop");
+    let people = serde_json::to_string(&f.store.people(&f.a).unwrap()).unwrap();
+    assert!(!people.contains("example.com") && !people.contains("config"));
+}
+
+#[test]
 fn v2_migration_preserves_accounts_connections_files_and_old_email_challenges() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("old.db");
