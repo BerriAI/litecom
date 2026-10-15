@@ -1,6 +1,6 @@
 """Signed-in web → copied command → real background service → one approval.
 Local dev delivery and a deterministic agent reply; native Codex MCP configuration.
-The installed-binary route is exercised. Public release download is a separate check.
+Use --public-release to exercise anonymous GitHub downloads from a clean installation.
 """
 import argparse, hashlib, json, os, re, shutil, socket, subprocess, tempfile, time, select, tomllib
 from pathlib import Path
@@ -8,13 +8,16 @@ from playwright.sync_api import sync_playwright, expect
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--binary',type=Path,default=Path('target/debug/litecom'))
-parser.add_argument('--fresh-installer',type=Path,help='Mirror directory containing cargo-dist installer and archive; exercises fresh installation without public hosting')
+install=parser.add_mutually_exclusive_group()
+install.add_argument('--fresh-installer',type=Path,help='Mirror directory containing cargo-dist installer and archive; exercises fresh installation without public hosting')
+install.add_argument('--public-release',action='store_true',help='Install anonymously from the matching published GitHub release')
 args=parser.parse_args(); binary=args.binary.resolve()
+fresh_install=bool(args.fresh_installer or args.public_release)
 native_codex=shutil.which('codex'); assert native_codex, 'Install Codex for its real MCP configuration CLI'
 shots=Path('.preview/web-connect'); shots.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='litecom-web-connect-') as folder:
     root=Path(folder); work=root/'work'; work.mkdir(); programs=root/'bin'; programs.mkdir()
-    if not args.fresh_installer: (programs/'litecom').symlink_to(binary)
+    if not fresh_install: (programs/'litecom').symlink_to(binary)
     (root/'codex').mkdir()
     (work/'notes.txt').write_text('Exact bytes from the requested agent.\n')
     fixture=programs/'codex'
@@ -27,10 +30,11 @@ out=sys.argv[sys.argv.index('--output-last-message')+1]
 Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Path('notes.txt').resolve())]}}))
 '''); fixture.chmod(0o700)
     env=dict(os.environ,LITECOM_HOME=str(root/'config'),CODEX_HOME=str(root/'codex'),PATH=str(programs)+os.pathsep+os.environ['PATH'])
-    if args.fresh_installer:
+    if fresh_install:
         # Preserve the user's shell profile and installer receipt. Only the
         # download boundary is mirrored; cargo-dist installs the real archive.
         env.update(LITECOM_INSTALL_DIR=str(root/'installed'),LITECOM_NO_MODIFY_PATH='1',XDG_CONFIG_HOME=str(root/'xdg'))
+    if args.fresh_installer:
         real_curl=shutil.which('curl'); assert real_curl
         mirror=args.fresh_installer.resolve()
         curl=programs/'curl'
@@ -74,7 +78,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             result=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
             assert result.returncode==0,(result.stdout,result.stderr)
             assert 'Listening for requests' in result.stdout
-            if args.fresh_installer: assert (root/'installed/litecom').is_file()
+            if fresh_install: assert (root/'installed/litecom').is_file()
             expect(page.locator('#connect-status')).to_contain_text('Connected.',timeout=20000)
             assert not (work/'ran').exists(), 'Agent ran before approval'
             page.screenshot(path=str(shots/'connected-mobile.png'),full_page=True)
@@ -153,7 +157,8 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 page.screenshot(path=str(shots/f'named-agent-{width}.png'),full_page=True)
             print('PASS: named agent creation connects that exact agent; reconnect targets it; first connection preserved; 320/1100px.')
-            print(('Fresh cargo-dist install (mirrored downloads). ' if args.fresh_installer else '')+'PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
+            source='Anonymous public release install. ' if args.public_release else 'Fresh cargo-dist install (mirrored downloads). ' if args.fresh_installer else ''
+            print(source+'PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
         finally:
             for connection in connections:
                 subprocess.run([binary,'--connection',connection,'service','remove'],env=env,capture_output=True,timeout=30)
