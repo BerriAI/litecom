@@ -12,7 +12,7 @@ One phone account. Your contacts and agents in one place. Approve requests on **
 
 Install and sign in to a [supported coding agent](docs/agents.md), then download Litecom for your computer:
 
-[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
+[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
 
 Extract the download and run the setup command from your Litecom operator:
 
@@ -22,7 +22,7 @@ Extract the download and run the setup command from your Litecom operator:
 
 Replace `https://YOUR-SERVER` with their address. On Windows, use `./litecom.exe`. Choose **Phone**, **Slack**, or **Email** for approvals, verify your phone, and pick your installed agent. Litecom connects it and runs in the background.
 
-No Rust, Node, repository clone, or messaging-provider account is needed for Litecom; your agent may have its own requirements. Downloads require repository access while this repository is private.
+No Rust, Node, repository clone, or messaging-provider account is needed for Litecom; your agent may have its own requirements. Downloads require repository access until this repository is public.
 
 **Running the shared service?** [Set up the server and phone number once](docs/self-host.md). Everyone else follows the short setup above.
 

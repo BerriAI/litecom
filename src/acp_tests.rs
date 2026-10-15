@@ -260,6 +260,117 @@ fn mock_agent(
 }
 
 #[tokio::test]
+async fn cursor_authenticates_before_opening_a_session_and_stops_on_login_failure() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    for (advertised, authenticated) in [(true, true), (true, false), (false, false)] {
+        let mut h = Harness::new().await;
+        h.settings.agent = NativeAgent::Cursor;
+        h.settings.mcp = None;
+        let auth_seen = Arc::new(AtomicBool::new(false));
+        let session_seen = Arc::new(AtomicBool::new(false));
+        let auth = auth_seen.clone();
+        let auth_before_session = auth_seen.clone();
+        let session = session_seen.clone();
+        let (client_io, agent_io) = tokio::io::duplex(65536);
+        let (read, write) = tokio::io::split(agent_io);
+        let peer = tokio::spawn(async move {
+            agent_client_protocol::Agent
+                .builder()
+                .on_receive_request(
+                    async move |_: InitializeRequest, responder, _| {
+                        let methods = if advertised {
+                            vec![AuthMethod::Agent(AuthMethodAgent::new(
+                                "cursor_login",
+                                "Cursor Login",
+                            ))]
+                        } else {
+                            vec![]
+                        };
+                        responder.respond(
+                            InitializeResponse::new(ProtocolVersion::V1).auth_methods(methods),
+                        )
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: AuthenticateRequest, responder, _| {
+                        assert_eq!(request.method_id.to_string(), "cursor_login");
+                        assert!(!auth.swap(true, Ordering::SeqCst), "authenticate once");
+                        if authenticated {
+                            responder.respond(AuthenticateResponse::new())
+                        } else {
+                            responder.respond_with_error(
+                                agent_client_protocol::Error::internal_error()
+                                    .data("expired login"),
+                            )
+                        }
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: NewSessionRequest, responder, _| {
+                        assert!(authenticated && auth_before_session.load(Ordering::SeqCst));
+                        assert!(request.mcp_servers.is_empty());
+                        session.store(true, Ordering::SeqCst);
+                        responder.respond(NewSessionResponse::new("cursor-test"))
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async |request: PromptRequest, responder, cx| {
+                        cx.send_notification(SessionNotification::new(
+                            request.session_id,
+                            SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                                ContentBlock::Text(TextContent::new(
+                                    r#"{"text":"Authenticated reply","files":[]}"#,
+                                )),
+                            )),
+                        ))?;
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .connect_to(ByteStreams::new(write.compat_write(), read.compat()))
+                .await
+                .ok();
+        });
+        let (read, write) = tokio::io::split(client_io);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::acp::converse(
+                ByteStreams::new(write.compat_write(), read.compat()),
+                &h.client,
+                &h.settings,
+                &h.work,
+                h.temp.path(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(auth_seen.load(Ordering::SeqCst), advertised);
+        assert_eq!(session_seen.load(Ordering::SeqCst), authenticated);
+        if authenticated {
+            assert_eq!(result.unwrap().text, "Authenticated reply");
+        } else {
+            let error = format!("{:#}", result.unwrap_err());
+            assert!(
+                error.contains(if advertised {
+                    "agent login"
+                } else {
+                    "authentication method"
+                }),
+                "{error}"
+            );
+        }
+        peer.abort();
+    }
+}
+
+#[tokio::test]
 async fn acp_exact_permission_uses_once_and_delivers_the_approved_result() {
     for decision in [Decision::Approve, Decision::Decline] {
         let h = Harness::new().await;

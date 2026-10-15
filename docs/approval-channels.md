@@ -58,7 +58,7 @@ Use [AgentPhone](https://agentphone.ai) for sign-in codes, approval messages, an
    ```
 
    For Docker Compose, put them in `.env` and run `docker compose up -d`. All four belong to the same AgentPhone project and sender. The explicit number keeps outgoing messages on the same line that receives approvals.
-4. Sign in to Litecom, request a short reply from your own agent, and reply to its approval text. Confirm that the result arrives and that a repeated approval does not run it again. AgentPhone's webhook test checks connectivity; it does not prove phone delivery or an approval.
+4. Sign in to Litecom, request a short reply from your own agent, and reply to its approval text. Confirm that the result arrives and that a repeated approval does not run it again. Use a real incoming text to check the callback: AgentPhone's synthetic test can supply an invalid `numberId`, which Litecom rejects. A successful callback alone does not prove outbound delivery or an approval.
 
 AgentPhone chooses iMessage where both the sender and recipient support it; this does not make an SMS-only number an iMessage sender. Its number-details API reports `outboundSms: "registration_required"` when SMS registration is still needed. Verify the sender's actual capabilities and complete registration for the countries and channels you serve. See [AgentPhone messaging](https://docs.agentphone.ai/documentation/guides/messages). Litecom sends the full request without a local character cutoff.
 

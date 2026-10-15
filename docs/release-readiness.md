@@ -11,7 +11,7 @@ Litecom connects to existing agents. It does not ship its own reasoning agent or
 | General actions | Real harness code change, test command and PR flow with permission boundaries | Live Codex file creation and exact transfer pass. Broader code/test/PR and external-tool workflows pending |
 | GitHub Write access example | Ordinary request through the selected agent's existing GitHub tools; exact recipient/repository approval and truthful grant/invitation result | Pending live harness demonstration; no GitHub-specific Litecom connector or action handler is in scope |
 | Terminal setup | Phone/Slack/Email choice, saved progress, main harness, sources, measured controls | Phone path, native detection, folder, saved progress, reconnect, repeat setup and macOS startup pass; Email linking tested locally; Slack/provider validation and clean consumer install pending |
-| Phone signup and approval | Real OTP, delivery, opt-out, new-device authentication, mobile review | Pending |
+| Phone signup and approval | Real OTP, delivery, opt-out, new-device authentication, mobile review | Real inbound SMS and signed callback pass; outgoing sign-in and approval await carrier registration |
 | Slack linking and approval | Phone identity, real app install, signed button approval, original message update | Confidential OAuth, session-bound linking, signed callbacks, token refresh and message-update fixture tests pass; real workspace flow pending |
 | Email linking and approval | Phone identity, notification email verification, real mail delivery and reply approval | Local terminal/browser email setup, reply authorization, MIME parsing and IMAP restart/checkpoint tests pass; real SMTP/IMAP service validation pending |
 | Multiple approval channels | Account linking, concurrent decisions and synchronization | Signed SMS/Slack callbacks, email reply capabilities, stale/duplicate/foreign decisions, and shared state tests pass; actual provider delivery pending |
@@ -24,7 +24,7 @@ Litecom connects to existing agents. It does not ship its own reasoning agent or
 | Email retrieval example | Real retrieval through the selected agent's existing email tools and reviewable exports | Pending live harness demonstration; notification email remains a separate Litecom feature |
 | Background operation | Startup, sleep/offline, reconnect, restart and safe updates | macOS startup, worker heartbeat and repeat setup pass. Linux/Windows definitions implemented; live platform, sleep and upgrade checks pending |
 | Downloads | Authenticated browser/MCP receipt, all file types, expiry and interrupted transfer | Streamed browser downloads, explicit receipt, verified CLI/MCP download, preapproval privacy and corruption/revocation checks pass; 2 GiB native upload/browser/CLI transfer and progressing 64-second upload/download checks pass; cross-network validation remains pending |
-| Operator deployment | Docker Compose, HTTPS, persistence, secrets, backup/recovery and providers | Compose and Caddy configuration implemented; live database snapshot, key validation and recovery tests pass. Linux ARM64 build with Rust 1.88 and Compose HTTPS/backup/restore/restart smoke passed; public deployment and provider delivery pending |
+| Operator deployment | Docker Compose, HTTPS, persistence, secrets, backup/recovery and providers | Compose HTTPS/backup/restore/restart smoke passes. Render HTTPS deployment, persistent key across redeploy, and online backup verification pass; off-machine backup and outgoing provider delivery pending |
 | Consumer onboarding | Operated endpoint with no end-user server credentials or provider keys | Pending |
 | Distribution | Clean-machine installers for claimed platforms, signatures, uninstall, release artifacts | Native archive packaging configured; Apple Silicon archive runs standalone CLI, relay, SQLite, and bundled UI. Other targets, published installers, signatures, update/uninstall and clean-machine validation pending |
 | Open-source readiness | License, dependency review, CI, contribution/security docs, clean source tree | Rust advisory/license/source checks pass; generated notices included and verified in native archive and container. Policy and CI checks configured; full source/release audit pending |
@@ -43,7 +43,7 @@ External prerequisites will be recorded when they become relevant. They must not
 - Slack connection completion can be retried from the original browser after a lost response, without reusing the OAuth exchange, restoring a disabled channel, or replacing a newer destination. This uses local fixtures; real Slack linking remains pending.
 - Download headers preserve spaces, literal plus signs, stars, and Unicode through the standard encoded filename field. Native execution, ACP, and agent configuration commands set `PWD` to the selected folder instead of inheriting the launch terminal's folder. The ACP subprocess assertion and a fresh real Codex run pass after this correction.
 
-Still absent: a deployed hosted endpoint, published installers, actual delivery verification, live Slack/email verification, live cloud-provider and remaining ACP adapter validation, Gmail retrieval, GitHub grants, cross-network tests, and full release validation. Codex has live file-operation evidence; successful Claude execution and broader native context/tool compatibility remain unverified. The full requirement set above remains in scope.
+Still absent: verified published installers, outbound phone delivery, live Slack/email verification, live cloud-provider and remaining ACP adapter validation, Gmail retrieval, GitHub grants, cross-network transfer tests, and full release validation. The hosted endpoint and inbound phone callback are verified below. Codex has live file-operation evidence; successful Claude execution and broader native context/tool compatibility remain unverified. The full requirement set above remains in scope.
 
 ## Content and transfer limits
 
@@ -135,7 +135,7 @@ Gitleaks 8.30.1 scanned the 80 non-ignored source files with its default rules a
 
 ## Single approval and message replies
 
-The current native/ACP/Devin request flow uses one approval for execution and automatic delivery of the final reply and selected files. Older evidence below that mentions two approvals predates this change. Stored execution-only approvals retain their original consent boundary.
+The current native/ACP/Devin request flow uses one approval for execution and automatic delivery of the final reply and selected files. Earlier evidence that mentions two approvals predates this change. Stored execution-only approvals retain their original consent boundary.
 
 - The worker validates its live execution lease before launching a native or ACP process. A malicious prompt, forged preparation work item, cancelled lease, requester credential, or agent credential cannot grant execution authority.
 - `cargo test --locked`: 80 passed, one deliberately ignored slow-transfer test. Current cases cover single-approval native and Devin results, legacy consent, signed Twilio callbacks, signed/timestamped Slack buttons, exact linked sender/channel, email reply capabilities, and an IMAP protocol fixture with persistent UID checkpoints and non-destructive reads.
@@ -154,9 +154,24 @@ AgentPhone replaces the initial Twilio transport. The relay uses one explicitly 
 - `cargo clippy --all-targets --locked -- -D warnings` and dependency advisory/license/source checks pass. Third-party notices were regenerated after removing the Twilio-only SHA-1 dependency.
 - The local first-use preview and accessibility checks passed again; the browser editing check passed after updating its obsolete heading selector. See [interface review](ui-review.md).
 - The [operator guide](self-host.md) separates service/number/webhook/storage setup from each person's agent connection. It supports a native process or Docker on any suitable host; the product has no Render dependency.
-- No AgentPhone number has been purchased and no real phone message sent during these checks. Live provider delivery and the requested hosted instance remain unverified.
+- These automated checks sent no real phone messages. The subsequent hosted checks below verified a real incoming message; outbound delivery still requires carrier registration.
 
 ## Latest single-approval checks
 
 - A fresh live Codex 0.160.0 run with the AgentPhone-enabled build passed project-instruction handling, the pre-execution approval gate, a verified local file operation, automatic result delivery, and a second account's exact download and receipt. It used local test identities and development notifications; it did not test carrier delivery.
 - The current-build 180-second reliability run passed 4,246 rounds and 64,603 HTTP checks, including 2,654 exact transfers, 1,061 single-approval deliveries, 531 relay restarts, cancellation, stale decisions, revocation, and a real lease expiry. It used deterministic fixtures with no model calls or provider messages.
+- A frozen `227a39e` single-approval build completed 30 minutes: 1,987 rounds, 30,242 HTTP checks, 1,241 exact transfers, 496 automatic deliveries, 248 restarts, and a real lease expiry. A separate hour-long run exercised legacy two-stage consent compatibility through 813 rounds and 12,930 checks. Both passed with deterministic fixtures and no provider messages or model calls; neither is a live phone or complete agent-matrix test.
+
+## Hosted checks — October 15, 2026
+
+- The relay is live on Render with 1 CPU, 2 GB RAM, and a 100 GB persistent disk. This deployment uses the same Docker image and relay command as other hosts. Auto-deploy is disabled.
+- Version `0.1.0-alpha.3` at commit `d25bad4` responds to the health check. Development mode is off. Unauthenticated account access and unsigned phone callbacks return HTTP 401.
+- A real incoming SMS reached the configured AgentPhone sender at 18:27 UTC. Its signed callback succeeded on the first attempt with HTTP 200. This verifies inbound transport and callback authentication, not a complete approval flow.
+- The process runs as a non-root user. The relay directory has mode `700` and its encryption key has mode `600`. An online backup verified successfully; the same key and backup survived a deployment to a new instance. The backup is currently on the same disk, so off-machine recovery remains unverified.
+- Outgoing SMS is still marked `registration_required` by AgentPhone. Real phone sign-in and approval delivery cannot be claimed until registration is approved and those flows pass. The provider's synthetic webhook test supplies a non-string `numberId` and returns HTTP 400; the real incoming callback has a valid number ID and succeeds. Field-shape diagnostics disclose neither the message nor the sender.
+
+## Cursor authentication checks
+
+The real Cursor CLI `2026.10.14-941492e` negotiated ACP v1 and rejected a new session before authentication. Litecom now performs Cursor's [documented existing-login handshake](https://cursor.com/docs/cli/acp) before opening a session. Background runs disable browser opening; a missing or expired login produces a private instruction to sign in, without starting the requested work.
+
+The SDK regression test covers authentication before session creation, failed authentication, and a missing supported authentication method. The full local suite passes 85 tests with one intentionally ignored slow-transfer test, and Clippy reports no warnings. Separately, the real Cursor CLI enabled a temporary project's Litecom MCP server and discovered its ask, receive, contacts, and download tools. This did not change user-level settings or call a model. Full guided Cursor setup and live model execution remain unverified because the CLI has no signed-in account on the test machine.

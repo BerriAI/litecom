@@ -147,6 +147,11 @@ pub(crate) async fn reply(
             .env("OPENCLAW_HIDE_BANNER", "1")
             .env("OPENCLAW_SUPPRESS_NOTES", "1");
     }
+    if settings.agent == crate::runner::NativeAgent::Cursor {
+        // A background request may reuse a login, but must not open a browser
+        // on the owner's computer if that login has expired.
+        command.env("NO_OPEN_BROWSER", "1");
+    }
     #[cfg(unix)]
     command.process_group(0);
     let mut child = command
@@ -179,6 +184,7 @@ pub(crate) async fn converse(
     let task = work.clone();
     let cwd = settings.workspace.clone();
     let mcp = settings.mcp.clone();
+    let cursor = settings.agent == crate::runner::NativeAgent::Cursor;
     let prompt = format!(
         "{}\n\nYour final response must be only JSON with this shape: {{\"text\":\"your full reply\",\"files\":[\"/absolute/path/to/file\"]}}. Use an empty files array if no attachment is needed. Do not put commentary after the JSON.",
         crate::runner::prompt(work)
@@ -245,6 +251,20 @@ pub(crate) async fn converse(
             let initialized = cx.send_request(initialize).block_task().await?;
             if initialized.protocol_version != ProtocolVersion::V1 {
                 return Err(AcpError::internal_error().data("This agent did not negotiate ACP v1."));
+            }
+            if cursor {
+                let method = initialized.auth_methods.iter().find_map(|method| match method {
+                    AuthMethod::Agent(method) if method.id.to_string() == "cursor_login" => {
+                        Some(method.id.clone())
+                    }
+                    _ => None,
+                }).ok_or_else(|| AcpError::internal_error().data(
+                    "Cursor did not offer its existing-login authentication method. Update Cursor CLI, then retry."
+                ))?;
+                cx.send_request(AuthenticateRequest::new(method)).block_task().await
+                    .map_err(|_| AcpError::internal_error().data(
+                        "Cursor could not use its existing login. Run `agent login` on your computer, then retry the request."
+                    ))?;
             }
             let mut new_session = NewSessionRequest::new(cwd);
             if let Some(mcp) = mcp {

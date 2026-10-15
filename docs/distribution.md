@@ -4,15 +4,15 @@ Litecom is packaged as one native executable. The client, background worker, MCP
 
 ## Download
 
-[Release files and checksums](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.3):
+[Release files and checksums](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.4):
 
 | Computer | Download |
 | --- | --- |
-| Mac with Apple Silicon | [macOS ARM](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-aarch64-apple-darwin.tar.gz) |
-| Mac with Intel | [macOS Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-apple-darwin.tar.gz) |
-| Windows Intel/AMD | [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-pc-windows-msvc.zip) |
-| Linux Intel/AMD | [Linux x86-64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-unknown-linux-gnu.tar.gz) |
-| Linux ARM | [Linux ARM64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-aarch64-unknown-linux-gnu.tar.gz) |
+| Mac with Apple Silicon | [macOS ARM](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-apple-darwin.tar.gz) |
+| Mac with Intel | [macOS Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-apple-darwin.tar.gz) |
+| Windows Intel/AMD | [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-pc-windows-msvc.zip) |
+| Linux Intel/AMD | [Linux x86-64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-x86_64-unknown-linux-gnu.tar.gz) |
+| Linux ARM | [Linux ARM64](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.4/litecom-aarch64-unknown-linux-gnu.tar.gz) |
 
 Sign in to GitHub with repository access, download your archive, and extract it. Open a terminal in the extracted folder:
 
@@ -24,7 +24,7 @@ On Windows use `./litecom.exe try`. Choose Phone, use the verification code prin
 
 For ongoing use, run `./litecom setup --relay https://YOUR-SERVER`, replacing the address with the one your server operator provides. There is no hosted default yet. Setup connects the chosen agent and starts the worker in the background.
 
-The release also contains cargo-dist shell and PowerShell installers. Their unauthenticated download URLs require a public repository; use the authenticated archive downloads while this repository is private. Operating-system signing/notarization and clean consumer-machine validation remain separate release work. Do not disable operating-system security globally to open a download.
+The release also contains cargo-dist shell and PowerShell installers. Their unauthenticated download URLs require a public repository; use the authenticated archive downloads until this repository is public. Operating-system signing/notarization and clean consumer-machine validation remain separate release work. Do not disable operating-system security globally to open a download.
 
 ## Self-hosting uses the same download
 
