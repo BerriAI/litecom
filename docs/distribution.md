@@ -1,63 +1,54 @@
-# Downloads and self-hosting
+# Install Litecom
 
-Litecom is packaged as one native executable. The client, background worker, MCP server, relay, database engine, and browser pages are bundled together. Litecom itself needs no Rust, Node, or separate database installation. Your coding agent and any adapter still need their own installation, runtime, and sign-in; for example, Pi's ACP adapter requires Node.js.
+Litecom uses one executable for the client, background worker, and shared server. Your coding agent needs its own installation and sign-in.
 
-## Download
+## Installation availability
 
-No native release has been published yet. The [Releases page](https://github.com/BerriAI/litecom/releases) is the download destination once release validation is complete. The browser's install command requires those published, anonymously accessible assets; it does not yet work for a new user without an existing Litecom binary.
+Native downloads are not published yet. If you have Litecom installed, use your workspace's **Connect local agent** command. Otherwise, build from source below. Joining a workspace and asking a contact's agent does not require a local installation.
 
-The packaging workflow builds these archives:
+The [Releases page](https://github.com/BerriAI/litecom/releases) is the destination for native downloads. The browser's automatic installer needs a published release that matches the server version.
 
-| Computer | Download |
-| --- | --- |
-| Mac with Apple Silicon | `litecom-aarch64-apple-darwin.tar.gz` |
-| Mac with Intel | `litecom-x86_64-apple-darwin.tar.gz` |
-| Windows Intel/AMD | `litecom-x86_64-pc-windows-msvc.zip` |
-| Linux Intel/AMD | `litecom-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux ARM | `litecom-aarch64-unknown-linux-gnu.tar.gz` |
+## Build from source
 
-Maintainers with repository access can download completed artifacts from the [Build downloads workflow](https://github.com/BerriAI/litecom/actions/workflows/packages.yml). Extract the artifact bundle, then extract your platform's archive. Open a terminal in the extracted folder:
+You need Git, Rust 1.88 or later, and access to the repository:
 
 ```sh
-./litecom try
+git clone https://github.com/BerriAI/litecom.git
+cd litecom
+cargo install --locked --path .
+litecom --version
 ```
 
-On Windows use `./litecom.exe try`. Choose Phone, use the verification code printed in the terminal, and select your agent. Approve once and download the sample file. **Ctrl+C** removes the temporary tryout data. [Setup details](setup.md#existing-installations-and-terminal-setup).
+Cargo installs Litecom in its binary directory, usually `~/.cargo/bin`. Keep that directory on your PATH. `litecom --version` should print the installed version.
 
-For ongoing use, run `./litecom setup --relay https://YOUR-SERVER`, replacing the address with the one your server operator provides. Setup connects the chosen agent and starts the worker in the background.
-
-Packaging also produces cargo-dist shell and PowerShell installers. Their unauthenticated download URLs require accessible release assets; CI artifact downloads are for maintainer testing. Operating-system signing/notarization and clean consumer-machine validation remain separate release work. Do not disable operating-system security globally to open a download.
-
-## Self-hosting uses the same download
-
-The same executable runs the relay. An operator can extract the archive and start a persistent local test without a compiler:
+To connect your agent, return to your workspace and follow [Connect your local agent](setup.md#connect-your-local-agent). For an existing installation, you can also run:
 
 ```sh
-./litecom relay --public-url http://127.0.0.1:4141 --data ./litecom-data --dev
+litecom setup --relay https://YOUR-SERVER
 ```
 
-On Windows, use `./litecom.exe`. Open <http://127.0.0.1:4141>; the sign-in page confirms that the relay is running. Development verification codes print in the terminal and no messages are sent. Keep `litecom-data`: it contains the database and its encryption key.
+Replace the address with the Litecom link from your host.
 
-A public deployment also needs HTTPS, configured [message delivery](approval-channels.md), persistent storage, and tested backup/recovery. The [Compose deployment](self-host.md) packages the relay and HTTPS service; Docker is optional when you use the executable directly. Both paths support the same [backup commands](backup.md).
+## Try locally
 
-## Build download archives
-
-This section is for maintainers. Install [cargo-dist 0.33.0](https://github.com/axodotdev/cargo-dist/releases/tag/v0.33.0), then run from the checkout:
+With Litecom and a signed-in coding agent installed:
 
 ```sh
-dist build --artifacts=local
+litecom try
 ```
 
-The archive and SHA-256 checksum appear in `target/distrib/`. Use `--target` with a platform from `dist-workspace.toml` to select a build explicitly. Cross-compiling requires that platform's toolchain; native CI runners avoid that extra setup.
+Choose **Phone**, use the verification code printed in the terminal, and select your agent. Approve the sample request and download its result. Your agent's normal usage charges apply. Messages stay local; **Ctrl+C** stops the tryout and removes its temporary data.
 
-For an Apple Silicon build, verify the extracted executable with:
+The tryout does not install a background service or change your agent's MCP settings. Native tools keep their existing permissions.
+
+## Run a local server
+
+For a server that keeps its data across restarts:
 
 ```sh
-python3 scripts/check-package.py target/distrib/litecom-aarch64-apple-darwin.tar.gz
+litecom relay --public-url http://127.0.0.1:4141 --data .litecom/dev --dev
 ```
 
-The check requires Python 3.12+. It runs the packaged CLI and relay with an empty executable search path, checks the bundled pages and database initialization, and removes its test data. It does not establish operating-system compatibility, signed installation, native agent access, or real provider delivery.
+Open <http://127.0.0.1:4141>. Leave the terminal open; it displays verification codes and notifications. Keep `.litecom/dev`, which contains the database and its encryption key.
 
-The **Release** workflow is generated by cargo-dist. It tests each native target before packaging, then verifies each extracted archive before publishing. The separate manual **Build downloads** workflow keeps artifacts without publishing a release. CI verifies the declared runners; it does not substitute for clean consumer-machine checks.
-
-The repository URL is configured as [BerriAI/litecom](https://github.com/BerriAI/litecom). Regenerate the release workflow with `dist generate --mode ci` after changing `dist-workspace.toml`. Push a matching version tag to build and publish. Set `LITECOM_DEFAULT_RELAY` when building a hosted-service release only after that HTTPS endpoint is operating. Self-hosted server selection remains available in every build.
+Use [self-hosting](self-host.md) for a shared server with HTTPS and real notifications. The same executable supports both setups.

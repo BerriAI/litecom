@@ -24,4 +24,5 @@
 - Encrypted file snapshots, authenticated downloads, cancellation, and revocation.
 - Native archives and shell/PowerShell installers built with cargo-dist.
 
-Run `litecom try` for a temporary local tryout, or connect to an existing relay. The tryout prints codes locally; real notifications require operator-configured providers. No hosted default is included. See [validation evidence](docs/release-readiness.md) and [agent compatibility](docs/agents.md) for tested paths and remaining provider/platform checks.
+
+See [setup](docs/setup.md), [installation availability](docs/distribution.md), and [agent compatibility](docs/agents.md).

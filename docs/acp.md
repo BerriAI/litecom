@@ -17,11 +17,9 @@ litecom setup --agent codex-acp
 
 The adapter includes a compatible Codex dependency and uses your existing login and configuration. Its selected mode determines which operations need permission; Litecom forwards the requests it emits. Direct `--agent codex` uses the local CLI and denies additional permissions instead of forwarding them.
 
-Before the single-approval change, version 2.2.2 passed a live file-operation test: project instructions, one-time tool approval in Litecom, separate sharing approval, and exact file download. The test selected the adapter's read-only mode to require tool approval. Broader tools and default-mode behavior still need validation.
-
 ### Pi
 
-Pi uses the external [pi-acp adapter](https://github.com/svkozak/pi-acp). With Node.js 22+ and a signed-in Pi installation on your PATH (automatic MCP setup tested with Pi 1.2.0):
+Pi uses the external [pi-acp adapter](https://github.com/svkozak/pi-acp). With Node.js 22+ and a signed-in Pi installation on your PATH:
 
 ```sh
 npm install -g pi-acp@0.0.34
@@ -44,7 +42,7 @@ Replace the path with that agent's executable. Add `--acp-arg=VALUE` for each re
 
 Litecom supplies its MCP tools to session-capable adapters automatically. Named Pi, Cursor, OpenCode, OpenClaw, and Hermes connections also save tools in the agent's native settings during setup. For a custom ACP executable, use `litecom mcp-config` if you also want tools in its ordinary sessions. `--no-mcp` skips adding tools and disables session injection; it does not remove an existing native connection. Direct Codex and Claude Code connections remain available alongside their ACP adapters.
 
-The maintained adapter projects are [Codex ACP](https://github.com/agentclientprotocol/codex-acp) and [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp). Installing an adapter is separate from signing in to its underlying provider. Their presence does not establish that every native memory source, hook, or tool works through ACP.
+The maintained adapter projects are [Codex ACP](https://github.com/agentclientprotocol/codex-acp) and [Claude Agent ACP](https://github.com/agentclientprotocol/claude-agent-acp). Sign in to the underlying provider before connecting an adapter. Support for native memory, hooks, and tools depends on that adapter.
 
 ## Handle a request
 
@@ -62,8 +60,4 @@ If the adapter reports that authentication is required, sign in using that agent
 
 An agent must return the requested reply and attachment list. Malformed output leaves a private diagnostic file and is not published. Attachments must be regular files inside the selected working folder, without escaping through symlinks.
 
-## Validation
-
-Tests use the official SDK on both sides of a local stream and exercise the real Litecom HTTP permission API. They cover one-time approval, rejection, session isolation, changing operation scope, cancellation, private reasoning, and automatic result delivery after request approval.
-
-The browser check also runs a deterministic ACP subprocess through terminal setup, mobile review, refusal, cancellation, and an exact file download. The same flow passed using the unmodified, published `pi-acp` 0.0.34 package and a simulated Pi RPC process, including extension confirmations and exclusion of thought chunks. Those tests made no model calls. Codex has the live evidence described above; other live agents and their native context integrations remain unverified.
+See [agent compatibility](agents.md) before choosing an adapter.

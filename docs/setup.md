@@ -1,6 +1,6 @@
 # Join Litecom and connect your agent
 
-Your host sets up Google sign-in and approval delivery once. You need their Litecom link. No API keys, provider accounts, repository clone, or Rust installation are required.
+Open the Litecom link from your host. You can join the workspace and ask contacts before installing a local agent. Your host manages sign-in and message delivery.
 
 ## Join the workspace
 
@@ -15,7 +15,7 @@ You can join and ask other people before connecting your own agent. Your name an
 
 ## Connect your local agent
 
-Install and sign in to a [supported coding agent](agents.md) first. Then:
+Install and sign in to a [supported coding agent](agents.md), and check [Litecom installation options](distribution.md). Then:
 
 1. Click **Connect local agent** in the workspace or on the Agents page.
 2. Click **Copy command**.
@@ -42,7 +42,7 @@ These counts start on your host’s Litecom page. Google account selection, prov
 | Add a workspace contact | Add contact: **1 click** | Recipient clicks Accept contact once | **0** |
 | Approve an ordinary request | **1 Slack button** or **1 text/email reply** | None after channel connection | Requested reply for phone/email |
 
-The browser paths are tested at 320, 390, and 1100 px using provider fixtures. Real Google sign-in, Slack linking, and Slack button approval also pass on the hosted BerriAI workspace. The copied-command path passes with an already-installed binary, native Codex MCP configuration, a real macOS background service, a deterministic agent reply, and one approval. Fresh public release downloads, live phone/email delivery, and Windows/Linux startup remain unverified. See [release validation](release-readiness.md).
+These counts exclude installing Litecom and your coding agent. They also exclude provider sign-in, workspace administrator approval, and operating-system prompts.
 
 ## Ask and receive
 
@@ -64,29 +64,29 @@ For a temporary local tryout, run `litecom try`. It prints verification codes lo
 
 ## Background operation
 
-The worker runs as your signed-in OS user. Closing the terminal or coding app does not stop it. Sleeping, signing out, or shutting down the computer makes its local agent unavailable. Requests remain queued. Devin sessions are monitored by the relay and can continue while your computer is off. See [cloud agents](cloud-agents.md) for setup and validation status.
+The worker runs as your signed-in OS user. Closing the terminal or coding app does not stop it. Sleeping, signing out, or shutting down the computer makes its local agent unavailable. Requests remain queued. Devin sessions are monitored by the relay and can continue while your computer is off. See [cloud agents](cloud-agents.md) for connection requirements.
 
 ```sh
-./litecom doctor
-./litecom service status
-./litecom service start
-./litecom service stop
-./litecom service remove
+litecom doctor
+litecom service status
+litecom service start
+litecom service stop
+litecom service remove
 ```
 
 `service remove` removes automatic startup and preserves your account and settings. It does not revoke remote credentials. Use **Settings → Connected apps → Disconnect** to revoke a connection.
 
 Repeating setup reuses an identical installed executable. When replacing a different build on Windows, stop Litecom's workers and close agent sessions using its MCP connection first, then rerun setup.
 
-macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows uses a sign-in task. Only macOS startup has been exercised locally. Native agent configuration is reused; environment-only provider secrets are not copied into startup definitions.
+macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows uses a sign-in task. Native agent configuration is reused. Secrets exported only in your terminal are not copied to the background service; save credentials through your agent’s supported sign-in flow. Linux and Windows background startup remain experimental; use foreground mode below if startup fails.
 
 The Windows task runs under your signed-in account without elevation. It permits battery power and has no fixed runtime cutoff. Closing the terminal does not stop it; signing out still does.
 
 To keep everything in the terminal:
 
 ```sh
-./litecom setup --relay https://YOUR-SERVER --no-background
-./litecom worker
+litecom setup --relay https://YOUR-SERVER --no-background
+litecom worker
 ```
 
 ## If something needs attention
@@ -108,17 +108,7 @@ To keep everything in the terminal:
 
 Use `--connection NAME` with these commands when managing a named connection. Use `--home PATH` to store its private configuration somewhere else.
 
-Successful run diagnostics are removed after staging the result. Failed runs retain private local diagnostics for inspection. Automatic retention of those diagnostics and relay payload deletion are still release work.
+Litecom removes successful run diagnostics after preparing the result. Failed runs keep private local diagnostics for troubleshooting. There is no automatic cleanup of failed-run diagnostics or relay payloads.
 
 
-## Run a local server
-
-From the extracted download folder:
-
-```sh
-./litecom relay --public-url http://127.0.0.1:4141 --data .litecom/dev --dev
-```
-
-Leave that terminal open. In another terminal, follow **Connect your computer** above using `http://127.0.0.1:4141`. Verification codes appear in the relay terminal; no messages are delivered. The server keeps its data in `.litecom/dev` across restarts.
-
-For the complete temporary preview in one terminal, use `./litecom try`. It starts a private local server, pairs an agent, and opens a real sample request. It uses a sample folder, does not install a background service or change your MCP configuration, and removes its temporary data on normal exit. Native tools keep their existing permissions. The preview is not a hosted installation.
+For a temporary local tryout or development server, see [installation options](distribution.md#try-locally).

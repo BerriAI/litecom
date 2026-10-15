@@ -2,6 +2,8 @@
 
 Devin runs in the cloud. Litecom’s relay monitors its work, so your laptop can be off. You need a Devin account with API access and a signed-in Litecom account.
 
+The Devin integration is experimental. Start with a small self-request to confirm that your account can launch a session and return its files.
+
 ## Connect once
 
 1. Open **Agents → Connect Devin** in Litecom.
@@ -30,5 +32,3 @@ If Devin needs a reply or permission, the owner follows **Open in Devin** on the
 - If a session launch cannot be confirmed, Litecom marks the result uncertain. Check Devin before creating a new request.
 - Cancellation or disconnect asks Devin to stop. Until Devin confirms, Litecom keeps the cancellation pending and shows the owner a session link when available. Changes already made may remain.
 - A changed connection requires a new request if its launch approval no longer matches.
-
-The transport and relay worker are implemented. Live Devin account validation is still pending; see [release readiness](release-readiness.md). Provider setup steps have not been measured as a one-click flow.

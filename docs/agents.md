@@ -8,14 +8,14 @@ Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp an
 | --- | --- |
 | Codex | Native CLI or [Codex ACP](acp.md#codex) for additional tool approvals in Litecom. Native setup adds MCP tools. |
 | Claude Code | Native CLI or `claude-agent-acp`. Native setup adds MCP tools. |
-| OpenCode | `opencode acp`. Setup adds MCP tools to ordinary and receiving sessions; checked with 1.18.29. |
+| OpenCode | `opencode acp`. Setup adds MCP tools to ordinary and receiving sessions. |
 | Cursor | Signed-in Cursor CLI: `cursor-agent acp` or `agent acp`. Setup saves and enables MCP tools; receiving sessions reuse the existing login. Interactive question/plan extensions are not implemented. |
-| Pi | Node.js 22+, signed-in Pi, and `pi-acp` 0.0.34. Automatic MCP setup checked with Pi 1.2.0. See [Pi limitations](acp.md#pi). |
-| OpenClaw | `openclaw acp` with a configured gateway. Native MCP setup checked with 2026.10.3; a running gateway may need stopping first. |
-| Hermes | `hermes acp` with its ACP dependencies and configured gateway. Native MCP setup, repeated setup, and configuration recovery checks pass with Hermes 0.22.2; session MCP needs gateway support. |
+| Pi | Node.js 22+, signed-in Pi, and `pi-acp` 0.0.34. See [Pi limitations](acp.md#pi). |
+| OpenClaw | `openclaw acp` with a configured gateway. You may need to stop the gateway before adding the MCP connection. |
+| Hermes | `hermes acp` with its ACP dependencies and configured gateway. Session MCP needs gateway support. |
 | Devin | Cloud API with an existing account and API access. The relay runs and monitors requests. |
 
-Live requests have been verified with Codex and Codex ACP. The other adapters have protocol or setup checks; full live validation remains pending. See [tested integrations and limitations](release-readiness.md).
+Codex and Codex ACP support verified file-request workflows. Treat the other integrations as experimental: send a small self-request to check your login, tools, and file access before using them for important work. Your agent's provider charges apply.
 
 Start a new session in your agent after setup to load Litecom's tools. You can then ask it to contact someone or check received results. Setup checks the Litecom command and reads back the saved connection; it preserves unrelated MCP servers. `--no-mcp` skips adding tools.
 

@@ -1,6 +1,8 @@
 # Run your own Litecom server
 
-You configure the shared service once: **hosting, Google sign-in, and at least one approval channel**. Users get a link, sign in, and connect their own destination. They never need your provider credentials or their own sending number.
+Configure **hosting, Google sign-in, and at least one approval channel**. Users open your link, sign in, and connect their own destination. Keep provider credentials on the server.
+
+[Google sign-in](#enable-google-sign-in) · [Approval channels](#enable-approval-channels) · [Hosting](#choose-a-host) · [Docker Compose](#start-with-docker-compose) · [Troubleshooting](#check-a-problem)
 
 ## What you set up once
 
@@ -18,7 +20,7 @@ There is no separate database service, model account, or coding agent required o
 
 ## Enable Google sign-in
 
-Use the same direct Google OAuth/OpenID Connect approach as LiteReview; no separate authentication service is needed.
+Litecom connects to Google through OAuth and OpenID Connect.
 
 1. In [Google Cloud’s Clients page](https://console.cloud.google.com/auth/clients), create an OAuth client of type **Web application**. Complete your app’s branding and audience settings if Google asks.
 2. Add this authorized redirect URI, replacing the domain with your public server address:
@@ -41,7 +43,7 @@ Keep the client secret on the server. Use Google’s audience/publishing control
 
 ## Enable approval channels
 
-Configure at least one of [Slack, Email, or Phone](approval-channels.md#configure-the-relay). For Slack, opening `https://YOUR-DOMAIN/setup/slack` prefills app creation with the required scopes and callbacks. Email requires both outgoing delivery and incoming replies. Phone requires an outbound-enabled number; carrier registration can delay readiness.
+Configure at least one of [Slack, Email, or Phone](hosting-channels.md). For Slack, opening `https://YOUR-DOMAIN/setup/slack` prefills app creation with the required scopes and callbacks. Email requires both outgoing delivery and incoming replies. Phone requires an outbound-enabled number; start carrier registration early.
 
 Save a backup of the data and encryption key, then test sign-in, channel connection, one request, message approval, and the final result. Send users your server’s homepage link. Their [setup guide](setup.md) covers every route and separates provider prompts from Litecom’s click counts.
 
@@ -49,13 +51,13 @@ Save a backup of the data and encryption key, then test sign-in, channel connect
 
 **Google → one approval channel → workspace.** They can find people and send contact requests immediately. Connecting their own agent is optional: **Agents → Connect local agent → Copy command → paste and run**. The command connects that browser account, configures MCP, and starts the background worker.
 
-The installer fetches a version-matched GitHub release through cargo-dist. Before sharing a deployment, verify its native release assets are published and accessible to those users. Private repository downloads require repository access; public onboarding requires public assets. The checked-in source and a successful server deployment alone do not publish them.
+The client installer needs a matching native release that users can download. See [installation availability](distribution.md) before inviting users to connect local agents. Users with an installed binary can run the generated command without downloading it again.
 
 ## Choose a host
 
 Any host that can run a persistent process or container works. Keep **one relay instance** with a persistent writable directory for SQLite, files, and its encryption key. Storage must survive restarts and deployments. Put HTTPS in front of port 4141, pass the public HTTPS address as `--public-url`, and use `/health` for the host's health check. Avoid sleeping or ephemeral instances: they interrupt callbacks and background work or lose accounts and files.
 
-For a host that already provides HTTPS, use the [same native download](distribution.md#self-hosting-uses-the-same-download) with your provider environment values:
+For a host that provides HTTPS, use the [native executable](distribution.md) with your provider environment values:
 
 ```sh
 ./litecom relay --listen 0.0.0.0:4141 \
@@ -64,11 +66,11 @@ For a host that already provides HTTPS, use the [same native download](distribut
 
 Mount your persistent storage at `/data` and configure the host to restart the process. With the repository's Dockerfile, the executable is already the entrypoint; supply `relay --listen 0.0.0.0:4141 --public-url https://YOUR-DOMAIN --data /data/relay` as its arguments. If your host overrides the entrypoint as well as the arguments, include `/usr/local/bin/litecom` at the beginning. The process runs as UID 65532, which must be able to write to the mounted directory. Keep backups outside that directory too.
 
-The Compose route below adds HTTPS for a server you manage yourself. Public container images and a hosted default are not published. [Deployment validation](release-readiness.md) records the checks completed.
+The Compose route below builds the container from source and adds HTTPS for a server you manage yourself.
 
 ## Start with Docker Compose
 
-You need this checkout, Docker with Compose, and a server with a domain pointing to it. Allow inbound ports **80 and 443**. You also need Google OAuth credentials and at least one configured approval provider. [Provider setup](approval-channels.md) covers the required account values and optional Slack/email delivery.
+You need the [source checkout](https://github.com/BerriAI/litecom), Docker with Compose, and a server with a domain pointing to it. Allow inbound ports **80 and 443**. You also need Google OAuth credentials and at least one configured approval provider. [Provider setup](hosting-channels.md) covers the required values.
 
 From the repository folder:
 
@@ -109,4 +111,4 @@ docker compose logs --tail=100 relay https
 
 Follow [backup and restore](backup.md). The backup includes the database, stored account connections, and its matching encryption key. Keep a protected copy outside this server and separately preserve `.env`. Environment-based delivery credentials and TLS certificate files are not included in the database backup.
 
-There is no released-version upgrade path yet. Before changing a running source deployment, make and verify a backup. Do not assume an older executable can open a database from a newer release.
+Before updating a running deployment, make and verify a backup. Do not assume an older executable can open a database written by a newer version.

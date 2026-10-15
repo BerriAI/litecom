@@ -6,43 +6,84 @@
 > “Ask my agent to find the final PDF.”\
 > “Ask Ishaan to give me GitHub access.”
 
-One account. Your contacts and agents in one place. Approve requests on **Phone, Slack, or Email**; add other channels later.
-
-## Get started
-
-1. Open your team’s Litecom link and **Continue with Google**.
-2. Choose **Phone**, **Slack**, or **Email** for approvals. Only channels enabled by your host appear.
-3. You’re in. Find people in the workspace and send a contact request.
-
-To connect your own [coding agent](docs/agents.md), choose **Connect local agent**, copy the command, and run it in your working folder. It installs Litecom if needed, connects your account, configures MCP, and starts the background worker. When it says **Connected**, you can receive requests and ask other people from that agent.
-
-No Rust, repository clone, or messaging-provider account required. Your coding agent must already be installed and signed in. Start a new agent conversation if the open one does not reload MCP tools.
-
-**Running the shared service?** [Set up Google sign-in and your approval channels once](docs/self-host.md). Everyone else follows the steps above.
-
-[Setup details and step counts](docs/setup.md) · [Native downloads and local tryout](docs/distribution.md)
-
-## Use it with people
+Host a workspace where people can send requests to each other's coding agents. Owners approve through **Slack, phone, or email**. Their agents do the work and return the reply and files.
 
 ```mermaid
-flowchart TD
-  A[Ask a person or your own agent] --> B[Owner approves the work]
-  B --> C[Agent does the work and sends the result]
-  C --> D[Read the reply · download the files]
+flowchart LR
+  A[Send a request] --> B[Owner approves]
+  B --> C[Their agent does the work]
+  C --> D[Receive the result]
 ```
 
-Send a contact request from the workspace, or share your contact link. Once they accept, ask by name from a connected agent. Every person chooses their default agent; you can also select a named one. Requests for an offline local agent wait until it reconnects.
+## Host Litecom
 
-Work runs through that agent's existing tools and accounts. Litecom handles the request, approval, and delivery.
+You need Docker with Compose and a domain pointing to your server. Open ports **80 and 443**. The server stores its database and encryption key in a persistent Docker volume; Caddy provides HTTPS.
 
-[Connect to a server →](docs/setup.md) · [Connect Devin](docs/cloud-agents.md) · [Approval channels](docs/approval-channels.md)
+### 1. Start the server
 
-## One approval
+```sh
+git clone https://github.com/BerriAI/litecom.git
+cd litecom
+cp .env.example .env
+chmod 600 .env
+```
 
-Approve the request to authorize the work and sending its result. Reply by text or email, or tap **Approve** in Slack. The agent starts after approval; it cannot approve itself through Litecom. Downloads require sign-in, and you can revoke future access.
+Set these values in `.env`:
 
-Client and relay are open source. The relay stores encrypted content and can decrypt it. [Security and permissions →](SECURITY.md)
+```dotenv
+LITECOM_HOST=litecom.example.com
+ACME_EMAIL=you@example.com
+```
 
-[Self-hosting](docs/self-host.md) · [Agent compatibility](docs/agents.md) · [Contributing](CONTRIBUTING.md)
+Use your domain and an email address for certificate notices, then start:
+
+```sh
+docker compose up -d --build
+```
+
+### 2. Connect Google sign-in
+
+Create a **Web application** OAuth client in [Google Auth Platform](https://console.cloud.google.com/auth/clients). Set its redirect URI to `https://YOUR-DOMAIN/api/auth/google/callback`, then add its credentials to `.env`:
+
+```dotenv
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+GOOGLE_ALLOWED_DOMAINS=yourcompany.com
+```
+
+Use your team's Google Workspace domain to restrict who can join. Leave `GOOGLE_ALLOWED_DOMAINS` empty to allow any verified Google account. [Google setup details](docs/self-host.md#enable-google-sign-in).
+
+### 3. Connect one approval channel
+
+Pick one to start; add others later. Save its credentials in `.env`.
+
+- **[Slack](docs/hosting-channels.md#slack):** open `https://YOUR-DOMAIN/setup/slack`, create the prefilled app, and copy its three credentials.
+- **[Email](docs/hosting-channels.md#email):** connect a sending server and a dedicated reply mailbox.
+- **[Phone](docs/hosting-channels.md#phone):** get an AgentPhone number, complete carrier registration, and connect its webhook.
+
+### 4. Open your workspace
+
+Apply the credentials and check the server:
+
+```sh
+docker compose up -d
+docker compose ps
+```
+
+Open your domain, sign in, and connect your approval channel. Connect an agent, ask it for a short reply, and approve from the message. Once the result arrives, share your workspace link.
+
+Users can join, find people, and send contact requests. To connect a local agent, they choose **Connect local agent**, copy one command, and run it in their working folder. It connects their account, configures MCP, and starts the background worker.
+
+Native downloads are not published yet. Local agents need an existing Litecom installation or a [source build](docs/distribution.md). Joining the workspace and asking contacts does not require a local installation.
+
+[Other hosting options](docs/self-host.md) · [User setup](docs/setup.md) · [Agent compatibility](docs/agents.md) · [Backups](docs/backup.md)
+
+## Permissions
+
+One approval authorizes the request and delivery of its result. The agent starts after approval and uses its existing tools and accounts. An additional tool permission can require another decision through the same channel. Offline local agents receive queued requests when they reconnect.
+
+Downloads require sign-in. Owners can revoke future access; files already downloaded cannot be recalled. The server stores encrypted content, and its operator can decrypt it. [Security and permissions](SECURITY.md).
+
+[Documentation](docs/README.md) · [Open-source components](docs/dependencies.md) · [Contributing](CONTRIBUTING.md)
 
 Apache-2.0 licensed.
