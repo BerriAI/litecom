@@ -34,7 +34,7 @@ External prerequisites will be recorded when they become relevant. They must not
 
 ## Evidence from the Rust build
 
-- `cargo test --locked`: 64 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, independent SQLite-connection races, interrupted downloads, and backup/recovery. These are local tests, not provider or cloud-agent validation.
+- `cargo test --locked`: 67 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, independent SQLite-connection races, interrupted downloads, and backup/recovery. These are local tests, not provider or cloud-agent validation.
 - `cargo clippy --all-targets -- -D warnings`: passed.
 - `scripts/ui-smoke.py`: passed using two isolated Chrome contexts at desktop and phone widths. It verifies phone-account test authentication, mutual contact acceptance, private draft visibility, approval, a byte-verified download, receipt, and revocation. Delivery was explicitly local development mode.
 - README source commands replace the removed TypeScript scaffold. Rust is the product implementation; browser assets are bundled static files.
@@ -51,9 +51,9 @@ New requests have no built-in file-size, total-transfer, attachment-count, reque
 
 HTTP multipart uploads use Axum’s upstream parser; native and cloud transfers stream through encrypted staging into SQLite chunks. Backups still contain one database and its key. Authenticated JSON remains supported for older API clients, though that compatibility format buffers its body. Public sign-in/pairing bodies retain a small 16 KiB abuse-protection bound; authentication rate controls, session expiry, short-lived codes, and renewable worker leases remain.
 
-Downloads have connection/read-inactivity timeouts, with no fixed total transfer duration. Native uploads use a connection timeout and remain cancellable through their worker heartbeat, without a response-header deadline during transfer. ACP initialization remains cancellable through the worker instead of having a 30-second completion deadline. Notification retries continue with backoff; disconnecting the channel stops them. An inbox page contains 100 entries, with an older-page cursor in the browser, CLI and MCP.
+Downloads have connection/read-inactivity timeouts, with no fixed total transfer duration. Native uploads use a connection timeout and remain cancellable through their worker heartbeat, without a response-header deadline during transfer. ACP initialization remains cancellable through the worker instead of having a 30-second completion deadline. Notification retries continue with backoff; disconnecting the channel stops them. Reopening an older database recovers deliveries abandoned by the former retry cutoff without restoring disconnected destinations. An inbox page contains 100 entries, with an older-page cursor in the browser, CLI and MCP.
 
-Local tests cover requests beyond 100 KB, replies beyond 3 MB, 105 attachments and pending permissions, availability after 40 days, encrypted-chunk tampering, cancelled staging, legacy attachment migration, and 205-row pagination. These numbers are test cases, not new product limits. A separately invoked test throttles a native multipart upload over 64 seconds while keeping its work lease alive; it passes without sharing the resulting file before approval.
+Local tests cover requests beyond 100 KB, replies beyond 3 MB, 105 attachments and pending permissions, availability after 40 days, encrypted-chunk tampering, cancelled staging, full-storage rollback and retry, revocation during streaming, legacy attachment migration, and 205-row pagination. These numbers are test cases, not new product limits. A separately invoked test throttles a native multipart upload over 64 seconds while keeping its work lease alive; it passes without sharing the resulting file before approval.
 
 ## Setup and worker evidence
 

@@ -107,6 +107,9 @@ impl Store {
                 Ok(())
             })?;
         }
+        // Older builds abandoned delivery after eight attempts. Retry active
+        // destinations, while preserving the user's choice to disconnect one.
+        store.db.execute("UPDATE deliveries SET state=CASE WHEN EXISTS(SELECT 1 FROM channels c WHERE c.id=deliveries.channel_id AND c.verified=1) THEN 'pending' ELSE 'cancelled' END WHERE state='failed'",[])?;
         Ok(store)
     }
 

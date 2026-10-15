@@ -1,6 +1,170 @@
 //! Failure and race cases exercised through independent database connections and HTTP.
 use super::*;
 
+#[test]
+fn reopening_retries_legacy_failed_notifications_but_not_disconnected_channels() {
+    let (directory, f) = disk_fixture();
+    f.store.enable_phone(&f.a).unwrap();
+    f.store.enable_phone(&f.b).unwrap();
+    f.approve(&f.draft("legacy-notification", None));
+    f.store
+        .db
+        .execute("UPDATE deliveries SET state='failed',attempts=8", [])
+        .unwrap();
+    f.store
+        .db
+        .execute(
+            "UPDATE channels SET verified=0 WHERE user_id=?",
+            [&f.a.user_id],
+        )
+        .unwrap();
+    drop(f.store);
+    let store = Store::open(directory.path().join("litecom.db"), [7; 32]).unwrap();
+    let delivery = store.next_delivery().unwrap().unwrap();
+    assert_eq!(delivery.attempts, 9);
+    assert_eq!(delivery.kind, "approved");
+    assert_eq!(delivery.destination, "+14155550102");
+    store
+        .delivery_result(&delivery, &Ok("accepted".into()))
+        .unwrap();
+    assert!(store.next_delivery().unwrap().is_none());
+    store.enable_phone(&f.a).unwrap();
+    assert!(store.next_delivery().unwrap().is_none());
+}
+
+#[test]
+fn full_storage_leaves_no_partial_snapshot_and_allows_retry() {
+    let f = Fixture::new();
+    let task = f.request("full-storage");
+    let pages: i64 = f
+        .store
+        .db
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .unwrap();
+    let capacity: i64 = f
+        .store
+        .db
+        .query_row("PRAGMA max_page_count", [], |row| row.get(0))
+        .unwrap();
+    f.store
+        .db
+        .pragma_update(None, "max_page_count", pages + 2)
+        .unwrap();
+    let bytes = vec![0x39; 2 * 1024 * 1024];
+    let attempt = f.store.upload(
+        &f.b,
+        &task.id,
+        None,
+        "report.bin",
+        "application/octet-stream",
+        &bytes,
+    );
+    assert!(attempt.is_err());
+    for table in ["artifacts", "artifact_chunks"] {
+        let count: i64 = f
+            .store
+            .db
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "Failed snapshot must roll back all rows");
+    }
+    f.store
+        .db
+        .pragma_update(None, "max_page_count", capacity)
+        .unwrap();
+    let file = f
+        .store
+        .upload(
+            &f.b,
+            &task.id,
+            None,
+            "report.bin",
+            "application/octet-stream",
+            &bytes,
+        )
+        .unwrap();
+    assert_eq!(f.store.download(&f.b, &file.id).unwrap().1, bytes);
+    assert!(f.store.get_task(&f.a, &task.id).unwrap().response.is_none());
+}
+
+#[tokio::test]
+async fn revocation_stops_an_already_open_download_stream() {
+    use axum::{body::Body, http::Request};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let f = Fixture::new();
+    f.advance(61);
+    let (_, session) = user(&f.store, "Theo", "+14155550101");
+    let task = f.request("revoke-stream");
+    let bytes = vec![0x5a; 3 * 1024 * 1024];
+    let file = f
+        .store
+        .upload(
+            &f.b,
+            &task.id,
+            None,
+            "report.bin",
+            "application/octet-stream",
+            &bytes,
+        )
+        .unwrap();
+    let draft = f
+        .store
+        .prepare(
+            &f.b,
+            &task.id,
+            None,
+            DraftInput {
+                text: String::new(),
+                attachment_ids: vec![file.id.clone()],
+                action: None,
+            },
+        )
+        .unwrap();
+    f.approve(&draft);
+    let state = crate::api::AppState::new(
+        f.store,
+        "http://localhost".into(),
+        crate::providers::Providers::from_env(true).unwrap(),
+    );
+    let response = crate::api::router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/files/{}", file.id))
+                .header("Cookie", format!("litecom_session={}", session.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let mut body = response.into_body();
+    assert_eq!(
+        body.frame()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_data()
+            .unwrap()
+            .len(),
+        1024 * 1024
+    );
+    state.db().unwrap().cancel(&f.b, &task.id).unwrap();
+    assert!(
+        body.frame().await.unwrap().is_err(),
+        "No further chunk is released after revocation"
+    );
+    assert!(
+        state
+            .db()
+            .unwrap()
+            .get_task(&f.a, &task.id)
+            .unwrap()
+            .downloads
+            .is_empty()
+    );
+}
+
 #[tokio::test]
 async fn multipart_uploads_validate_metadata_and_commit_only_complete_files() {
     use axum::{
