@@ -52,6 +52,15 @@ This uses the actual temporary-server flow and a fixture agent, and verifies tha
 
 Run `.litecom/qa/bin/python scripts/acp-smoke.py` for terminal setup with a fixture ACP process, browser tool approval and rejection, file transfer, and cancellation. It starts and cleans up its own local development relay and does not call a model.
 
+For browser recovery and a timed core-protocol stress test:
+
+```sh
+.litecom/qa/bin/python scripts/reliability-smoke.py
+python3 scripts/soak.py --seconds 3600
+```
+
+Both start isolated development relays and clean them up. The browser test covers stale decisions, interrupted/corrupt downloads, lost receipts, and edits during background updates. The seeded soak test varies binary payloads, self/contact requests, approvals, cancellation, permission decisions, and relay restarts. Runs longer than 125 seconds also check real lease expiry. Agent operations and delivery are fixtures; neither test calls a model or sends messages. The soak report is saved locally in `.preview/soak.json`.
+
 To check the actual released Pi adapter against a simulated Pi backend, install it in an isolated test folder and run:
 
 ```sh

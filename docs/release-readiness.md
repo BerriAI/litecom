@@ -7,7 +7,7 @@ Litecom connects to existing agents. It does not ship its own reasoning agent or
 | Requirement | Evidence needed | State |
 | --- | --- | --- |
 | Durable contacts and requests | Acceptance, authorization, restart, queue and cancellation tests | Core tests and two-account browser flow pass; deployment recovery pending |
-| Exact sharing approval | Cross-user access, immutable files, stale approval and race tests | Privacy, snapshot, stale/duplicate decision tests and browser transfer pass; concurrent-process race audit pending |
+| Exact sharing approval | Cross-user access, immutable files, stale approval and race tests | Privacy, snapshot, stale/duplicate decisions and browser transfer pass; independent SQLite-connection races verify one request, one claim, one decision, and no release of unreviewed edits |
 | General actions | Real harness code change, test command and PR flow with permission boundaries | Live Codex file creation and exact transfer pass. Broader code/test/PR and external-tool workflows pending |
 | GitHub Write access example | Ordinary request through the selected agent's existing GitHub tools; exact recipient/repository approval and truthful grant/invitation result | Pending live harness demonstration; no GitHub-specific Litecom connector or action handler is in scope |
 | Terminal setup | Phone/Slack/Email choice, saved progress, main harness, sources, measured controls | Phone path, native detection, folder, saved progress, reconnect, repeat setup and macOS startup pass; Email linking tested locally; Slack/provider validation and clean consumer install pending |
@@ -34,10 +34,12 @@ External prerequisites will be recorded when they become relevant. They must not
 
 ## Evidence from the Rust build
 
-- `cargo test --locked`: 55 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, and backup/recovery. These are local tests, not provider or cloud-agent validation.
+- `cargo test --locked`: 58 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, independent SQLite-connection races, interrupted downloads, and backup/recovery. These are local tests, not provider or cloud-agent validation.
 - `cargo clippy --all-targets -- -D warnings`: passed.
 - `scripts/ui-smoke.py`: passed using two isolated Chrome contexts at desktop and phone widths. It verifies phone-account test authentication, mutual contact acceptance, private draft visibility, approval, a byte-verified download, receipt, and revocation. Delivery was explicitly local development mode.
 - README source commands replace the removed TypeScript scaffold. Rust is the product implementation; browser assets are bundled static files.
+- Filename edge cases now retain the original response metadata while saving portable names within filesystem limits. CLI downloads publish atomically and never replace an existing file. Truncated/corrupt HTTP responses create neither a local file nor a receipt.
+- Browser fault tests reproduce and cover lost download acknowledgments and background updates arriving during editing. A verified download remains successful when its receipt cannot be confirmed; unsaved edits survive background polling. Stale approvals and late conflicting decisions cannot release a changed or declined response.
 
 Still absent: a deployed hosted endpoint, published installers, actual delivery verification, live Slack/email verification, live cloud-provider and remaining ACP adapter validation, Gmail retrieval, GitHub grants, cross-network tests, and full release validation. Codex has live file-operation evidence; successful Claude execution and broader native context/tool compatibility remain unverified. The full requirement set above remains in scope.
 

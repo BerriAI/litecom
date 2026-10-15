@@ -120,7 +120,11 @@ pub fn create(data: &Path, output: &Path) -> Result<Manifest> {
     target.execute_batch("PRAGMA journal_mode=DELETE;")?;
     check_database(&target, key)?;
     drop(target);
-    fs::File::open(&snapshot)?.sync_all()?;
+    // Windows requires a writable handle to flush file buffers.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&snapshot)?
+        .sync_all()?;
     config::write_private(&output.join("storage.key"), &key)?;
     let manifest = Manifest {
         format: 1,
@@ -181,7 +185,10 @@ pub fn restore(input: &Path, data: &Path) -> Result<Manifest> {
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;")?;
     check_database(&db, key)?;
     drop(db);
-    fs::File::open(database)?.sync_all()?;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(database)?
+        .sync_all()?;
     sync_directory(data)?;
     fs::remove_file(data.join(".restoring"))?;
     sync_directory(data)?;

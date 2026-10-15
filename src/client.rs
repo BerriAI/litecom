@@ -182,21 +182,22 @@ impl Client {
         if !directory.is_dir() {
             bail!("Choose a download folder.");
         }
-        let name = format!("{}-{}", &file.id[..8], file.name);
+        let name = download_name(file);
         let path = directory.join(name);
         use std::io::Write;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut output = options
-            .open(&path)
-            .context("A file with this name already exists. Choose another download folder.")?;
+        // Publish only the complete verified file, without replacing an existing file.
+        let mut output = tempfile::NamedTempFile::new_in(directory)
+            .context("Cannot create a file in this download folder.")?;
         output.write_all(&bytes)?;
-        output.sync_all()?;
+        output.as_file().sync_all()?;
+        output.persist_noclobber(&path).map_err(|error| {
+            let message = if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+                "A file with this name already exists. Choose another download folder."
+            } else {
+                "Cannot save the file in this download folder."
+            };
+            anyhow::Error::new(error.error).context(message)
+        })?;
         let receipt: anyhow::Result<TaskView> = self
             .post(
                 &format!("/api/files/{artifact_id}/received"),
@@ -216,4 +217,31 @@ impl Client {
     pub fn request_id() -> String {
         id()
     }
+}
+
+fn download_name(file: &Artifact) -> String {
+    // Sender filenames may come from a different OS. Keep the original in the
+    // response metadata, but save a portable name within a 255-byte component.
+    let clean: String = file
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let clean = clean.trim_end_matches([' ', '.']);
+    let (stem, extension) = clean
+        .rsplit_once('.')
+        .filter(|(stem, ext)| !stem.is_empty() && !ext.is_empty() && ext.len() <= 20)
+        .map(|(stem, ext)| (stem, format!(".{ext}")))
+        .unwrap_or((clean, String::new()));
+    let mut stem = stem.to_owned();
+    while stem.len() + extension.len() > 246 {
+        stem.pop();
+    }
+    format!("{}-{stem}{extension}", &file.id[..8])
 }

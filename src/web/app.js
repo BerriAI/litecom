@@ -219,12 +219,20 @@ async function inbox() {
       "",
     )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details>${tasks.length ? tasks.map((t) => `<article class="card"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : '<div class="card empty"><h2>Start with a request.</h2><p>Ask one of your own agents above, or <a href="/contacts">connect with someone</a>.</p></div>'}`;
 }
-async function taskPage(id) {
+function editingTask() {
+  return (
+    ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName) ||
+    app.querySelector("#draft")?.dataset.dirty === "true"
+  );
+}
+async function taskPage(id, update, previous) {
   const [t, contacts, agents] = await Promise.all([
-    api(`/api/tasks/${encodeURIComponent(id)}`),
+    update || api(`/api/tasks/${encodeURIComponent(id)}`),
     api("/api/contacts"),
     api("/api/agents"),
   ]);
+  // A poll may finish after typing or another action began. Do not replace that UI.
+  if (previous && (currentTask !== previous || busy || editingTask())) return;
   currentTask = t;
   const owner = t.owner_id === profile.id,
     requester = t.requester_id === profile.id,
@@ -399,7 +407,11 @@ document.addEventListener("submit", async (e) => {
     buttons.forEach((b) => (b.disabled = false));
   }
 });
+document.addEventListener("input", (e) => {
+  if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
+});
 document.addEventListener("change", async (e) => {
+  if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
   if (e.target.name === "owner") {
     try {
       const agents = await api(
@@ -444,10 +456,18 @@ document.addEventListener("click", async (e) => {
       if (
         currentTask?.requester_id === profile.id &&
         currentTask.status === "completed"
-      )
-        await api(`/api/files/${fileLink.dataset.download}/received`, {
-          sha256: digest,
-        });
+      ) {
+        try {
+          await api(`/api/files/${fileLink.dataset.download}/received`, {
+            sha256: digest,
+          });
+        } catch {
+          notice(
+            "Download verified; receipt could not be confirmed. You can mark the response received when reconnected.",
+          );
+          return;
+        }
+      }
       notice("Download verified.");
     } catch (err) {
       error(err);
@@ -545,11 +565,13 @@ setInterval(async () => {
     busy ||
     document.hidden ||
     !location.pathname.startsWith("/request/") ||
-    ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)
+    editingTask()
   )
     return;
   try {
-    const t = await api(`/api/tasks/${currentTask.id}`);
+    const previous = currentTask;
+    const t = await api(`/api/tasks/${previous.id}`);
+    if (currentTask !== previous || busy || editingTask()) return;
     if (
       t.updated_at !== currentTask.updated_at ||
       t.status !== currentTask.status ||
@@ -560,7 +582,7 @@ setInterval(async () => {
       t.revoked_at !== currentTask.revoked_at ||
       t.downloads?.length !== currentTask.downloads?.length
     )
-      await taskPage(t.id);
+      await taskPage(t.id, t, previous);
   } catch (err) {
     notice(err.message);
   }
