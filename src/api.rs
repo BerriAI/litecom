@@ -314,7 +314,14 @@ async fn start_login(
     }
     let nonce = secret();
     let (challenge, code) = s.db()?.begin_login(&v.name, &v.phone, &nonce)?;
-    s.providers.sms(&v.phone,&format!("Your Litecom sign-in code is {code}. It expires in 10 minutes. Never share this code.")).await?;
+    s.providers
+        .sms(
+            &v.phone,
+            &format!(
+                "Your Litecom sign-in code is {code}. You requested this text. It expires in 10 minutes. Never share this code. Reply STOP to unsubscribe."
+            ),
+        )
+        .await?;
     cookies(
         Json(challenge).into_response(),
         vec![s.cookie("litecom_login", &nonce, true, 600)],

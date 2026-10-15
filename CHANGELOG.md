@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+- Sign-in texts acknowledge the requested message and include opt-out instructions.
+- MCP reports the installed package version automatically.
+- Bundled notices use the correct release version and source link.
+- Hosting instructions explain carrier registration and container startup requirements.
+
 ## 0.1.0-alpha.2
 
 - AgentPhone handles phone sign-in, approval texts, and status messages.

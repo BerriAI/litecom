@@ -155,3 +155,8 @@ AgentPhone replaces the initial Twilio transport. The relay uses one explicitly 
 - The local first-use preview and accessibility checks passed again; the browser editing check passed after updating its obsolete heading selector. See [interface review](ui-review.md).
 - The [operator guide](self-host.md) separates service/number/webhook/storage setup from each person's agent connection. It supports a native process or Docker on any suitable host; the product has no Render dependency.
 - No AgentPhone number has been purchased and no real phone message sent during these checks. Live provider delivery and the requested hosted instance remain unverified.
+
+## Latest single-approval checks
+
+- A fresh live Codex 0.160.0 run with the AgentPhone-enabled build passed project-instruction handling, the pre-execution approval gate, a verified local file operation, automatic result delivery, and a second account's exact download and receipt. It used local test identities and development notifications; it did not test carrier delivery.
+- The current-build 180-second reliability run passed 4,246 rounds and 64,603 HTTP checks, including 2,654 exact transfers, 1,061 single-approval deliveries, 531 relay restarts, cancellation, stale decisions, revocation, and a real lease expiry. It used deterministic fixtures with no model calls or provider messages.

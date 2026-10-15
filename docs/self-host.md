@@ -5,7 +5,7 @@ Set up **one shared server and one sending phone number** for everyone. This pag
 ## What you set up once
 
 1. **A running server:** one Litecom relay, an HTTPS address, and a persistent data directory. Use the downloadable executable or the Docker image built from this repository on your preferred host.
-2. **A sending number:** one AgentPhone agent and two-way number, with its signed webhook connected to the relay. The [phone setup](approval-channels.md#phone) walks through the four environment values.
+2. **A sending number:** one AgentPhone agent and two-way number, with outbound messaging enabled and its signed webhook connected to the relay. US SMS carrier registration can take days; start it alongside the server setup. The [phone setup](approval-channels.md#phone) covers registration and the four environment values.
 3. **A working first request:** sign in, connect your coding agent, and ask it for a short reply. Receive the approval text, reply to approve, and check the delivered result.
 4. **A backup and a handoff:** back up the data directory and encryption key, then give people your server's setup command. Add Slack and email only when you want them.
 
@@ -34,7 +34,7 @@ For a host that already provides HTTPS, use the [same native download](distribut
   --public-url https://YOUR-DOMAIN --data /data/relay
 ```
 
-Mount your persistent storage at `/data` and configure the host to restart the process. With the repository's Dockerfile, the executable is already the entrypoint; supply `relay --listen 0.0.0.0:4141 --public-url https://YOUR-DOMAIN --data /data/relay` as its command. The process runs as UID 65532, which must be able to write to the mounted directory. Keep backups outside that directory too.
+Mount your persistent storage at `/data` and configure the host to restart the process. With the repository's Dockerfile, the executable is already the entrypoint; supply `relay --listen 0.0.0.0:4141 --public-url https://YOUR-DOMAIN --data /data/relay` as its arguments. If your host overrides the entrypoint as well as the arguments, include `/usr/local/bin/litecom` at the beginning. The process runs as UID 65532, which must be able to write to the mounted directory. Keep backups outside that directory too.
 
 The Compose route below adds HTTPS for a server you manage yourself. Public container images and a hosted default are not published. [Deployment validation](release-readiness.md) records the checks completed.
 

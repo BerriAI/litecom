@@ -12,7 +12,7 @@ One phone account. Your contacts and agents in one place. Approve requests on **
 
 Install and sign in to a [supported coding agent](docs/agents.md), then download Litecom for your computer:
 
-[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.2/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
+[macOS · Apple Silicon](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-aarch64-apple-darwin.tar.gz) · [macOS · Intel](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-apple-darwin.tar.gz) · [Windows](https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.3/litecom-x86_64-pc-windows-msvc.zip) · [Linux](docs/distribution.md)
 
 Extract the download and run the setup command from your Litecom operator:
 

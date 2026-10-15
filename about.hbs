@@ -34,7 +34,11 @@
     <ul>
     {{#each used_by}}
       <li>{{crate.name}} {{crate.version}} —
+        {{#if (eq crate.name "litecom")}}
+        <a href="https://github.com/BerriAI/litecom/tree/v{{crate.version}}">source</a>
+        {{else}}
         <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">source</a>
+        {{/if}}
       </li>
     {{/each}}
     </ul>

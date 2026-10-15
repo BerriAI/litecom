@@ -34,6 +34,8 @@ Keep provider credentials in the relay environment. `--dev` prints local notices
 
 Use [AgentPhone](https://agentphone.ai) for sign-in codes, approval messages, and status updates. End users keep the same **Phone** choice; they never need an AgentPhone account.
 
+**Enable outbound messaging before inviting users.** An active number can receive texts while still being unable to send sign-in codes. Complete [AgentPhone's carrier registration](https://agentphone.ai/register); its [registration reference](https://docs.agentphone.ai/api-reference/registration/register-a-2-p-v-1-register-post) currently lists a $25 standard registration fee and a typical 7–10 business-day approval period. This is one registration for the operator, not for each Litecom user. The operator supplies its business details, message examples, opt-in flow, and applicable policy URLs. Start this step while setting up the server.
+
 1. Get an API key from AgentPhone. Create a dedicated **Litecom** agent with `voiceMode: "webhook"`, and attach a two-way phone number. The [AgentPhone quickstart](https://docs.agentphone.ai/welcome) includes the create, provision, and attach commands. Save the agent ID and number ID shown in their details. Litecom uses messaging only; it does not use AgentPhone's hosted AI or voice calls.
 2. Register the callback below once, replacing the API key, agent ID, and relay host below with your values:
 
@@ -58,7 +60,9 @@ Use [AgentPhone](https://agentphone.ai) for sign-in codes, approval messages, an
    For Docker Compose, put them in `.env` and run `docker compose up -d`. All four belong to the same AgentPhone project and sender. The explicit number keeps outgoing messages on the same line that receives approvals.
 4. Sign in to Litecom, request a short reply from your own agent, and reply to its approval text. Confirm that the result arrives and that a repeated approval does not run it again. AgentPhone's webhook test checks connectivity; it does not prove phone delivery or an approval.
 
-AgentPhone chooses iMessage where supported and otherwise uses its cellular fallback. Complete the provider's registration for the countries and channels you serve; US outbound SMS requires 10DLC registration. See [AgentPhone messaging](https://docs.agentphone.ai/documentation/guides/messages). Litecom sends the full request without a local character cutoff.
+AgentPhone chooses iMessage where both the sender and recipient support it; this does not make an SMS-only number an iMessage sender. Its number-details API reports `outboundSms: "registration_required"` when SMS registration is still needed. Verify the sender's actual capabilities and complete registration for the countries and channels you serve. See [AgentPhone messaging](https://docs.agentphone.ai/documentation/guides/messages). Litecom sends the full request without a local character cutoff.
+
+The first sign-in text identifies Litecom, confirms that the user requested it, and includes STOP instructions, as required by [AgentPhone's first-message guidance](https://docs.agentphone.ai/documentation/reference/messaging-rate-limits#first-message-requirements).
 
 Litecom verifies the [webhook signature and timestamp](https://docs.agentphone.ai/documentation/guides/webhooks), configured agent and number, connected sender, and exact request code. Calls, reactions, outbound echoes, and group messages cannot approve. Signed `STOP` replies disable the phone channel and invalidate its outstanding approval codes; reconnect in Settings after restoring consent with the provider. Callback receipts survive relay restarts.
 
