@@ -15,6 +15,50 @@ const esc = (v) =>
         c
       ],
   );
+const icon = (name) => {
+  const paths = {
+    workspace:
+      '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    inbox:
+      '<path d="M4 4h16l2 12v4H2v-4L4 4Z"/><path d="M2 15h6l2 3h4l2-3h6"/>',
+    contacts:
+      '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m3 10v-3a6 6 0 0 0-2-4"/>',
+    agents:
+      '<rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 22h8m-4-4v4M8 10l2 2-2 2m5 0h3"/>',
+    settings:
+      '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
+    phone:
+      '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/>',
+    slack:
+      '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4Z"/><path d="M8 10h8m-8 4h5"/>',
+    email:
+      '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/>',
+    arrow: '<path d="m9 6 6 6-6 6"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+  };
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.agents}</svg>`;
+};
+const avatar = (name) =>
+  `<span class="avatar" aria-hidden="true">${esc(String(name).trim().slice(0, 1).toUpperCase())}</span>`;
+const pageHeading = (title, action = "", description = "") =>
+  `<div class="page-heading"><div><h1>${title}</h1>${description ? `<p class="muted">${description}</p>` : ""}</div>${action}</div>`;
+function shell(connected) {
+  document.body.classList.toggle("workspace-shell", connected);
+  nav.innerHTML = connected
+    ? [
+        ["workspace", "/workspace", "Workspace"],
+        ["inbox", "/", "Inbox"],
+        ["contacts", "/contacts", "Contacts"],
+        ["agents", "/agents", "Agents"],
+        ["settings", "/settings", "Settings"],
+      ]
+        .map(
+          ([name, href, label]) =>
+            `<a href="${href}">${icon(name)}<span>${label}</span></a>`,
+        )
+        .join("")
+    : "";
+}
 const csrf = () =>
   document.cookie
     .split("; ")
@@ -100,12 +144,12 @@ function permissionCard(permission) {
       ? { ...operation }
       : operation;
   if (fields?.title === permission.title) delete fields.title;
-  return `<section class="card permission"><p class="preview-label">Your approval is needed</p><h2>${esc(permission.title)}</h2><p>This operation needs additional permission. Allow it once for this request.</p>${operationFields(fields)}<div class="actions"><button class="primary" data-action="approve-permission" data-id="${esc(permission.id)}">Approve once</button><button data-action="decline-permission" data-id="${esc(permission.id)}">Decline operation</button></div></section>`;
+  return `<section class="card permission"><p class="eyebrow">Permission needed</p><h2>${esc(permission.title)}</h2><p>Allow this operation once for this request.</p>${operationFields(fields)}<div class="actions"><button class="primary" data-action="approve-permission" data-id="${esc(permission.id)}">Approve once</button><button data-action="decline-permission" data-id="${esc(permission.id)}">Decline operation</button></div></section>`;
 }
 function draftCard(draft, status) {
   const action = draft.action;
   const body = action
-    ? `<p>${action.share_result ? "Approve to let your agent do this and send back the result." : "Approve to run this request. This older proposal requires a separate result review."}</p><details><summary>Agent and access</summary><h2>${esc(action.title)}</h2><p>${esc(action.description)}</p><p class="muted">Acts as ${esc(action.acting_account)}.</p>${action.workspace ? `<p class="muted subtitle">Folder: <code>${esc(action.workspace)}</code></p>` : ""}<pre>${esc(JSON.stringify(action, null, 2))}</pre></details>`
+    ? `<p>${action.share_result ? "Approve to run this request and send back the result." : "Approve to run this request. This older proposal requires a separate result review."}</p><details><summary>Agent and access</summary><h2>${esc(action.title)}</h2><p>${esc(action.description)}</p><p class="muted">Acts as ${esc(action.acting_account)}.</p>${action.workspace ? `<p class="muted subtitle">Folder: <code>${esc(action.workspace)}</code></p>` : ""}<details><summary>Technical details</summary><pre>${esc(JSON.stringify(action, null, 2))}</pre></details></details>`
     : `<h2>${status === "completed" ? "Result" : "Reply"}</h2><div class="prose">${esc(draft.text)}</div>${files(draft.attachments)}`;
   const controls =
     status === "awaiting_approval"
@@ -113,7 +157,7 @@ function draftCard(draft, status) {
       : "";
   return action && ["approved", "executing"].includes(status)
     ? `<details class="card"><summary>Request approved</summary>${body}</details>`
-    : `<section class="card">${body}${controls}</section>`;
+    : `<section class="card approval-panel">${body}${controls}</section>`;
 }
 
 async function boot() {
@@ -180,8 +224,7 @@ async function boot() {
       return approvalSetup();
     }
     sessionStorage.removeItem("approval-channel");
-    nav.innerHTML =
-      '<a href="/workspace">Workspace</a><a href="/">Inbox</a><a href="/contacts">Contacts</a><a href="/agents">Agents</a><a href="/settings">Settings</a>';
+    shell(true);
     await render();
   } catch (e) {
     error(e);
@@ -195,30 +238,29 @@ function availableChannels() {
   );
 }
 function approvalSetup(message = "") {
-  nav.innerHTML = "";
+  shell(false);
   const labels = { phone: "Phone", slack: "Slack", email: "Email" };
   const details = {
-    phone: "Confirm your number. Approve by text.",
-    slack: "Connect Slack. Approve in a direct message.",
-    email: account?.google_email
-      ? `Use ${account.google_email}. Approve by replying.`
-      : "Confirm your address. Approve by replying.",
+    phone: "Approve by text",
+    slack: "Approve in a direct message",
+    email: account?.google_email || "Approve by replying",
   };
   const kinds = availableChannels();
-  app.innerHTML = `<section class="narrow"><h1>Where do you want to approve requests?</h1><p class="muted">Choose one to get started. Add others in Settings whenever you want.</p>${message ? `<p class="error" role="alert">${esc(message)}</p>` : ""}${kinds.map((kind) => `<section class="card"><h2>${labels[kind]}</h2><p class="muted">${esc(details[kind])}</p><button data-action="choose-channel" data-id="${kind}">Connect ${labels[kind]}</button></section>`).join("")}${!kinds.length ? '<p class="banner">The host has not enabled an approval channel yet. You can return here when it is ready.</p>' : ""}<button data-action="logout">Sign out</button></section>`;
+  app.innerHTML = `<section class="narrow setup"><h1>Where should requests go?</h1><p class="muted">Choose where to approve. Add more later.</p>${message ? `<p class="error" role="alert">${esc(message)}</p>` : ""}<div class="channel-picker">${kinds.map((kind) => `<button class="channel-choice" data-action="choose-channel" data-id="${kind}" aria-label="Connect ${labels[kind]}">${icon(kind)}<span><strong>${labels[kind]}</strong><small>${esc(details[kind])}</small></span>${icon("arrow")}</button>`).join("")}</div>${!kinds.length ? '<p class="banner">No approval channels are available yet. Ask your host to enable one, then refresh.</p>' : ""}<button class="quiet" data-action="logout">Sign out</button></section>`;
 }
+
 function phoneSetup() {
   const pending = sessionStorage.getItem("phone-link-challenge");
-  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your phone" : "Approve requests by text"}</h1><p class="muted">Reply APPROVE and the request code to let your agent do the work and send its result. Message rates may apply; reply STOP to unsubscribe.</p>${pending ? '<form id="phone-link-verify"><label>Phone code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect phone</button></form><button data-action="restart-phone-link">Use another number</button>' : '<form id="phone-link-start"><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><button class="primary">Send code</button></form>'}<button data-action="choose-another-channel">Choose another channel</button></section>`;
+  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your phone" : "Approve requests by text"}</h1><p class="muted">Receive approval requests by SMS. Message rates may apply; reply STOP to unsubscribe.</p>${pending ? '<form id="phone-link-verify"><label>Phone code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect phone</button></form><button class="quiet" data-action="restart-phone-link">Use another number</button>' : '<form id="phone-link-start"><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><button class="primary">Send code</button></form>'}<button class="quiet" data-action="choose-another-channel">Choose another channel</button></section>`;
 }
 function login() {
-  nav.innerHTML = "";
+  shell(false);
   if (capabilities.google) {
     const next =
       location.pathname === "/"
         ? "/workspace"
         : location.pathname + location.search;
-    app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p><a class="button primary" href="/api/auth/google?next=${encodeURIComponent(next)}">Continue with Google</a><p class="muted subtitle">Next, choose where to receive approvals. Your name and connected agents are visible to people in this workspace.</p>${new URLSearchParams(location.search).has("signin") ? '<p class="error" role="alert">Sign-in was not completed. Try again.</p>' : ""}${capabilities.phone_signin ? '<button data-action="phone-login">Sign in with phone instead</button>' : ""}</section>`;
+    app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask someone’s agent. They approve. It gets done.</p><a class="button primary full-width" href="/api/auth/google?next=${encodeURIComponent(next)}">Continue with Google</a><p class="muted subtitle">Your name and agents will be visible in this workspace.</p>${new URLSearchParams(location.search).has("signin") ? '<p class="error" role="alert">Sign-in was not completed. Try again.</p>' : ""}${capabilities.phone_signin ? '<button class="quiet" data-action="phone-login">Sign in with phone instead</button>' : ""}</section>`;
     return;
   }
   phoneLogin();
@@ -229,7 +271,7 @@ function phoneLogin() {
     ? requested
     : null;
   if (chosen) sessionStorage.setItem("approval-channel", chosen);
-  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${
+  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask someone’s agent. They approve. It gets done.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${
     chosen
       ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>`
       : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${availableChannels()
@@ -239,7 +281,7 @@ function phoneLogin() {
               `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`,
           )
           .join("")}</div></fieldset>`
-  }<label>Your name<input name="name" autocomplete="name" required></label><label id="approval-email-field" hidden>Email for approvals<input name="approval_email" type="email" autocomplete="email" disabled></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone signs you in to this account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
+  }<label>Your name<input name="name" autocomplete="name" required></label><label id="approval-email-field" hidden>Email for approvals<input name="approval_email" type="email" autocomplete="email" disabled></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">We’ll text a sign-in code. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
   syncApprovalFields();
 }
 function syncApprovalFields() {
@@ -253,7 +295,7 @@ function syncApprovalFields() {
   input.required = email;
 }
 function phoneCode() {
-  app.innerHTML = `<section class="narrow"><h1>Check your phone</h1><p class="muted">Enter the six-digit code. It expires in 10 minutes.</p><form id="verify"><label>Sign-in code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Continue</button></form><p><button data-action="restart-login">Use another number</button></p></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Check your phone</h1><p class="muted">Enter the six-digit code. It expires in 10 minutes.</p><form id="verify"><label>Sign-in code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Continue</button></form><p><button class="quiet" data-action="restart-login">Use another number</button></p></section>`;
 }
 async function startEmail(address) {
   const c = await api("/api/channels/email/start", { email: address });
@@ -272,7 +314,7 @@ async function startSlack() {
 }
 async function slackSetup() {
   app.innerHTML =
-    '<section class="narrow"><h1>Approve requests in Slack</h1><p class="muted">Allow Litecom in your workspace to receive requests by direct message. Tap Approve in Slack to let your agent do the work and send its result.</p><button class="primary" data-action="add-slack">Continue to Slack</button><button data-action="choose-another-channel">Choose another channel</button></section>';
+    '<section class="narrow"><h1>Approve requests in Slack</h1><p class="muted">Allow Litecom to send you approval requests in Slack.</p><button class="primary" data-action="add-slack">Continue to Slack</button><button class="quiet" data-action="choose-another-channel">Choose another channel</button></section>';
   // Choosing Slack already expresses intent. Go straight to its consent page,
   // but do not send the user back there automatically after Back or a failure.
   if (
@@ -295,7 +337,7 @@ async function slackConnected() {
   const params = new URLSearchParams(location.search);
   if (params.has("error")) {
     app.innerHTML =
-      '<section class="narrow"><h1>Slack was not connected.</h1><p class="muted">You can retry, or ask your workspace administrator to allow the Litecom app.</p><button class="primary" data-action="add-slack">Try again</button><button data-action="choose-another-channel">Choose another channel</button></section>';
+      '<section class="narrow"><h1>Slack was not connected.</h1><p class="muted">You can retry, or ask your workspace administrator to allow the Litecom app.</p><button class="primary" data-action="add-slack">Try again</button><button class="quiet" data-action="choose-another-channel">Choose another channel</button></section>';
     return;
   }
   await api("/api/channels/slack/finish", { state: params.get("state") });
@@ -319,7 +361,7 @@ async function slackConnected() {
 
 function emailSetup() {
   const pending = sessionStorage.getItem("email-challenge");
-  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your email" : "Approve requests by email"}</h1><p class="muted">Reply Approve to a request email to let your agent do the work and send its result.</p>${capabilities.development ? '<p class="banner">Local development: email codes print in the relay terminal.</p>' : ""}${pending ? `<form id="email-verify"><label>Email code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect email</button></form><button data-action="restart-email">Use another email</button>` : `<form id="email-start"><label>Email address<input name="email" type="email" autocomplete="email" required></label><button class="primary">Send email code</button></form>`}<button data-action="choose-another-channel">Choose another channel</button></section>`;
+  app.innerHTML = `<section class="narrow"><h1>${pending ? "Check your email" : "Approve requests by email"}</h1><p class="muted">Receive requests here. Reply Approve to run them.</p>${capabilities.development ? '<p class="banner">Local development: email codes print in the relay terminal.</p>' : ""}${pending ? `<form id="email-verify"><label>Email code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus></label><button class="primary">Connect email</button></form><button class="quiet" data-action="restart-email">Use another email</button>` : `<form id="email-start"><label>Email address<input name="email" type="email" autocomplete="email" required></label><button class="primary">Send email code</button></form>`}<button class="quiet" data-action="choose-another-channel">Choose another channel</button></section>`;
 }
 
 async function render() {
@@ -336,7 +378,10 @@ async function render() {
     }[parts[0]] || "Inbox";
   document.title = `${title} · Litecom`;
   document.querySelectorAll("#nav a").forEach((link) => {
-    if (new URL(link.href).pathname === location.pathname)
+    if (
+      new URL(link.href).pathname ===
+      (location.pathname.startsWith("/request/") ? "/" : location.pathname)
+    )
       link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
@@ -376,7 +421,7 @@ async function inbox() {
       : await api("/api/agents?owner_id=" + encodeURIComponent(owner));
   const names = new Map(contacts.map((c) => [c.id, c.name]));
   names.set(profile.id, "You");
-  app.innerHTML = `<div class="intro"><h1>Your inbox</h1><p class="muted">Requests and responses, shared across your agents.</p></div><details class="card" ${requested ? "open" : ""}><summary>Ask an agent</summary><form id="ask"><label>Who<select name="owner"><option value="${esc(profile.id)}">My agents</option>${contacts
+  app.innerHTML = `${pageHeading("Inbox")}<details class="composer" ${requested ? "open" : ""}><summary>${icon("plus")}Ask an agent</summary><form id="ask"><label>Who<select name="owner"><option value="${esc(profile.id)}">My agents</option>${contacts
     .filter((c) => c.status === "accepted")
     .map(
       (c) =>
@@ -384,7 +429,7 @@ async function inbox() {
     )
     .join(
       "",
-    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details>${tasks.length ? tasks.map((t) => `<article class="card"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="card empty"><h2>No older requests.</h2></div>' : '<div class="card empty"><h2>Start with a request.</h2><p>Ask one of your own agents above, or <a href="/contacts">connect with someone</a>.</p></div>'}`;
+    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
   const last = tasks.at(-1);
   if (query || tasks.length === 100) {
     const paging = document.createElement("nav");
@@ -436,7 +481,7 @@ async function taskPage(id, update, previous) {
   const editable =
     owner && ["queued", "preparing", "awaiting_approval"].includes(t.status);
   const d = owner ? t.draft : null;
-  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner && !requester ? esc(names.get(t.requester_id) || "Your contact") + " asks" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="card"><h2>Requested</h2><div class="prose">${esc(t.request)}</div></div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">This request is saved. The selected agent will pick it up when it connects.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="card"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
+  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner && !requester ? esc(names.get(t.requester_id) || "Your contact") + " asks" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="request-body prose">${esc(t.request)}</div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">Waiting for the agent to connect.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="disclosure"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
   if (oldVersion === t.draft?.version) {
     app.querySelectorAll("details > summary").forEach((el) => {
       if (opened.includes(el.textContent)) el.parentElement.open = true;
@@ -460,14 +505,21 @@ async function workspacePage() {
     api("/api/people"),
     api("/api/agents"),
   ]);
-  app.innerHTML = `<div class="intro"><h1>Your workspace</h1><p class="muted">Connect with someone to ask their agents for help. Each request needs their approval.</p><button class="primary" data-action="connect-local">Connect local agent</button><div id="local-command"></div></div><section class="card"><h2>Your agents</h2><p class="muted">${agents.map((a) => esc(a.name)).join(" · ") || "No agents connected yet"}</p><a href="/?ask=me">Ask my agent</a></section>${people.map((person) => `<article class="card"><h2>${esc(person.name)}</h2><p class="muted">${person.agents.length ? person.agents.map((a) => esc(a.name)).join(" · ") : "No agents connected yet"}</p>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Send contact request</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : `<span class="badge">${person.status === "accepted" ? "Connected" : "Request sent"}</span>${person.status === "accepted" ? `<p><a href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a></p>` : ""}`}</article>`).join("") || '<section class="card"><h2>You’re the first one here.</h2><p>Share your <a href="/contacts">contact link</a> to bring someone in.</p></section>'}`;
+  app.innerHTML = `${pageHeading("Your workspace", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list"><article class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2><p class="muted">${
+    agents
+      .filter((a) => a.last_seen_at || a.kind === "devin")
+      .map((a) => esc(a.name))
+      .join(" · ") || "No agents connected"
+  }</p></div><a class="button" href="/?ask=me">Ask my agent</a></article></div></section><section class="section"><h2 class="section-label">People</h2><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${person.agents.length ? person.agents.map((a) => esc(a.name)).join(" · ") : "No agents connected"}</p></div>${person.status === "available" ? `<button data-action="contact-person" data-id="${esc(person.id)}">Add contact</button>` : person.status === "pending" && person.incoming ? `<button data-action="accept-contact" data-id="${esc(person.id)}">Accept contact</button>` : person.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}</a>` : '<span class="muted">Request sent</span>'}</article>`).join("") || '<div class="empty"><p>No one else is here yet.</p><a href="/contacts">Invite someone</a></div>'}</div></section>`;
   showLocalCommand();
   await pollLocalConnection();
 }
+
 async function contactsPage() {
   const contacts = await api("/api/contacts");
-  app.innerHTML = `<h1>People you can ask</h1><p class="muted">Share a link. They accept. Then ask by name from any agent.</p><section class="card"><label>Your contact link<input id="invite-link" readonly value="${esc(location.origin + "/invite/" + profile.invite)}"></label><button data-action="copy-invite">Copy link</button></section><form id="contact" class="card"><label>Add a contact<input name="link" type="url" placeholder="Paste their Litecom contact link" required></label><button>Connect</button></form>${contacts.map((c) => `<article class="card"><div class="row"><h2>${esc(c.name)}</h2><span class="badge">${esc(c.status)}</span></div>${c.status === "pending" && c.incoming ? `<button class="primary" data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<p class="muted">${c.agents.map((a) => esc(a.name) + (a.is_default ? " (default)" : "")).join(" · ")}</p><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button>` : ""}</article>`).join("")}`;
+  app.innerHTML = `${pageHeading("Contacts", '<button class="primary" data-action="copy-invite">Copy invite link</button>')}<div class="list">${contacts.map((c) => `<article class="list-row">${avatar(c.name)}<div class="row-content"><h2>${esc(c.name)}</h2><p class="muted">${c.status === "accepted" ? c.agents.map((a) => esc(a.name)).join(" · ") || "No agents connected" : c.status === "pending" ? (c.incoming ? "Wants to connect" : "Request sent") : esc(c.status)}</p></div><div class="row-actions">${c.status === "pending" && c.incoming ? `<button data-action="accept-contact" data-id="${esc(c.id)}">Accept contact</button>` : ""}${c.status === "accepted" ? `<a class="button" href="/?ask=${encodeURIComponent(c.id)}">Ask ${esc(c.name)}</a><details class="row-menu"><summary aria-label="Manage ${esc(c.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(c.id)}">Block</button></details>` : ""}</div></article>`).join("") || '<div class="empty"><p>Your contacts will appear here.</p><a href="/workspace">Find someone in your workspace</a></div>'}</div><details class="disclosure"><summary>Add with a contact link</summary><form id="contact"><label>Contact link<input name="link" type="url" placeholder="Paste their Litecom link" required></label><button>Connect</button></form></details>`;
 }
+
 async function agentsPage() {
   const agents = await api("/api/agents");
   try {
@@ -475,10 +527,11 @@ async function agentsPage() {
   } catch {
     sessionStorage.removeItem("local-pairing");
   }
-  app.innerHTML = `<h1>Your agents</h1><p class="muted">One account. A separate connection for every agent.</p><section class="card" id="connect-local"><h2>Connect this computer</h2><p>Run one command in the folder your agent should work in. Litecom installs if needed, uses your installed agent, and starts in the background.</p><button class="primary" data-action="connect-local">Connect local agent</button><div id="local-command"></div></section>${agents.map((a) => `<section class="card"><div class="row"><h2>${esc(a.name)}</h2><span class="badge">${a.is_default ? "Default" : esc(a.kind)}</span></div><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : a.kind === "devin" ? "Connect Devin below to enable cloud requests" : "Waiting for a runner to connect"}</p><div class="actions">${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></div></section>`).join("")}<details class="card"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Adding a name creates a destination. It becomes available after you connect its runner.</p><button>Create agent</button></form></details><details class="card" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use Devin even when your computer is off. Get a personal access token or service-user key from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings → Devin API</a>. Your existing Devin plan is required.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">To reconnect, use the same agent name. The organization ID is at the top of Devin Settings → Devin API.</p></details><p class="muted subtitle">The server stores this token encrypted. Connecting checks access without starting a session. Each run needs your approval and uses your normal Devin billing.</p><button class="primary">Connect Devin</button></form></details>`;
+  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2>${esc(a.name)}${a.is_default && a.name.toLowerCase() !== "default" ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : "Not connected"}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
   showLocalCommand();
   await pollLocalConnection();
 }
+
 const shellQuote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const psQuote = (value) => "'" + value.replaceAll("'", "''") + "'";
 async function connectLocal() {
@@ -495,12 +548,15 @@ async function connectLocal() {
 function showLocalCommand() {
   const target = document.getElementById("local-command");
   if (!target || !localPairing) return;
+  document
+    .querySelectorAll("[data-action=connect-local]")
+    .forEach((button) => (button.hidden = true));
   const name = "local-" + localPairing.user_code.toLowerCase();
   const windows = /Windows/i.test(navigator.userAgent);
   const command = windows
     ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
     : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
-  target.innerHTML = `<label>${windows ? "PowerShell command" : "Terminal command"}<textarea id="connect-command" readonly rows="4" spellcheck="false">${esc(command)}</textarea></label><button data-action="copy-connect">Copy command</button><p class="muted subtitle">Paste and run it in your working folder. Keep this command private; it connects to your account and expires in 10 minutes. Requests still need your approval. If several agents are installed, Litecom uses the first detected agent; you can change it later with setup.</p><p id="connect-status" role="status">Waiting for you to run the command.</p>`;
+  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect this computer</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your installed agent and adds MCP. The agent runs in the background. Requests need your approval.</p><p>If several agents are installed, Litecom uses the first detected agent. You can change it later with setup.</p></details></section>`;
 }
 async function pollLocalConnection() {
   if (!localPairing || !document.getElementById("connect-status") || busy)
@@ -508,6 +564,9 @@ async function pollLocalConnection() {
   const current = localPairing;
   const target = document.getElementById("connect-status");
   if (Date.now() - current.started > 30 * 60 * 1000) {
+    document
+      .querySelectorAll("[data-action=connect-local]")
+      .forEach((button) => (button.hidden = false));
     target.textContent =
       "This connection check has stopped. Refresh to check again, or generate a new command.";
     return;
@@ -520,8 +579,7 @@ async function pollLocalConnection() {
     const messages = {
       waiting: "Waiting for you to run the command.",
       starting: "Finishing setup. Keep the terminal open.",
-      connected:
-        "Connected. Your agent is listening for requests. You can close the terminal.",
+      connected: "Connected. You can close the terminal.",
       offline:
         "Setup finished, but the worker is offline. Run litecom doctor on this computer.",
       expired: "This command expired. Click Connect local agent for a new one.",
@@ -530,11 +588,14 @@ async function pollLocalConnection() {
     };
     target.textContent = messages[result.status] || "Checking connection…";
     if (["connected", "expired", "disconnected"].includes(result.status)) {
+      document
+        .querySelectorAll("[data-action=connect-local]")
+        .forEach((button) => (button.hidden = false));
       sessionStorage.removeItem("local-pairing");
       localPairing = null;
       const panel = document.getElementById("local-command");
       if (panel)
-        panel.innerHTML = `<p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? '<p><a href="/?ask=me">Ask your agent</a> · <a href="/workspace">Find someone to ask</a></p>' : ""}`;
+        panel.innerHTML = `<div class="connection-result"><p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? '<a href="/?ask=me">Ask your agent →</a>' : ""}</div>`;
       if (result.status === "connected") {
         const row = [...document.querySelectorAll("[data-agent-status]")].find(
           (el) => el.dataset.agentStatus === current.agent_id,
@@ -557,7 +618,7 @@ async function connectPage(code) {
 }
 async function invitePage(code) {
   const p = await api(`/api/invite/${encodeURIComponent(code)}`);
-  app.innerHTML = `<section class="narrow"><h1>Connect with ${esc(p.name)}</h1><p>Once they accept, your agents can ask each other for things. Each request still needs approval.</p><button class="primary" data-action="use-invite" data-id="${esc(code)}">Send contact request</button></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Connect with ${esc(p.name)}</h1><p>Send a contact request to start asking their agents.</p><button class="primary" data-action="use-invite" data-id="${esc(code)}">Send contact request</button></section>`;
 }
 async function settingsPage() {
   const [connections, channels] = await Promise.all([
@@ -569,28 +630,22 @@ async function settingsPage() {
     pending: "Waiting to send",
     sending: "Sending",
     accepted_by_provider: "Last notice accepted by provider",
-    failed: "Delivery failed. Check the channel or reconnect.",
+    failed: "Delivery failed. Reconnect to try again.",
   };
   const rows = availableChannels()
     .map((kind) => {
       const channel = channels.find((c) => c.kind === kind && c.verified);
-      const instructions = capabilities.direct_approvals?.[kind]
-        ? {
-            phone: "Reply APPROVE and the request code by text.",
-            email: "Reply Approve to the request email.",
-            slack: "Tap Approve in the Slack message.",
-          }[kind]
-        : "Open the link in your notification to review.";
       const addAction = {
         phone: "enable-phone",
         email: "add-email",
         slack: "add-slack",
       }[kind];
-      return `<div class="card"><div class="row"><h3>${labels[kind]}</h3><span class="muted subtitle">${channel ? "Connected" : "Not connected"}</span></div><p class="muted subtitle">${instructions}</p>${channel?.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="${channel.delivery_status === "failed" ? "error" : "muted subtitle"}">${deliveryLabels[channel.delivery_status]}</p>` : ""}<div class="actions">${capabilities[kind] ? `<button data-action="${addAction}">${channel ? (kind === "phone" ? "Keep phone enabled" : "Reconnect " + labels[kind]) : "Connect " + labels[kind]}</button>` : '<p class="muted subtitle">Not enabled on this server.</p>'}${channel ? `<button data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>` : ""}</div></div>`;
+      return `<div class="list-row">${icon(kind)}<div class="row-content"><h3>${labels[kind]}</h3><p class="muted">${channel ? "Connected" : "Not connected"}</p>${channel?.delivery_status === "failed" ? `<p class="error">${deliveryLabels.failed}</p>` : ""}</div>${channel ? `<details class="row-menu"><summary aria-label="Manage ${labels[kind]}">Manage</summary>${kind !== "phone" ? `<button data-action="${addAction}">Reconnect ${labels[kind]}</button>` : ""}<button class="danger" data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>${channel.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="muted subtitle">${deliveryLabels[channel.delivery_status]}</p>` : ""}</details>` : `<button data-action="${addAction}">Connect ${labels[kind]}</button>`}</div>`;
     })
     .join("");
-  app.innerHTML = `<h1>Account</h1><p class="muted">Signed in as ${esc(profile.name)}.</p><h2>Approval channels</h2><p class="muted">Approve from a connected channel. One decision updates them all. Add or remove channels without changing your account. Reply STOP to stop texts.</p>${rows}${capabilities.development ? '<p class="banner">Local development: notifications print in the relay terminal.</p>' : ""}<h2>Connected apps</h2>${connections.map((c) => `<div class="card row"><span>${esc(c.label)}</span><button data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("")}<button data-action="logout">Sign out</button>`;
+  app.innerHTML = `${pageHeading("Settings")}<section class="section"><h2>Approval channels</h2><p class="muted">One approval updates every channel.</p><div class="list">${rows || '<p class="empty">No channels enabled. Ask your host to connect one.</p>'}</div>${capabilities.development ? '<p class="muted subtitle">Development mode · Notifications appear in the terminal.</p>' : ""}</section><section class="section"><h2>Connected apps</h2><div class="list">${connections.map((c) => `<div class="list-row"><div class="row-content">${esc(c.label)}</div><button class="quiet danger" data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("") || '<p class="muted">No connected apps.</p>'}</div></section><section class="section account-row"><div>${avatar(profile.name)}<span>${esc(profile.name)}</span></div><button class="quiet" data-action="logout">Sign out</button></section>`;
 }
+
 document.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (busy) return;

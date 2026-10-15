@@ -45,7 +45,7 @@ with sync_playwright() as p:
                 context.route('**/*',route); page=context.new_page(); page.on('pageerror',lambda e:errors.append(str(e)))
                 page.goto(origin+'/'); expect(page.get_by_label('Phone number')).to_have_count(0)
                 page.get_by_role('link',name='Continue with Google').click()
-                expect(page.get_by_role('heading',name='Where do you want to approve requests?')).to_be_visible()
+                expect(page.get_by_role('heading',name='Where should requests go?')).to_be_visible()
                 page.screenshot(path=str(shots/f'channels-{width}.png'),full_page=True)
                 page.get_by_role('button',name='Connect '+selected.title(),exact=True).click()
                 if selected=='phone':
@@ -59,7 +59,7 @@ with sync_playwright() as p:
                 else: assert state['email_confirmations']==1
                 expect(page.get_by_role('heading',name='Your workspace')).to_be_visible()
                 expect(page.get_by_role('heading',name='Ishaan')).to_be_visible()
-                expect(page.get_by_role('button',name='Send contact request')).to_be_visible()
+                expect(page.get_by_role('button',name='Add contact')).to_be_visible()
                 expect(page.get_by_role('button',name='Connect local agent')).to_be_visible()
                 page.reload(); expect(page.get_by_role('heading',name='Your workspace')).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

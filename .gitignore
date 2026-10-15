@@ -19,3 +19,6 @@ playwright-report/
 .preview/
 backups/
 __pycache__/
+
+# Generated local design context
+.superdesign/

@@ -8,12 +8,13 @@ from playwright.sync_api import sync_playwright, expect
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--binary',type=Path,default=Path('target/debug/litecom'))
+parser.add_argument('--fresh-installer',type=Path,help='Mirror directory containing cargo-dist installer and archive; exercises fresh installation without public hosting')
 args=parser.parse_args(); binary=args.binary.resolve()
 native_codex=shutil.which('codex'); assert native_codex, 'Install Codex for its real MCP configuration CLI'
 shots=Path('.preview/web-connect'); shots.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory(prefix='litecom-web-connect-') as folder:
     root=Path(folder); work=root/'work'; work.mkdir(); programs=root/'bin'; programs.mkdir()
-    (programs/'litecom').symlink_to(binary)
+    if not args.fresh_installer: (programs/'litecom').symlink_to(binary)
     (root/'codex').mkdir()
     (work/'notes.txt').write_text('Exact bytes from the requested agent.\n')
     fixture=programs/'codex'
@@ -26,6 +27,24 @@ out=sys.argv[sys.argv.index('--output-last-message')+1]
 Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Path('notes.txt').resolve())]}}))
 '''); fixture.chmod(0o700)
     env=dict(os.environ,LITECOM_HOME=str(root/'config'),CODEX_HOME=str(root/'codex'),PATH=str(programs)+os.pathsep+os.environ['PATH'])
+    if args.fresh_installer:
+        # Preserve the user's shell profile and installer receipt. Only the
+        # download boundary is mirrored; cargo-dist installs the real archive.
+        env.update(LITECOM_INSTALL_DIR=str(root/'installed'),LITECOM_NO_MODIFY_PATH='1',XDG_CONFIG_HOME=str(root/'xdg'))
+        real_curl=shutil.which('curl'); assert real_curl
+        mirror=args.fresh_installer.resolve()
+        curl=programs/'curl'
+        curl.write_text('#!/usr/bin/python3\n'+f"""import os,sys,shutil
+from pathlib import Path
+for arg in sys.argv[1:]:
+    if arg.startswith('https://github.com/BerriAI/litecom/releases/download/'):
+        source=Path({str(mirror)!r})/arg.rsplit('/',1)[-1]
+        if not source.is_file(): sys.exit(22)
+        if '-o' in sys.argv: shutil.copyfile(source,sys.argv[sys.argv.index('-o')+1])
+        else: sys.stdout.buffer.write(source.read_bytes())
+        sys.exit(0)
+os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
+"""); curl.chmod(0o700)
     with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
     origin=f'http://127.0.0.1:{port}'; log=root/'relay.log'; connection=None
     with log.open('w') as output, sync_playwright() as p:
@@ -54,6 +73,7 @@ Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Pat
             result=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
             assert result.returncode==0,(result.stdout,result.stderr)
             assert 'Listening for requests' in result.stdout
+            if args.fresh_installer: assert (root/'installed/litecom').is_file()
             expect(page.locator('#connect-status')).to_contain_text('Connected.',timeout=20000)
             assert not (work/'ran').exists(), 'Agent ran before approval'
             page.screenshot(path=str(shots/'connected-mobile.png'),full_page=True)
@@ -67,9 +87,9 @@ Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Pat
             other.get_by_label('Sign-in code').fill(re.findall(r'Your Litecom sign-in code is (\d{6})',log.read_text())[-1])
             other.get_by_role('button',name='Continue',exact=True).click()
             expect(other.get_by_role('heading',name='Your workspace')).to_be_visible()
-            page.goto(origin+'/workspace'); page.get_by_role('button',name='Send contact request').click()
+            page.goto(origin+'/workspace'); page.get_by_role('button',name='Add contact').click()
             other.reload(); other.get_by_role('button',name='Accept contact').click()
-            expect(other.get_by_text('Connected',exact=True)).to_be_visible()
+            expect(other.get_by_role('link',name='Ask Web connection test',exact=True)).to_be_visible()
             # Run the exact MCP command registered by native Codex setup.
             config=tomllib.loads((root/'codex/config.toml').read_text())
             entry=next(iter(config['mcp_servers'].values()))
@@ -105,7 +125,7 @@ Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Pat
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()
             assert Path(download.value.path()).read_bytes()==(work/'notes.txt').read_bytes()
-            print('PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
+            print(('Fresh cargo-dist install (mirrored downloads). ' if args.fresh_installer else '')+'PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
         finally:
             if connection: subprocess.run([binary,'--connection',connection,'service','remove'],env=env,capture_output=True,timeout=30)
             browser.close(); relay.terminate(); relay.wait(timeout=15)

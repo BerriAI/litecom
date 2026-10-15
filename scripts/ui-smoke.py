@@ -16,8 +16,8 @@ args.screenshots.mkdir(parents=True, exist_ok=True)
 with sync_playwright() as p:
     browser = p.chromium.launch(channel='chrome', headless=True)
     try:
-        alice = browser.new_context(viewport={'width': 1100, 'height': 850}, accept_downloads=True)
-        bob = browser.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True)
+        alice = browser.new_context(viewport={'width': 1100, 'height': 850}, accept_downloads=True, permissions=['clipboard-read','clipboard-write'])
+        bob = browser.new_context(viewport={'width': 390, 'height': 844}, accept_downloads=True, permissions=['clipboard-read','clipboard-write'])
         a, b = alice.new_page(), bob.new_page()
         errors = []
         for page in (a, b):
@@ -36,17 +36,20 @@ with sync_playwright() as p:
             assert codes, 'No local delivery code found.'
             page.get_by_label('Sign-in code').fill(codes[-1])
             page.get_by_role('button', name='Continue', exact=True).click()
-            expect(page.get_by_role('heading', name='Your inbox')).to_be_visible()
+            expect(page.get_by_role('heading', name='Inbox')).to_be_visible()
 
         login(a, 'Theo', '+1202'+suffix+'1')
         login(b, 'Moe', '+1202'+suffix+'2')
         a.goto(args.url+'/contacts')
-        link = a.get_by_label('Your contact link').input_value()
+        a.get_by_role('button', name='Copy invite link').click()
+        link = a.evaluate('navigator.clipboard.readText()')
         b.goto(link)
         b.get_by_role('button', name='Send contact request').click()
-        expect(b.get_by_role('heading', name='People you can ask')).to_be_visible()
+        expect(b.get_by_role('heading', name='Contacts')).to_be_visible()
         a.reload()
         a.get_by_role('button', name='Accept contact').click()
+        expect(a.get_by_role('link', name='Ask Moe', exact=True)).to_be_visible()
+        a.get_by_text('Manage', exact=True).click()
         expect(a.get_by_role('button', name='Block')).to_be_visible()
         a.goto(args.url)
         a.get_by_text('Ask an agent', exact=True).click()

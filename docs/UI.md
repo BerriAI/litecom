@@ -4,6 +4,10 @@ Use the same visual language as [LiteReview](https://github.com/BerriAI/literevi
 
 ## Components
 
+- Desktop uses a compact sidebar; mobile uses the same navigation above the page. Keep a single page heading and no repeated tagline.
+- People, agents, connections, and requests use shared rows with separators. Reserve bordered panels for a focused form or approval.
+- Channel setup uses one list of full-row buttons. Keep explanations to one line; put optional connection details behind a disclosure.
+
 - One primary action per task. Request approval is **Approve / Decline**. Approval authorizes the requested work and sending its result; there is no second sharing step.
 - Agent access details use native `details` / `summary`. Keep the request and its approval controls visible without expanding anything.
 - Buttons, inputs, selects, response panels, notices, status labels and disclosure controls use shared CSS rules. Do not add page-specific colors, radii or typefaces.
@@ -15,6 +19,6 @@ Use the same visual language as [LiteReview](https://github.com/BerriAI/literevi
 
 ## References
 
-The implementation uses [LiteLLM's UI skill](https://github.com/BerriAI/litellm-internal-skills/blob/main/litellm-based-ui-design/SKILL.md) and the [better-interface review](https://github.com/jakubkrehel/skills/blob/main/skills/better-interface/SKILL.md), including its accessibility, layout, writing, typography, colors and UI-polish checks. LiteReview is the selected visual reference; no private skill is required to contribute using the rules above.
+The implementation uses [LiteLLM's UI skill](https://github.com/BerriAI/litellm-internal-skills/blob/main/litellm-based-ui-design/SKILL.md) and the [better-interface review](https://github.com/jakubkrehel/skills/blob/main/skills/better-interface/SKILL.md), including its accessibility, layout, writing, typography, colors and UI-polish checks. The [Superdesign skill](https://github.com/superdesigndev/superdesign-skill/blob/main/skills/superdesign/SKILL.md) informed the source and design-system review; this redesign was implemented directly, without its hosted canvas. LiteReview is the selected visual reference; no private skill is required to contribute using the rules above.
 
 Run `scripts/ui-smoke.py`, `scripts/preview-smoke.py`, and `scripts/onboarding-smoke.py` as described in [Contributing](../CONTRIBUTING.md). Inspect the resulting desktop and mobile screenshots as well as the test result. Fixture delivery does not prove SMS or Slack delivery.

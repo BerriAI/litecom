@@ -157,9 +157,11 @@ done
                 expect(page.get_by_role('heading',name='Connect this agent?')).to_be_visible()
                 assert page.request.get(args.url+'/api/me').json()['id']==before
                 page.goto(args.url+'/settings')
+                page.get_by_label('Manage Email',exact=True).click()
                 expect(page.get_by_role('button',name='Turn off Email',exact=True)).to_be_visible()
                 page.get_by_role('button',name='Turn off Email',exact=True).click()
                 expect(page.get_by_role('button',name='Connect Email',exact=True)).to_be_visible()
+                page.get_by_label('Manage Phone',exact=True).click()
                 expect(page.get_by_role('button',name='Turn off Phone',exact=True)).to_be_visible()
             if not args.with_service:
                 worker = subprocess.Popen(prefix+['worker'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
@@ -205,7 +207,7 @@ done
             page.goto(args.url+'/settings')
             page.get_by_role('button',name='Disconnect',exact=True).click()
             terminal = Terminal(command, env, work)
-            terminal.until("Let's reconnect your phone account.")
+            terminal.until("Let's reconnect your account.")
             terminal.until('Where do you want to approve requests?')
             terminal.close()
             terminal = None

@@ -2,6 +2,12 @@
 
 Reviewed 2026-10-15. Scope: the bundled browser sign-in, pairing, inbox, request approval/result, contacts, agents, and approval-channel settings. Stack: server-rendered shell with plain JavaScript and shared CSS. Conventions: [UI.md](UI.md), LiteReview's UI guide, [LiteLLM UI skill](https://github.com/BerriAI/litellm-internal-skills/blob/main/litellm-based-ui-design/SKILL.md), and [better-interface](https://github.com/jakubkrehel/skills/blob/main/skills/better-interface/SKILL.md).
 
+## Simplification pass
+
+The 2026-10-15 redesign replaces separate cards with shared rows, uses a compact desktop sidebar, and keeps setup to a channel picker and one copyable command. Optional connection and account controls use native disclosures. Approval still shows the requested action and the effect of approving it.
+
+Verified with the Google/Phone/Slack/Email browser fixtures, the actual local relay and native background connection, and the preview accessibility audit at 320/390/768/1100 px and 200% text size. Browser reliability checks cover stale decisions, recipient switching, pagination, interrupted downloads, and edits during live updates. Provider APIs and native model replies remain fixtures in these checks.
+
 ## Coverage
 
 | Domain | Evidence inspected | Result |

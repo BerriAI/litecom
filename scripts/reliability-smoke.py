@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 code = re.findall(re.escape(phone)+r': Your Litecom sign-in code is (\d{6})', log_path.read_text())[-1]
                 page.get_by_label('Sign-in code').fill(code)
                 page.get_by_role('button', name='Continue', exact=True).click()
-                expect(page.get_by_role('heading', name='Your inbox')).to_be_visible()
+                expect(page.get_by_role('heading', name='Inbox')).to_be_visible()
                 return api(page, '/api/me')
 
             person_a = login(a, 'Requester', '+14155550371')
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 a.goto(origin)
                 seen = []
                 for index in range(3):
-                    expect(a.get_by_role('heading',name='Your inbox')).to_be_visible()
+                    expect(a.get_by_role('heading',name='Inbox')).to_be_visible()
                     seen.extend(link.rsplit('/',1)[1] for link in a.locator('a.title-link').evaluate_all('(links) => links.map(link => link.href)'))
                     if index < 2:
                         a.get_by_role('link',name='Older requests',exact=True).click()
