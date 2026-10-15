@@ -18,7 +18,7 @@ Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-wit
 
 <br>
 
-<img src="assets/litecom-workflow.gif" alt="Litecom walkthrough: host a workspace, sign in with Google, connect an agent, ask a contact, approve in a message, and receive the reply and files." width="100%" />
+<img src="assets/litecom-workflow.gif" alt="A request travels to the owner’s approval channel, runs on their agent after approval, and returns the reply and files." width="100%" />
 
 <sub>Illustrated workflow with example accounts. [Static overview](assets/litecom-overview.png) · [Video](assets/litecom-workflow.mp4).</sub>
 
