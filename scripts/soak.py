@@ -24,6 +24,7 @@ parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
 parser.add_argument('--seconds', type=int, default=180)
 parser.add_argument('--interval', type=float, default=5)
 parser.add_argument('--seed', type=int, default=20261015)
+parser.add_argument('--large-files', action='store_true', help='Also check 25 MiB/file, 100 MiB/request, and 100-file boundaries')
 parser.add_argument('--report', type=Path, default=Path('.preview/soak.json'))
 args = parser.parse_args()
 assert args.seconds > 0 and args.interval >= 0
@@ -134,6 +135,36 @@ with tempfile.TemporaryDirectory(prefix='litecom-soak-') as directory:
         b.call('/api/contacts/'+person_a['id']+'/accept', {})
         main_agent = b.call('/api/agents')[0]['id']
         runner = pair(b, main_agent)
+        if args.large_files:
+            large = make_request(a, main_agent, 'Maximum transfer sizes')
+            limit = 25*1024*1024
+            files = []
+            for index in range(4):
+                payload = bytes([index])*limit
+                entry = {'name': f'part-{index}.bin', 'media_type': 'application/octet-stream',
+                         'data': base64.b64encode(payload).decode()}
+                file = b.call('/api/tasks/'+large['id']+'/files', entry)
+                assert b.call('/api/tasks/'+large['id']+'/files', entry)['id'] == file['id']
+                files.append(file['id'])
+            b.call('/api/tasks/'+large['id']+'/files', {
+                'name': 'over-total.bin', 'media_type': 'application/octet-stream', 'data': 'eA=='}, expected=400)
+            b.call('/api/tasks/'+large['id']+'/files', {
+                'name': 'over-file.bin', 'media_type': 'application/octet-stream',
+                'data': base64.b64encode(b'x'*(limit+1)).decode()}, expected=400)
+            large = prepare(large, 'Four approved file snapshots', files)
+            decision(large)
+            for index, file_id in enumerate(files):
+                body = a.call('/api/files/'+file_id, raw=True)
+                assert body == bytes([index])*limit
+            many = make_request(a, main_agent, 'Maximum attachment count')
+            for index in range(100):
+                b.call('/api/tasks/'+many['id']+'/files', {
+                    'name': f'empty-{index}.txt', 'media_type': 'text/plain', 'data': ''})
+            b.call('/api/tasks/'+many['id']+'/files', {
+                'name': 'one-too-many.txt', 'media_type': 'text/plain', 'data': ''}, expected=400)
+            b.call('/api/tasks/'+many['id']+'/cancel', {})
+            counts['large_file_boundaries'] += 1
+            print('PASS: four exact 25 MiB transfers, idempotent reuploads, over-size rejection, and 100-file limit.', flush=True)
         offline_agent = b.call('/api/agents', {'name': 'Offline fixture', 'kind': 'local'})['id']
         offline = pair(b, offline_agent)
         # Leave two real leases without heartbeats while other scenarios run.

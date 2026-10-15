@@ -37,6 +37,15 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: cargo build --release --locked
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+      - name: Verify official A2A SDK interoperability
+        if: runner.os == 'Linux'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/a2a-sdk" --ignore-scripts --no-audit --no-fund @a2a-js/sdk@1.3.0
+          node scripts/a2a-smoke.mjs "$RUNNER_TEMP/a2a-sdk/node_modules/@a2a-js/sdk" target/release/litecom
       - name: Verify Windows background-task states
         if: runner.os == 'Windows'
         shell: pwsh

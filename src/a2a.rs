@@ -119,7 +119,7 @@ pub async fn rpc(
     };
     let id = serde_json::to_value(&request.id)?;
     let params = request.params.unwrap_or_else(|| json!({}));
-    let outcome = (|| -> Result<Value> {
+    let outcome: Result<Value> = async {
         destination(&state, &p, &owner, &agent)?;
         match request.method.as_str() {
             "SendMessage" => {
@@ -145,7 +145,9 @@ pub async fn rpc(
                     match part.content{PartContent::Text(text)=>texts.push(text),_=>return Err(Error::Invalid("This agent accepts text requests. Approved responses may contain files.".into()))}
                 }
                 let key = params.message.id.0;
-                let task = state.db()?.create_task(
+                let immediate = params.configuration.as_ref()
+                    .and_then(|config| config.return_immediately).unwrap_or(false);
+                let mut task = state.db()?.create_task(
                     &p,
                     NewTask {
                         owner_id: owner.clone(),
@@ -154,6 +156,15 @@ pub async fn rpc(
                         idempotency_key: key,
                     },
                 )?;
+                while !immediate && !task.status.terminal() {
+                    // Do not hold the database lock while another request works
+                    // or the owner reviews. Recheck authority on every read so a
+                    // revoked connection cannot receive a later private result.
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    let current = state.principal(&headers, true)?;
+                    destination(&state, &current, &owner, &agent)?;
+                    task = state.db()?.get_task(&current, &task.id)?;
+                }
                 // SendMessage's result is the Task/Message union wrapper in A2A v1.
                 Ok(json!({"task":project(task,&state.origin)?}))
             }
@@ -175,6 +186,9 @@ pub async fn rpc(
                     task.owner_id == owner && task.agent_id == agent,
                     "This task belongs to another agent.",
                 )?;
+                if task.status == Status::Cancelled {
+                    return Ok(serde_json::to_value(project(task, &state.origin)?)?);
+                }
                 if task.status.terminal() {
                     return Err(Error::Conflict("This task is already finished. Use Litecom's revoke control to revoke future download access.".into()));
                 }
@@ -185,7 +199,7 @@ pub async fn rpc(
                 "This endpoint supports SendMessage, GetTask, and CancelTask.".into(),
             )),
         }
-    })();
+    }.await;
     match outcome {
         Ok(value) => Ok(Json(json!({"jsonrpc":"2.0","id":id,"result":value}))),
         Err(Error::Invalid(message)) => Ok(failure(id, -32602, &message)),

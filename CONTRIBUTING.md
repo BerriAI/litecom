@@ -59,7 +59,16 @@ For browser recovery and a timed core-protocol stress test:
 python3 scripts/soak.py --seconds 3600
 ```
 
-Both start isolated development relays and clean them up. The browser test covers stale decisions, interrupted/corrupt downloads, lost receipts, and edits during background updates. The seeded soak test varies binary payloads, self/contact requests, approvals, cancellation, permission decisions, and relay restarts. Runs longer than 125 seconds also check real lease expiry. Agent operations and delivery are fixtures; neither test calls a model or sends messages. The soak report is saved locally in `.preview/soak.json`.
+Both start isolated development relays and clean them up. The browser test covers stale decisions, interrupted/corrupt downloads, lost receipts, edits during background updates, and out-of-order contact lookups. The seeded soak test varies binary payloads, self/contact requests, approvals, cancellation, permission decisions, and relay restarts. Runs longer than 125 seconds also check real lease expiry. Agent operations and delivery are fixtures; neither test calls a model or sends messages. The soak report is saved locally in `.preview/soak.json`. Add `--large-files` to exercise file-size, total-size, attachment-count, and idempotent-upload boundaries.
+
+To check interoperability with the official A2A JavaScript SDK:
+
+```sh
+npm install --prefix .litecom/a2a-sdk --ignore-scripts --no-audit --no-fund @a2a-js/sdk@1.3.0
+node scripts/a2a-smoke.mjs .litecom/a2a-sdk/node_modules/@a2a-js/sdk
+```
+
+This starts a local relay and checks authenticated discovery, immediate and blocking requests, retries, private artifacts, exact downloads, and cancellation. It uses fixture accounts and sends no external messages.
 
 To check the actual released Pi adapter against a simulated Pi backend, install it in an isolated test folder and run:
 

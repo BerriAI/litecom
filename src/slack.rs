@@ -86,11 +86,15 @@ impl Store {
             let key=hash(state);
             let row=self.db.query_row("SELECT user_id,credential_id,data,expires_at,phase FROM oauth_links WHERE state_hash=?",[&key],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Vec<u8>>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?))).optional()?.ok_or(Error::NotFound)?;
             require(row.0==p.user_id && row.1==p.credential_id,"Finish connecting Slack in the browser that started it.")?;
-            conflict(row.3>self.time() && row.4=="ready","This Slack connection expired or was already completed.")?;
+            conflict(row.3>self.time(),"This Slack connection expired. Start again from Settings.")?;
+            // A lost HTTP response must be safe to retry in the same browser.
+            // Completion never reapplies an old destination or reenables a channel.
+            if row.4 == "completed" { return Ok(()); }
+            conflict(row.4=="ready","Slack has not finished connecting.")?;
             let data:LinkData=self.vault.open(&row.2,&format!("slack-link:{key}"))?;
             let destination=data.destination.ok_or_else(||Error::Conflict("Slack has not finished connecting.".into()))?;
             self.verified_channel(p,"slack",&serde_json::to_string(&destination)?)?;
-            self.db.execute("DELETE FROM oauth_links WHERE state_hash=?",[&key])?;
+            self.db.execute("UPDATE oauth_links SET phase='completed',data=? WHERE state_hash=?",params![self.vault.seal(&LinkData{destination:None},&format!("slack-link:{key}"))?,key])?;
             Ok(())
         })
     }

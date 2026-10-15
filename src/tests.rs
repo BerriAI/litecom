@@ -1533,7 +1533,7 @@ fn tool_permission_expires_with_the_agent_lease() {
 }
 
 #[test]
-fn slack_linking_requires_the_original_human_session_and_single_use_state() {
+fn slack_linking_requires_the_original_human_session_and_single_use_exchange() {
     use crate::slack::{Slack, SlackDestination};
     let f = Fixture::new();
     assert!(f.store.begin_slack(&f.bw).is_err());
@@ -1566,7 +1566,7 @@ fn slack_linking_requires_the_original_human_session_and_single_use_state() {
             .is_err()
     );
     f.store.finish_slack_link(&f.b, &start.state).unwrap();
-    assert!(f.store.finish_slack_link(&f.b, &start.state).is_err());
+    f.store.finish_slack_link(&f.b, &start.state).unwrap();
     assert_eq!(f.store.channels(&f.b).unwrap()[0].kind, "slack");
     assert!(
         !serde_json::to_string(&f.store.channels(&f.b).unwrap())
@@ -1576,6 +1576,57 @@ fn slack_linking_requires_the_original_human_session_and_single_use_state() {
     let start = f.store.begin_slack(&f.b).unwrap();
     f.advance(601);
     assert!(f.store.take_slack_link(&start.state).is_err());
+}
+
+#[test]
+fn retrying_slack_completion_does_not_reenable_or_replace_a_channel() {
+    use crate::slack::SlackDestination;
+    let f = Fixture::new();
+    let start = f.store.begin_slack(&f.b).unwrap();
+    f.store.take_slack_link(&start.state).unwrap();
+    f.store
+        .stage_slack_link(
+            &start.state,
+            SlackDestination {
+                token: "first-token".into(),
+                refresh_token: None,
+                expires_at: None,
+                user: "U1".into(),
+                team: "T1".into(),
+                channel: "D1".into(),
+            },
+        )
+        .unwrap();
+    f.store.finish_slack_link(&f.b, &start.state).unwrap();
+    // The first response can be lost after its transaction commits.
+    f.store.finish_slack_link(&f.b, &start.state).unwrap();
+    let channel = f.store.channels(&f.b).unwrap().remove(0);
+    f.store.disable_channel(&f.b, &channel.id).unwrap();
+    f.store.finish_slack_link(&f.b, &start.state).unwrap();
+    assert!(!f.store.channels(&f.b).unwrap()[0].verified);
+    f.store
+        .verified_channel(&f.b, "slack", "new destination")
+        .unwrap();
+    f.store.finish_slack_link(&f.b, &start.state).unwrap();
+    let stored: Vec<u8> = f
+        .store
+        .db
+        .query_row(
+            "SELECT destination FROM channels WHERE id=?",
+            [&channel.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let destination: String = f
+        .store
+        .vault
+        .open(&stored, &format!("channel:{}", channel.id))
+        .unwrap();
+    assert_eq!(destination, "new destination");
+    assert!(f.store.finish_slack_link(&f.a, &start.state).is_err());
+    assert!(f.store.take_slack_link(&start.state).is_err());
+    f.advance(601);
+    assert!(f.store.finish_slack_link(&f.b, &start.state).is_err());
 }
 
 #[tokio::test]

@@ -412,21 +412,30 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", async (e) => {
   if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
+  if (e.target.form?.id === "ask") delete e.target.form.dataset.requestId;
   if (e.target.name === "owner") {
+    const form = e.target.form,
+      owner = e.target.value,
+      select = form.elements.agent;
+    select.innerHTML = '<option value="">Default agent</option>';
+    select.disabled = true;
     try {
       const agents = await api(
-        "/api/agents?owner_id=" + encodeURIComponent(e.target.value),
+        "/api/agents?owner_id=" + encodeURIComponent(owner),
       );
-      e.target.form.elements.agent.innerHTML =
+      if (!form.isConnected || form.elements.owner.value !== owner) return;
+      select.innerHTML =
         '<option value="">Default agent</option>' +
         agents
           .map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`)
           .join("");
     } catch (err) {
-      error(err);
+      if (form.isConnected && form.elements.owner.value === owner) error(err);
+    } finally {
+      if (form.isConnected && form.elements.owner.value === owner)
+        select.disabled = false;
     }
   }
-  if (e.target.form?.id === "ask") delete e.target.form.dataset.requestId;
 });
 document.addEventListener("click", async (e) => {
   const fileLink = e.target.closest("[data-download]");

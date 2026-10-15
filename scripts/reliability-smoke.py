@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright, expect
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
-parser.add_argument('--case', choices=['all', 'downloads', 'editing', 'decisions'], default='all')
+parser.add_argument('--case', choices=['all', 'downloads', 'editing', 'decisions', 'routing'], default='all')
 args = parser.parse_args()
 binary = args.binary.resolve()
 evidence = Path('.preview/reliability')
@@ -86,6 +86,31 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 d = task['draft']
                 return api(b, '/api/tasks/'+task['id']+'/decision', {
                     'version': d['version'], 'digest': d['digest'], 'decision': decision})
+
+            if args.case in ('all', 'routing'):
+                a.goto(origin)
+                a.get_by_text('Ask an agent', exact=True).click()
+                own_agents = api(a, '/api/agents')
+                other_agents = api(a, '/api/agents?owner_id='+person_b['id'])
+                held = []
+                a.route('**/api/agents?owner_id=*', lambda route: held.append(route))
+                who = a.locator('select[name="owner"]')
+                who.select_option(person_b['id'])
+                who.select_option(person_a['id'])
+                for attempt in range(100):
+                    if len(held) == 2:
+                        break
+                    a.wait_for_timeout(25)
+                assert len(held) == 2
+                current = next(route for route in held if route.request.url.endswith(person_a['id']))
+                stale = next(route for route in held if route.request.url.endswith(person_b['id']))
+                current.fulfill(json=own_agents)
+                a.wait_for_timeout(100)
+                stale.fulfill(json=other_agents)
+                a.wait_for_timeout(100)
+                expect(a.locator('select[name="agent"] option').nth(1)).to_have_attribute('value', own_agents[0]['id'])
+                a.unroute('**/api/agents?owner_id=*')
+                print('PASS: changing contacts quickly cannot replace the selected person\'s agents with a stale response.', flush=True)
 
             if args.case in ('all', 'decisions'):
                 task = draft(request('Test a late approval'), 'Original private response')
