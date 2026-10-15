@@ -2,23 +2,13 @@
 
 October 15, 2026 · [App](https://litecom.onrender.com) · [Source](https://github.com/BerriAI/litecom) · [Render service](https://dashboard.render.com/web/srv-db8hglo473hc73evp9eg)
 
-The redesigned app is deployed. New-user activation still needs Google credentials, a working approval channel, and published installers. The source repository is **Internal** and there is **no published native release** yet.
+The redesigned app is deployed. Google sign-in is configured and verified with a real Berri account. New-user activation still needs a working approval channel and published installers. The source repository is **Internal** and there is **no published native release** yet.
 
-## What Tin needs to do
+## Google sign-in is connected
 
-Send Tin this section; he can create the client himself.
+The OAuth client is created, its credentials are saved in Render, and a real Google sign-in reached Litecom’s approval-channel picker on October 15. No further client creation is needed.
 
-1. Open [Google Auth Platform](https://console.cloud.google.com/auth/clients) in a project he can manage. Check whether `berri-litecom` exists first; its creation was not confirmed, and the current browser account cannot access it.
-2. Configure the app name **Litecom**, a monitored support email, and its audience. Use **Internal** for a Berri-only pilot. Use **External** if people outside the organization must sign in, and complete the applicable publishing requirements.
-3. Create a **Web application** OAuth client with this exact authorized redirect URI:
-
-   ```text
-   https://litecom.onrender.com/api/auth/google/callback
-   ```
-
-   Litecom requests `openid email profile` only. No Gmail, Drive, service account, or JavaScript origin is needed. [Google's configuration reference](https://developers.google.com/identity/openid-connect/openid-connect#settingup).
-4. In the [Render service's Environment settings](https://dashboard.render.com/web/srv-db8hglo473hc73evp9eg/env), add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set `GOOGLE_ALLOWED_DOMAINS=berri.ai` for the Berri-only pilot; leaving it empty allows any verified Google account to join and see the workspace directory. Keep the secret in Render or an approved secret manager, not a chat or the repository.
-5. Save and deploy. Open Litecom in a fresh browser session and choose **Continue with Google**. Success means reaching the approval-channel picker under the correct name.
+The callback is `https://litecom.onrender.com/api/auth/google/callback`; Litecom requests only `openid email profile`. Access from outside Berri has not been verified. Before opening the workspace more broadly, review **Audience** in [Google Auth Platform](https://console.cloud.google.com/auth/audience) and the [workspace access settings](self-host.md#enable-google-sign-in). `GOOGLE_ALLOWED_DOMAINS` is currently unset.
 
 ## Turn on an approval channel
 
@@ -38,4 +28,4 @@ Slack's callbacks are prefilled; a workspace administrator may need to allow ins
 - Keep an encrypted backup outside the Render disk and exercise recovery. The verified pre-deploy backup at `/data/backups/before-ui-20261015` is on the same disk as the app. Follow [backup and restore](backup.md).
 - Resolve the remaining [release requirements](release-readiness.md), including account recovery/linking, retention/deletion, and generic outbound A2A agent routing. These are engineering gaps, not tasks for end users.
 
-The deployed build is `45da8fe` (`0.1.0-alpha.4`), on the approved 1 CPU / 2 GB / 100 GB service. Auto-deploy is off. Desktop/mobile UI, accessibility, contact/transfer, copied-command MCP setup, and real macOS background-service tests passed locally. Provider fixtures were used for Google, Slack, email, and deterministic agent responses; live outbound delivery remains unverified.
+The deployed build is `45da8fe` (`0.1.0-alpha.4`), on the approved 1 CPU / 2 GB / 100 GB service. Auto-deploy is off. Desktop/mobile UI, accessibility, contact/transfer, copied-command MCP setup, and real macOS background-service tests passed locally. Google sign-in also passes against the live provider. Slack, email, and deterministic agent responses use fixtures; live outbound delivery remains unverified.
