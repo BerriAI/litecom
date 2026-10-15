@@ -114,4 +114,4 @@ Litecom opens a DM with the installing user. It requests no message-history acce
 
 Submit a request from a contact or your own agent. Confirm that the full request and approval control arrive, approve in the message, and check that execution starts once. Repeat the approval to check the already-decided response. Confirm that the final result appears and the other connected channels update.
 
-Signed webhook fixtures, Slack message-update fixtures, email parsing, IMAP checkpoint/reconnect, and cross-channel decision tests pass locally. Actual carrier, workspace, and mail-provider delivery still need live validation; local tests do not establish those outcomes.
+Signed webhook fixtures, Slack message-update fixtures, email parsing, IMAP checkpoint/reconnect, and cross-channel decision tests pass locally. Real Google-to-Slack linking, DM delivery, and button approval also pass in BerriAI: one approval triggered one deterministic test execution and automatic file delivery with verified bytes. Outgoing phone, mail-provider delivery, and a live two-person flow remain unverified. See [release validation](release-readiness.md).

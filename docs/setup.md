@@ -42,7 +42,7 @@ These counts start on your host’s Litecom page. Google account selection, prov
 | Add a workspace contact | Add contact: **1 click** | Recipient clicks Accept contact once | **0** |
 | Approve an ordinary request | **1 Slack button** or **1 text/email reply** | None after channel connection | Requested reply for phone/email |
 
-The browser paths are tested at 320, 390, and 1100 px using Google/Slack provider fixtures. The copied-command path is tested with an already-installed binary, native Codex MCP configuration, a real macOS background service, a deterministic agent reply, and one approval. These checks do not establish live OAuth consent, message delivery, fresh release download, or Windows/Linux startup. See [release validation](release-readiness.md).
+The browser paths are tested at 320, 390, and 1100 px using provider fixtures. Real Google sign-in, Slack linking, and Slack button approval also pass on the hosted BerriAI workspace. The copied-command path passes with an already-installed binary, native Codex MCP configuration, a real macOS background service, a deterministic agent reply, and one approval. Fresh public release downloads, live phone/email delivery, and Windows/Linux startup remain unverified. See [release validation](release-readiness.md).
 
 ## Ask and receive
 
