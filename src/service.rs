@@ -358,6 +358,8 @@ fn windows_install_script(connection: &str, executable: &Path, home: &Path) -> R
          $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited; \
          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries \
              -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable; \
+         $existing = Get-ScheduledTask -TaskName {name} -ErrorAction SilentlyContinue; \
+         if ($existing) {{ Stop-ScheduledTask -InputObject $existing; }} \
          Register-ScheduledTask -TaskName {name} -Action $action -Trigger $trigger \
              -Principal $principal -Settings $settings -Force | Out-Null; \
          Start-ScheduledTask -TaskName {name}"

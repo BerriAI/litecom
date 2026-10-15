@@ -128,7 +128,7 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: "Test before packaging"
-        run: "cargo test --locked"
+        run: "cargo test --locked --profile dist --target ${{ matrix.targets[0] }}"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

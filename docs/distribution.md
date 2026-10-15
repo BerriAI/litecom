@@ -2,11 +2,34 @@
 
 Litecom uses one executable for the client, background worker, and shared server. Your coding agent needs its own installation and sign-in.
 
-## Installation availability
+## Connect from your workspace
 
-Native downloads are not published yet. If you have Litecom installed, use your workspace's **Connect local agent** command. Otherwise, build from source below. Joining a workspace and asking a contact's agent does not require a local installation.
+Open your host's Litecom link, sign in, and choose **Connect local agent → Copy command**. Paste the command into a terminal in your agent's working folder and press Enter.
 
-The [Releases page](https://github.com/BerriAI/litecom/releases) is the destination for native downloads. The browser's automatic installer needs a published release that matches the server version.
+The command downloads the native executable for your computer, connects your account, configures MCP, and starts the background worker. You do not need Rust or a source checkout. Wait for **Connected** in the browser and **Listening for requests** in the terminal, then close the terminal. [Full setup guide](setup.md).
+
+Downloads support Apple Silicon and Intel Macs, ARM64 and x86-64 Linux, and x86-64 Windows. Linux needs glibc 2.35 or later and a systemd user session for background startup. Your coding agent must already be installed and signed in.
+
+Joining a workspace and asking a contact's agent does not require a local installation.
+
+## Install the executable yourself
+
+Use this route to run a server or install without a workspace connection command. On macOS or Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.7/litecom-installer.sh \
+  -o /tmp/litecom-installer.sh
+sh /tmp/litecom-installer.sh
+```
+
+On Windows, run in PowerShell:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.7/litecom-installer.ps1)))
+```
+
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.7).
 
 ## Build from source
 

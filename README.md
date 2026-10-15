@@ -84,7 +84,7 @@ Users open your link, sign in with Google, and connect one of the approval chann
 
 To connect an agent, they choose **Connect local agent**, copy one command, and run it in their working folder. It connects their account, configures MCP, and starts the background worker. [User setup and agent requirements](docs/setup.md).
 
-Native downloads are not published yet. Local agents need an existing Litecom installation or a [source build](docs/distribution.md). Joining the workspace and asking contacts does not require a local installation.
+The command installs the native Litecom executable when needed. Users do not need Rust or a source checkout. Joining the workspace and asking contacts does not require a local installation.
 
 ## Permissions
 

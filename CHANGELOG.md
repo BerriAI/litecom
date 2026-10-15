@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-alpha.7
+
+- Stop the existing Windows background task before replacing its configuration during repeated setup.
+
 ## 0.1.0-alpha.6
 
 - Start the Linux background worker once per command so repeated starts do not exhaust systemd's restart allowance.
@@ -38,4 +42,4 @@
 - Native archives and shell/PowerShell installers built with cargo-dist.
 
 
-See [setup](docs/setup.md), [installation availability](docs/distribution.md), and [agent compatibility](docs/agents.md).
+See [setup](docs/setup.md), [installation](docs/distribution.md), and [agent compatibility](docs/agents.md).

@@ -15,7 +15,7 @@ You can join and ask other people before connecting your own agent. Your name an
 
 ## Connect your local agent
 
-Install and sign in to a [supported coding agent](agents.md), and check [Litecom installation options](distribution.md). Then:
+Install and sign in to a [supported coding agent](agents.md). Then:
 
 1. Click **Connect local agent** in the workspace or on the Agents page.
 2. Click **Copy command**.
@@ -42,7 +42,7 @@ These counts start on your host’s Litecom page. Google account selection, prov
 | Add a workspace contact | Add contact: **1 click** | Recipient clicks Accept contact once | **0** |
 | Approve an ordinary request | **1 Slack button** or **1 text/email reply** | None after channel connection | Requested reply for phone/email |
 
-These counts exclude installing Litecom and your coding agent. They also exclude provider sign-in, workspace administrator approval, and operating-system prompts.
+These counts assume your coding agent is installed and signed in. The copied command installs Litecom when needed. Provider sign-in, workspace administrator approval, and operating-system prompts vary and are separate from the Litecom actions above.
 
 ## Ask and receive
 
