@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.5
+
+- Sign in with Google, choose an approval channel, and find contacts in your workspace.
+- Connect an installed coding agent with a command from the browser. Setup adds MCP tools and starts the background worker.
+- Connect and reconnect a named local agent without changing another connection.
+- Approve requests from Slack messages with one decision for execution and result delivery.
+- Preserve native MCP configuration during setup, including disabled connections and malformed configuration.
+- Keep Windows background workers running on battery power without a fixed runtime cutoff.
+
 ## 0.1.0-alpha.3
 
 - Sign-in texts acknowledge the requested message and include opt-out instructions.
