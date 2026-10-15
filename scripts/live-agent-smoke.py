@@ -1,7 +1,7 @@
 """Live native-agent test. Uses the agent's account and normal model billing.
 
 Creates two local test accounts, uses a real native/ACP process, and verifies
-project instructions, a local file operation, sharing approval, and exact bytes.
+project instructions, a local file operation, approved result delivery, and exact bytes.
 No messages are sent and no native MCP configuration or startup service is added.
 Requires an installed, signed-in agent, Python 3, Playwright, and Chrome.
 """
@@ -169,11 +169,11 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
             task_url = requester.url
             task_id = task_url.rsplit('/', 1)[1]
             owner.goto(task_url)
-            expect(owner.get_by_role('button', name='Approve run', exact=True)).to_be_visible(timeout=15000)
+            expect(owner.get_by_role('button', name='Approve', exact=True)).to_be_visible(timeout=15000)
             assert not (work / 'result.txt').exists(), 'Agent changed files before run approval'
             owner.screenshot(path=str(evidence / 'run-mobile.png'), full_page=True)
             started = time.monotonic()
-            owner.get_by_role('button', name='Approve run', exact=True).click()
+            owner.get_by_role('button', name='Approve', exact=True).click()
             print('Run approved; waiting for the real agent.', flush=True)
             previous = None
             while time.monotonic() - started < args.timeout:
@@ -204,9 +204,9 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
                         action = 'approve-permission' if decision == 'approve' else 'decline-permission'
                         owner.locator(f'button[data-action="{action}"][data-id="{permission_id}"]').click()
                         permissions_reviewed.add(permission_id)
-                if task['status'] == 'awaiting_approval' and not task['draft'].get('action'):
+                if task['status'] == 'completed':
                     break
-                if task['status'] in ('failed', 'cancelled', 'expired', 'completed'):
+                if task['status'] in ('failed', 'cancelled', 'expired'):
                     raise AssertionError('Agent did not produce a reviewable result: ' + task['status'])
                 time.sleep(1)
             else:
@@ -219,10 +219,9 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
             expected = (str(sum(numbers)) + '\n').encode()
             assert (work / 'result.txt').read_bytes() == expected, 'Actual file operation produced incorrect bytes'
             hidden = requester.request.get(origin + '/api/tasks/' + task_id).json()
-            assert hidden['response'] is None and hidden['draft'] is None
-            expect(owner.get_by_role('button', name='Approve', exact=True)).to_be_visible(timeout=15000)
+            assert hidden['response'] is not None and hidden['draft'] is None
+            assert owner.get_by_role('button', name='Approve', exact=True).count()==0
             owner.screenshot(path=str(evidence / 'review-mobile.png'), full_page=True)
-            owner.get_by_role('button', name='Approve', exact=True).click()
             expect(requester.get_by_role('link', name='result.txt', exact=True)).to_be_visible(timeout=15000)
             with requester.expect_download() as download:
                 requester.get_by_role('link', name='result.txt', exact=True).click()
@@ -237,7 +236,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
             (evidence / 'summary.json').write_text(json.dumps(summary, indent=2))
             (evidence / 'summary.json').chmod(0o600)
             passed = True
-            print('PASS: real native agent, project instructions, verified local file operation, separate sharing approval, two-account download and receipt.', flush=True)
+            print('PASS: real native agent, project instructions, verified local file operation, single approval and automatic delivery, two-account download and receipt.', flush=True)
         finally:
             if task_url and not passed:
                 # Cancel through the owner surface before terminating the local worker.

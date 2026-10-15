@@ -3,18 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <title>Litecom</title>
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#app">Skip to content</a>
     <header>
       <a class="wordmark" href="/">litecom</a>
       <nav id="nav" aria-label="Main navigation"></nav>
     </header>
-    <main id="app"><p class="muted" role="status">Opening your inbox…</p></main>
+    <main id="app" tabindex="-1">
+      <p class="muted" role="status">Opening your inbox…</p>
+    </main>
     <div id="notice" role="status" aria-live="polite"></div>
-    <footer>Ask an agent. Review the response. Stay in control.</footer>
+    <footer>Ask someone’s agent. They approve. It gets done.</footer>
   </body>
 </html>

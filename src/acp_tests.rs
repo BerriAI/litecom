@@ -260,7 +260,7 @@ fn mock_agent(
 }
 
 #[tokio::test]
-async fn acp_exact_permission_uses_once_and_keeps_result_private() {
+async fn acp_exact_permission_uses_once_and_delivers_the_approved_result() {
     for decision in [Decision::Approve, Decision::Decline] {
         let h = Harness::new().await;
         let (client_io, agent_io) = tokio::io::duplex(65536);
@@ -330,7 +330,7 @@ async fn acp_exact_permission_uses_once_and_keeps_result_private() {
                 },
             )
             .unwrap();
-        assert_eq!(staged.status, Status::AwaitingApproval);
+        assert_eq!(staged.status, Status::Completed);
         assert!(
             h.state
                 .db()
@@ -338,7 +338,7 @@ async fn acp_exact_permission_uses_once_and_keeps_result_private() {
                 .get_task(&h.requester, &h.work.task_id)
                 .unwrap()
                 .response
-                .is_none()
+                .is_some()
         );
         peer.abort();
     }

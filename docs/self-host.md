@@ -2,7 +2,7 @@
 
 This is the operator path. People connecting to your server only need its URL; they do not configure a database, messaging provider, or GitHub integration.
 
-**Development release:** the deployment files build the current source. Public images and a production release are not published. Check [release readiness](release-readiness.md) before exposing real user data.
+The Compose deployment builds the source and adds HTTPS. Public container images and a hosted default are not published. [Deployment validation](release-readiness.md) records the checks completed.
 
 ## Start with Docker Compose
 
@@ -30,7 +30,7 @@ Open `https://YOUR-DOMAIN` using the domain you configured. Sign in with your ph
 litecom setup --relay https://YOUR-DOMAIN
 ```
 
-Ask your own agent for a short reply. Approve its run, then review and approve the result. Seeing that reply verifies the useful path beyond container health. Real message delivery and your chosen agent's login must work for this check to pass.
+Ask your own agent for a short reply. Approve once in a connected channel, then receive the result. Seeing that reply verifies the useful path beyond container health. Real message delivery and your chosen agent's login must work for this check to pass.
 
 The deployment has two services: **Litecom**, which stores its SQLite database and encryption key in the `relay-data` volume, and **Caddy**, which stores certificates in its own volumes. Local agents continue to run on their owners' computers. The server does not gain access to those computers' files by being deployed.
 

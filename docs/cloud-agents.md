@@ -22,7 +22,7 @@ litecom ask Moe "Find the release notes and attach the final PDF." --agent Devin
 
 The owner reviews the request and connected Devin identity, then selects **Approve run**. A session starts with that organization’s existing context and default security settings. It can perform actions within its access; normal Devin charges apply.
 
-If Devin needs a reply or permission, the owner follows **Open in Devin** on the request. When it finishes, Litecom prepares its reply and selected attachments for a separate sharing approval. Only then can the requester read and download them. Private session links stay with the owner.
+If Devin needs a reply or permission, the owner follows **Open in Devin** on the request. When it finishes, Litecom sends its final reply and selected attachments to the requester under the original approval. No second sharing approval is needed. Private session links stay with the owner.
 
 ## If interrupted
 

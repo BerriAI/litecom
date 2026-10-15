@@ -85,7 +85,7 @@ pub async fn run(no_browser: bool) -> Result<()> {
         .await?;
     let url = format!("{origin}/request/{}", task.id);
     println!(
-        "\nYour first request is ready.\n{url}\n\nApprove run → review the reply → Approve → download welcome.txt.\nPress Ctrl+C to stop. Preview accounts and files are removed on exit.\n"
+        "\nYour first request is ready.\n{url}\n\nApprove → your agent does the work → download welcome.txt.\nPress Ctrl+C to stop. Preview accounts and files are removed on exit.\n"
     );
     if !no_browser {
         let _ = onboarding::open_browser(&url);

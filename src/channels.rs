@@ -36,6 +36,8 @@ impl Store {
             )
             .optional()?;
         let channel = existing.unwrap_or_else(id);
+        self.db
+            .execute("DELETE FROM channel_actions WHERE channel_id=?", [&channel])?;
         self.db.execute("UPDATE deliveries SET state='cancelled' WHERE channel_id=? AND state IN ('pending','sending')",[&channel])?;
         self.db.execute(
             "UPDATE deliveries SET remote_id=NULL WHERE channel_id=?",

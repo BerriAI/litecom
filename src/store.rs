@@ -11,6 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod channel_actions;
 mod cloud;
 mod files;
 mod permissions;
@@ -696,6 +697,10 @@ impl Store {
                 "UPDATE tasks SET data=? WHERE id=?",
                 params![self.vault.seal(&task, &format!("task:{task_id}"))?, task_id],
             )?;
+            self.db.execute(
+                "UPDATE agents SET last_seen_at=? WHERE id=?",
+                params![self.time(), task.view.agent_id],
+            )?;
             Ok(task.view.status)
         })
     }
@@ -722,8 +727,8 @@ impl Store {
         self.save_draft(p, task_id, lease, input, false)
     }
 
-    /// Execution approval never authorizes sharing new output. Stage a new immutable
-    /// version under the same live execution lease and require a fresh human decision.
+    /// Commit the final result under the live execution lease. Proposals explicitly
+    /// approved for execution and delivery release it in the same transaction.
     pub fn stage_result(
         &self,
         p: &Principal,
@@ -781,6 +786,14 @@ impl Store {
                     "Resolve the pending tool permissions before returning a result.",
                 )?;
             }
+            let share_result = execution_result
+                && task.decision == Some(Decision::Approve)
+                && task
+                    .view
+                    .draft
+                    .as_ref()
+                    .and_then(|draft| draft.action.as_ref())
+                    .is_some_and(Action::shares_result);
             let mut attachments = vec![];
             for id in &input.attachment_ids {
                 let artifact = self.artifact(id)?;
@@ -812,18 +825,41 @@ impl Store {
                 version: task.version,
                 digest,
             });
-            task.view.status = Status::AwaitingApproval;
+            task.view.status = if share_result {
+                Status::Completed
+            } else {
+                Status::AwaitingApproval
+            };
             if execution_result {
                 task.view.receipt = Some(Receipt {
                     outcome: Outcome::Succeeded,
-                    summary: "The agent finished. Review the reply and files before sharing them."
-                        .into(),
+                    summary: if share_result {
+                        "The agent finished and sent the result."
+                    } else {
+                        "The agent finished. Review the reply and files before sharing them."
+                    }
+                    .into(),
                     urls: vec![],
                 });
+                if share_result && let Some(progress) = task.view.execution.as_mut() {
+                    progress.message = "The agent finished and sent the result.".into();
+                    progress.needs_attention = false;
+                }
             }
-            task.decision = None;
+            task.decision = if share_result {
+                Some(Decision::Approve)
+            } else {
+                None
+            };
             Self::clear_lease(&mut task);
-            self.save(&mut task, "awaiting_approval")?;
+            self.save(
+                &mut task,
+                if share_result {
+                    "completed"
+                } else {
+                    "awaiting_approval"
+                },
+            )?;
             self.projection(p, task)
         })
     }
@@ -982,62 +1018,71 @@ impl Store {
             self.projection(p, task)
         })
     }
-    pub fn delivery_title(
-        &self,
-        delivery: &crate::notifications::Delivery,
-    ) -> Result<&'static str> {
+    pub fn delivery_title(&self, delivery: &crate::notifications::Delivery) -> Result<String> {
         // Read current state when sending, including retries. An old event must
         // not tell the user to approve work that is already decided or cancelled.
         let task = self.task(&delivery.task_id)?;
-        Ok(
-            if task.view.expired(self.time())
-                && !matches!(
-                    task.view.status,
-                    Status::Executing | Status::CancelRequested
-                )
-            {
-                "The request expired."
-            } else if task.view.revoked_at.is_some() && task.view.status == Status::Completed {
-                "Access to this response was revoked."
-            } else {
-                match task.view.status {
-                    Status::Queued | Status::Preparing => {
-                        "A new request is waiting for your agent."
-                    }
-                    Status::AwaitingApproval => "A request is ready for your review.",
-                    Status::Approved => "The run was approved and is waiting for the agent.",
-                    Status::Executing
-                        if !self.pending_permissions(&delivery.task_id)?.is_empty() =>
-                    {
-                        "An agent is waiting for your approval of a tool operation."
-                    }
-                    Status::Executing
-                        if task
-                            .view
-                            .execution
-                            .as_ref()
-                            .is_some_and(|p| p.needs_attention) =>
-                    {
-                        "Your cloud agent needs attention."
-                    }
-                    Status::Executing => "The approved agent is working.",
-                    Status::CancelRequested => {
-                        "Cancellation is waiting for the agent to confirm it stopped."
-                    }
-                    Status::Completed if delivery.kind == "download_verified" => {
-                        "A file download was verified by the recipient."
-                    }
-                    Status::Completed if task.view.received_at.is_some() => {
-                        "The response was received."
-                    }
-                    Status::Completed => "The response was approved and is available.",
-                    Status::Declined => "The request was declined.",
-                    Status::Cancelled => "The request was cancelled.",
-                    Status::Failed => "A request needs your attention.",
-                    Status::Expired => "The request expired.",
+        if task.view.status == Status::AwaitingApproval && !task.view.expired(self.time()) {
+            let requester = self.profile_by_id(&task.view.requester_id)?;
+            let words = task
+                .view
+                .request
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let mut preview = words.chars().take(180).collect::<String>();
+            if preview.len() < words.len() {
+                preview.push('…');
+            }
+            return Ok(format!(
+                "{} asks: “{preview}” Approve or decline:",
+                requester.name
+            ));
+        }
+        Ok(if task.view.expired(self.time())
+            && !matches!(
+                task.view.status,
+                Status::Executing | Status::CancelRequested
+            )
+        {
+            "The request expired."
+        } else if task.view.revoked_at.is_some() && task.view.status == Status::Completed {
+            "Access to this response was revoked."
+        } else {
+            match task.view.status {
+                Status::Queued | Status::Preparing => "A new request is waiting for your agent.",
+                Status::AwaitingApproval => "A request is ready for your review.",
+                Status::Approved => "The run was approved and is waiting for the agent.",
+                Status::Executing if !self.pending_permissions(&delivery.task_id)?.is_empty() => {
+                    "An agent is waiting for your approval of a tool operation."
                 }
-            },
-        )
+                Status::Executing
+                    if task
+                        .view
+                        .execution
+                        .as_ref()
+                        .is_some_and(|p| p.needs_attention) =>
+                {
+                    "Your cloud agent needs attention."
+                }
+                Status::Executing => "The approved agent is working.",
+                Status::CancelRequested => {
+                    "Cancellation is waiting for the agent to confirm it stopped."
+                }
+                Status::Completed if delivery.kind == "download_verified" => {
+                    "A file download was verified by the recipient."
+                }
+                Status::Completed if task.view.received_at.is_some() => {
+                    "The response was received."
+                }
+                Status::Completed => "The response was approved and is available.",
+                Status::Declined => "The request was declined.",
+                Status::Cancelled => "The request was cancelled.",
+                Status::Failed => "A request needs your attention.",
+                Status::Expired => "The request expired.",
+            }
+        }
+        .to_owned())
     }
     pub fn events(&self, p: &Principal, after: i64) -> Result<Vec<Event>> {
         Ok(self.db.prepare("SELECT e.sequence,e.task_id,e.kind,e.created_at FROM events e JOIN tasks t ON t.id=e.task_id WHERE e.sequence>? AND (t.requester_id=? OR t.owner_id=?) ORDER BY e.sequence LIMIT 100")?.query_map(params![after,p.user_id,p.user_id],|r|Ok(Event{sequence:r.get(0)?,task_id:r.get(1)?,kind:r.get(2)?,created_at:r.get(3)?}))?.collect::<std::result::Result<Vec<_>,_>>()?)

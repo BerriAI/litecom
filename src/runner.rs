@@ -1,5 +1,5 @@
 //! Native agents are launched only after a human approves their actual access.
-//! Their output is then staged for a separate sharing decision.
+//! Approval covers the requested work and delivery of its final result.
 use crate::{client::Client, config, model::*};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -132,12 +132,12 @@ impl RunnerConfig {
         Action::Harness {
             title: format!("Run {} for this request", self.agent.name()),
             description: match self.agent {
-                NativeAgent::Codex => "Codex can read local files and edit the selected folder. Your existing context, hooks, and connected tools are available; those tools keep their access to external accounts. Review the reply and files before sharing.".into(),
-                NativeAgent::Claude => "Use Claude Code with its saved permissions, context, hooks, and connected tools. It may read or change local and external data. Review the reply and files before sharing.".into(),
-                NativeAgent::CodexAcp => "Use Codex through its ACP adapter, with your existing login, configuration, and tools. The adapter's selected mode controls which operations ask for permission; those requests are sent to you through Litecom. Review the reply and files before sharing.".into(),
-                NativeAgent::Pi => "Use pi through pi-acp with its existing model, project instructions, extensions, skills, and tools. It may read or change local and external data as your computer account. ACP confirmation requests are sent to you; tools that do not ask retain their native access. Review the reply and files before sharing.".into(),
-                NativeAgent::OpenClaw => "Use your configured OpenClaw gateway and its existing agent, context, and tools. Its configured workspace and permissions apply; the folder below is where Litecom collects local attachments. New ACP permission requests are sent to you. Review the reply and files before sharing.".into(),
-                _ => "Use this ACP agent with its native context and tools. It may read or change local and external data under its saved permissions. New ACP permission requests are sent to you for one-time approval. Review the reply and files before sharing.".into(),
+                NativeAgent::Codex => "Codex can read local files and edit the selected folder. Your existing context, hooks, and connected tools are available; those tools keep their access to external accounts. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::Claude => "Use Claude Code with its saved permissions, context, hooks, and connected tools. It may read or change local and external data. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::CodexAcp => "Use Codex through its ACP adapter, with your existing login, configuration, and tools. The adapter's selected mode controls which operations ask for permission; those requests are sent to you through Litecom. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::Pi => "Use pi through pi-acp with its existing model, project instructions, extensions, skills, and tools. It may read or change local and external data as your computer account. ACP confirmation requests are sent to you; tools that do not ask retain their native access. The final reply and requested files will be sent to the requester automatically.".into(),
+                NativeAgent::OpenClaw => "Use your configured OpenClaw gateway and its existing agent, context, and tools. Its configured workspace and permissions apply; the folder below is where Litecom collects local attachments. New ACP permission requests are sent to you. The final reply and requested files will be sent to the requester automatically.".into(),
+                _ => "Use this ACP agent with its native context and tools. It may read or change local and external data under its saved permissions. New ACP permission requests are sent to you for one-time approval. The final reply and requested files will be sent to the requester automatically.".into(),
             },
             runner: self.agent.command().into(),
             executable: self.executable.to_string_lossy().into(),
@@ -157,6 +157,7 @@ impl RunnerConfig {
                 "File attachments must resolve inside the selected folder".into(),
             ],
             acting_account: format!("Your locally signed-in {} account", self.agent.name()),
+            share_result: true,
         }
     }
 }
@@ -250,7 +251,7 @@ fn reply_schema() -> Value {
 }
 pub(crate) fn prompt(work: &WorkItem) -> String {
     format!(
-        "You are handling a Litecom request which your account owner has approved for execution. Use your existing context and permitted tools. The request is supplied as JSON data below. Do not send the reply or attachments to the requester through another channel; return them to Litecom for the owner's separate sharing review. Describe what you actually accomplished, including permission denials or failures. Return the required JSON object: text is the full proposed reply; files contains absolute paths to requested regular files inside the current working folder. Do not include unrelated files, credentials, or process logs. Do not start detached background processes.\n\nRequest: {}",
+        "You are handling a Litecom request which your account owner has approved for execution and delivery of its result. Use your existing context and permitted tools only for this request. The request is supplied as JSON data below. Do not send the reply or attachments to the requester through another channel; return them to Litecom for delivery to the requester. Describe what you actually accomplished, including permission denials or failures. Return the required JSON object: text is the full proposed reply; files contains absolute paths to requested regular files inside the current working folder. Do not include unrelated files, credentials, or process logs. Do not start detached background processes.\n\nRequest: {}",
         serde_json::to_string(&work.request).expect("string serialization")
     )
 }
@@ -458,6 +459,18 @@ pub(crate) async fn handle_in(
         bail!(
             "The agent or folder changed after approval. Create a new request to approve the current settings."
         );
+    }
+    // The work item is only a snapshot. Confirm its execution authority before
+    // starting any native process, including hooks run during agent startup.
+    let status: Status = client
+        .post(
+            &format!("/api/tasks/{}/heartbeat", work.task_id),
+            json!({"lease": work.lease}),
+        )
+        .await
+        .context("Could not verify approval to run this request.")?;
+    if status != Status::Executing {
+        bail!("This request is no longer approved to run.");
     }
     config::private_dir(runs)?;
     let dir = tempfile::Builder::new()

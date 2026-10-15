@@ -185,6 +185,7 @@ async fn run(cli: Cli) -> Result<()> {
             );
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let notifications = tokio::spawn(litecom::notifications::run(state.clone()));
+            let email_replies = tokio::spawn(litecom::email_replies::run(state.clone()));
             let cloud = tokio::spawn(litecom::cloud::run(state.clone()));
             eprintln!(
                 "Litecom relay · {public_url}\nData: {}{}",
@@ -199,6 +200,7 @@ async fn run(cli: Cli) -> Result<()> {
                 .with_graceful_shutdown(shutdown())
                 .await?;
             notifications.abort();
+            email_replies.abort();
             cloud.abort();
         }
         Command::Backup { data, output } => {

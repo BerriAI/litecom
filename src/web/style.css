@@ -1,28 +1,53 @@
+@font-face {
+  font-family: "Geist Variable";
+  src: url("/fonts/geist.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  src: url("/fonts/geist-mono.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+/* Shared LiteReview family tokens. See docs/UI.md. */
 :root {
   font-family:
-    Inter,
-    ui-sans-serif,
+    "Geist Variable",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  color: #202426;
-  background: #fafaf8;
-  font-synthesis: none;
+  color-scheme: light;
   font-size: 16px;
-  line-height: 1.5;
-  --line: #dedfda;
-  --muted: #666e6b;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  --background: #fff;
+  --foreground: #272b37;
+  --line: #eeeeee;
+  --border: #858791;
+  --muted: #666976;
   --card: #fff;
-  --accent: #176547;
-  --tint: #edf5ef;
-  --danger: #a62d2d;
+  --accent: #5b3fd1;
+  --accent-hover: #4e34ba;
+  --accent-foreground: #fff;
+  --tint: #f6f6f6;
+  --danger: #a3323b;
+  --danger-background: #fff6f6;
+  --success: #287e4e;
+  --radius: 6px;
+  color: var(--foreground);
+  background: var(--background);
 }
+
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
+  font-size: 0.875rem;
 }
 header,
 main,
@@ -39,9 +64,9 @@ header {
   border-bottom: 1px solid var(--line);
 }
 .wordmark {
-  font-size: 24px;
-  font-weight: 750;
-  letter-spacing: -1px;
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.04em;
   text-decoration: none;
   color: inherit;
 }
@@ -55,7 +80,7 @@ a {
   text-underline-offset: 3px;
 }
 nav a {
-  font-size: 14px;
+  font-size: 0.875rem;
   text-decoration: none;
 }
 main {
@@ -63,18 +88,21 @@ main {
   min-height: 70vh;
 }
 h1 {
-  font-size: 32px;
+  font-size: 1.75rem;
+  font-weight: 500;
   line-height: 1.2;
-  letter-spacing: -0.8px;
+  letter-spacing: -0.025em;
   margin: 0 0 12px;
 }
 h2 {
-  font-size: 21px;
-  letter-spacing: -0.3px;
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
   margin: 0 0 10px;
 }
 h3 {
-  font-size: 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
   margin: 0 0 8px;
 }
 p {
@@ -92,7 +120,7 @@ footer {
 .card {
   padding: 24px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--card);
   margin: 16px 0;
 }
@@ -117,10 +145,11 @@ button,
 .button {
   font: inherit;
   cursor: pointer;
-  font-weight: 600;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 10px 16px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  min-height: 40px;
   text-decoration: none;
   background: var(--card);
   color: inherit;
@@ -130,7 +159,7 @@ button.primary,
 .button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: white;
+  color: var(--accent-foreground);
 }
 button.danger {
   color: var(--danger);
@@ -145,9 +174,10 @@ textarea {
   display: block;
   width: 100%;
   font: inherit;
+  min-width: 0;
   color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 11px 12px;
   background: var(--card);
   margin-top: 6px;
@@ -158,8 +188,8 @@ textarea {
 }
 label {
   display: block;
-  font-size: 14px;
-  font-weight: 550;
+  font-size: 0.875rem;
+  font-weight: 500;
   margin: 16px 0;
 }
 input[type="radio"],
@@ -174,7 +204,7 @@ fieldset {
   margin: 20px 0;
 }
 legend {
-  font-weight: 600;
+  font-weight: 500;
 }
 .choices {
   display: flex;
@@ -182,7 +212,8 @@ legend {
   flex-wrap: wrap;
 }
 .choices label {
-  padding: 10px 16px;
+  padding: 8px 12px;
+  min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
   margin: 8px 0;
@@ -192,11 +223,11 @@ legend {
   margin: 10px auto;
 }
 .badge {
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 4px 9px;
   background: var(--tint);
-  color: var(--accent);
-  border-radius: 20px;
+  color: var(--muted);
+  border-radius: 4px;
   white-space: nowrap;
 }
 pre,
@@ -206,10 +237,10 @@ pre,
   word-break: break-word;
 }
 pre {
-  font-size: 13px;
+  font-size: 0.8125rem;
   background: var(--tint);
   padding: 16px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   max-height: 380px;
   overflow: auto;
 }
@@ -217,8 +248,8 @@ pre {
   margin: 16px 0;
 }
 .operation-fields dt {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: 500;
   color: var(--muted);
 }
 .operation-fields dd {
@@ -252,16 +283,16 @@ code {
 }
 .error {
   color: var(--danger);
-  background: #fff1ee;
-  border-radius: 7px;
+  background: var(--danger-background);
+  border-radius: var(--radius);
   padding: 12px;
 }
 .banner {
   background: var(--tint);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 12px;
   margin: 12px 0;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 #notice {
   position: fixed;
@@ -270,19 +301,19 @@ code {
   transform: translateX(-50%);
   max-width: min(600px, 90vw);
   border-radius: 8px;
-  background: #202426;
-  color: white;
+  background: var(--foreground);
+  color: var(--accent-foreground);
   padding: 12px 20px;
   display: none;
-  box-shadow: 0 4px 20px #0002;
+  border: 1px solid var(--border);
   z-index: 2;
 }
 footer {
-  font-size: 13px;
+  font-size: 0.8125rem;
   border-top: 1px solid var(--line);
 }
 :focus-visible {
-  outline: 3px solid #66a68c;
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 details {
@@ -292,24 +323,22 @@ summary {
   cursor: pointer;
 }
 .code {
-  font-family: ui-monospace, monospace;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
   font-size: 24px;
   letter-spacing: 3px;
 }
 .preview-label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 .title-link {
-  font-weight: 600;
+  font-weight: 500;
   color: inherit;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 .subtitle {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 .card p:last-child {
   margin-bottom: 0;
@@ -322,6 +351,8 @@ summary {
   }
   header {
     align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
   }
   nav {
     gap: 12px;
@@ -330,7 +361,7 @@ summary {
     padding-top: 30px;
   }
   h1 {
-    font-size: 28px;
+    font-size: 1.5rem;
   }
   .card {
     padding: 18px;
@@ -348,29 +379,6 @@ summary {
     padding: 8px 12px;
   }
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #e8ebe8;
-    background: #171a18;
-    --line: #363c38;
-    --muted: #a1aaa4;
-    --card: #202521;
-    --accent: #94d1ad;
-    --tint: #293b30;
-    --danger: #ffaaa0;
-  }
-  button.primary,
-  .button.primary {
-    color: #132019;
-  }
-  .error {
-    background: #392421;
-  }
-  #notice {
-    background: #e8ebe8;
-    color: #171a18;
-  }
-}
 
 p,
 h1,
@@ -382,4 +390,95 @@ label,
 .card,
 .row > * {
   min-width: 0;
+}
+
+/* Every form and action uses these same states. */
+button,
+.button {
+  max-width: 100%;
+}
+strong {
+  font-weight: 500;
+}
+input,
+select,
+textarea {
+  accent-color: var(--accent);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+pre,
+code {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+}
+.prose {
+  max-width: 70ch;
+}
+summary {
+  padding-block: 8px;
+}
+nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+}
+nav a[aria-current="page"] {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.badge[data-status="completed"] {
+  color: var(--success);
+}
+.badge[data-status="failed"] {
+  color: var(--danger);
+}
+.skip-link {
+  position: absolute;
+  inset-inline-start: -9999px;
+}
+.skip-link:focus {
+  inset-inline-start: 20px;
+  inset-block-start: 12px;
+  padding: 12px;
+  background: var(--background);
+  z-index: 3;
+}
+@media (hover: hover) {
+  button:not(:disabled):hover,
+  .button:hover {
+    background: var(--tint);
+  }
+  button.primary:not(:disabled):hover,
+  .button.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+  a:hover {
+    color: var(--accent);
+  }
+}
+@media (max-width: 560px), (pointer: coarse) {
+  button,
+  .button,
+  input,
+  select,
+  summary {
+    min-height: 44px;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 1rem;
+  }
+  nav a {
+    min-height: 44px;
+  }
+}
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
 }

@@ -1,12 +1,12 @@
 # Security model
 
-Litecom is under development and has not had an independent security review. A production release is gated by [release readiness](docs/release-readiness.md).
+Litecom has not had an independent security review. [Release evidence](docs/release-readiness.md) records the checks completed and outstanding.
 
 CI checks Rust dependencies against the RustSec advisory database and the repository's license/source policy. Release archives and the container include generated third-party notices. These automated checks do not establish that the application, external agents, or container operating system have no vulnerabilities.
 
 ## Authority
 
-A verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Human changes require an authenticated browser session, matching origin, and a session-bound CSRF token. Agent bearer credentials cannot approve responses, pair other devices, add contacts, or change account settings.
+A verified phone challenge establishes an account. Browser sessions are separate from device and agent credentials. Browser changes require an authenticated session, matching origin, and a session-bound CSRF token. Direct approvals require a provider-verified sender and an opaque capability bound to the exact task and proposal. SMS uses Twilio signatures and the verified phone; Slack uses signed callbacks and the linked workspace, user, and DM; email uses the connected sender and a secret reference in the original notification. Connected inboxes and messaging accounts therefore carry approval authority. Agent bearer credentials cannot approve responses, pair other devices, add contacts, or change account settings.
 
 Contact acceptance is mutual. Requests target a fixed account and agent ID; names are selectors. Each connection can be revoked independently.
 
@@ -16,7 +16,7 @@ The relay stores encrypted phone numbers, prompts, response bodies, attachment m
 
 The relay operator can decrypt payloads. This design does not provide end-to-end encryption. TLS protects non-local connections. Clients refuse redirects for authenticated API calls.
 
-Approval binds an immutable snapshot and action to the task, recipient, owner, agent, version, and digest. No draft or unapproved attachment is available to another person's agent. Download URLs require authentication. Responses are served as attachments, not executable browser content.
+Approval binds an immutable snapshot and action to the task, recipient, owner, agent, version, and digest. No draft is available before approval. A request approval authorizes execution and automatic delivery of its final reply and selected files. It does not claim those future bytes were individually reviewed. Manually prepared replies still bind approval to their exact snapshot. Download URLs require authentication. Responses are served as attachments, not executable browser content.
 
 Revocation prevents future access. It cannot recall copies already received. New requests and downloads have no automatic expiry. The storage upgrade removes future deadlines from older requests without restoring already expired access. Database retention and operator backup deletion remain release work.
 
@@ -30,11 +30,11 @@ Restore writes only into a new folder. It revokes existing sessions and download
 
 A work lease belongs to one agent connection. Preparation can retry after a lost lease. An execution whose outcome is unknown is recorded as uncertain and is not automatically repeated. Cancelling a running operation is a request to stop, not proof that its effects were reversed.
 
-Raw execution output remains private to the owner. Public receipts expose a generic outcome, not arbitrary tool output or private URLs. Native Codex/Claude runs require human launch approval, then a new approval to share the result. Litecom uses Codex workspace-write shell mode with additional permission prompts denied, or Claude’s saved permissions with prompts denied. Native hooks and MCP tools retain their own access; Litecom does not sandbox those tools. The displayed launch scope includes that access. Attachment paths must resolve inside the selected working folder. Process groups are stopped on cancellation, but detached external jobs and completed side effects cannot be undone.
+Raw execution output remains private to the owner. Public receipts expose a generic outcome, not arbitrary tool output or private URLs. Native Codex/Claude runs require one human approval before launch and automatically deliver the final result under that approval. The worker rechecks its live execution lease immediately before starting the agent. Preparation constructs the proposal without launching the model. Litecom uses Codex workspace-write shell mode with additional permission prompts denied, or Claude’s saved permissions with prompts denied. Native hooks and MCP tools retain their own access; Litecom does not sandbox those tools. The displayed launch scope includes that access. Attachment paths must resolve inside the selected working folder. Process groups are stopped on cancellation, but detached external jobs and completed side effects cannot be undone.
 
 ACP connections forward new tool-permission requests to the owner. Decisions bind the exact operation to its session, task, credential and live lease. Litecom selects only a one-time permission; missing scope, persistent-only choices, changed operations and foreign sessions are rejected. The agent's saved permissions still apply: tools and hooks that do not ask ACP for permission are outside this mediation. The initial run approval covers that access. Live adapter behavior and broader scope enforcement remain release work.
 
-Devin uses a separate human launch approval and sharing approval. The relay persists a job before starting a session, resumes known sessions after restart, and does not repeat an uncertain launch. Provider session links and unshared output remain private to the owner. Disconnecting requests termination; pending cancellation is not reported as confirmed until the provider accepts it. A running job retains an encrypted credential snapshot for monitoring/termination; that copy is removed when the job ends. Signed attachment redirects never receive the Devin bearer token and use checked, pinned public DNS addresses.
+Devin uses the same single request approval for launch and result delivery. The relay persists a job before starting a session, resumes known sessions after restart, and does not repeat an uncertain launch. Provider session links and unshared output remain private to the owner. Disconnecting requests termination; pending cancellation is not reported as confirmed until the provider accepts it. A running job retains an encrypted credential snapshot for monitoring/termination; that copy is removed when the job ends. Signed attachment redirects never receive the Devin bearer token and use checked, pinned public DNS addresses.
 
 ## Development delivery
 

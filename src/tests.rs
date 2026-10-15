@@ -4,6 +4,9 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
+#[path = "channel_reply_tests.rs"]
+mod channel_reply_tests;
+
 #[path = "cloud_tests.rs"]
 mod cloud_tests;
 
@@ -117,6 +120,7 @@ fn action() -> Action {
         argv: vec!["git".into(), "branch".into(), "new".into()],
         cwd: "/tmp".into(),
         acting_account: "Moe's local account".into(),
+        share_result: true,
     }
 }
 
@@ -788,7 +792,7 @@ async fn real_client_uses_a2a_and_preserves_private_content_and_routing() {
 }
 
 #[test]
-fn execution_output_needs_its_own_immutable_sharing_approval() {
+fn one_approval_authorizes_execution_and_delivery_of_immutable_output() {
     let f = Fixture::new();
     let launch = f.draft("run", Some(action()));
     let first = launch.draft.clone().unwrap();
@@ -825,8 +829,9 @@ fn execution_output_needs_its_own_immutable_sharing_approval() {
         )
         .unwrap();
     let external = f.store.get_task(&f.a, &launch.id).unwrap();
-    assert_eq!(external.status, Status::AwaitingApproval);
-    assert!(external.draft.is_none() && external.response.is_none());
+    assert_eq!(external.status, Status::Completed);
+    assert!(external.draft.is_none());
+    assert_eq!(external.response.unwrap().text, "Private execution output");
     assert!(
         f.store
             .decide(
@@ -839,7 +844,18 @@ fn execution_output_needs_its_own_immutable_sharing_approval() {
             .is_err()
     );
     assert!(f.store.claim(&f.bw, &f.agent).unwrap().is_none());
-    f.approve(&result);
+    assert_eq!(result.status, Status::Completed);
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM approvals WHERE task_id=?",
+                [&launch.id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
     assert_eq!(
         f.store.download(&f.a, &file.id).unwrap().1,
         b"private result"
@@ -917,7 +933,7 @@ fn cancelled_execution_cannot_stage_output_or_chain_an_action() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn background_runner_requires_launch_and_sharing_decisions() {
+async fn background_runner_delivers_after_one_approval() {
     use crate::{
         client::Client,
         config::ClientConfig,
@@ -1072,8 +1088,8 @@ fi
             || a.contains("dangerously")
             || a.contains("max-tokens")));
         let private = state.db().unwrap().get_task(&f.a, &request.id).unwrap();
-        assert_eq!(private.status, Status::AwaitingApproval);
-        assert!(private.response.is_none() && private.draft.is_none());
+        assert_eq!(private.status, Status::Completed);
+        assert!(private.response.is_some() && private.draft.is_none());
         assert!(
             state
                 .db()
@@ -1091,17 +1107,19 @@ fi
             .unwrap();
         let file = &result.attachments[0];
         std::fs::write(workspace.join("launch.txt"), b"changed afterwards").unwrap();
-        state
-            .db()
-            .unwrap()
-            .decide(
-                &f.b,
-                &request.id,
-                result.version,
-                &result.digest,
-                Decision::Approve,
-            )
-            .unwrap();
+        assert_eq!(
+            state
+                .db()
+                .unwrap()
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM approvals WHERE task_id=?",
+                    [&request.id],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
         assert_eq!(
             state.db().unwrap().download(&f.a, &file.id).unwrap().1,
             b"original file bytes"
@@ -1309,7 +1327,7 @@ fn notification_retries_follow_current_state_and_cannot_undo_disabled_channels()
         f.store
             .delivery_title(&delivery)
             .unwrap()
-            .contains("ready for your review")
+            .contains("Theo asks:")
     );
     f.approve(&task);
     assert!(
@@ -1701,11 +1719,17 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
         .unwrap();
     let destination = slack.refresh(&http, &destination).await.unwrap();
     let remote = slack
-        .notify(&http, &destination, "Ready for review", None)
+        .notify(
+            &http,
+            &destination,
+            "Ready for review",
+            None,
+            Some("test-capability"),
+        )
         .await
         .unwrap();
     let updated = slack
-        .notify(&http, &destination, "Approved", Some(&remote))
+        .notify(&http, &destination, "Approved", Some(&remote), None)
         .await
         .unwrap();
     assert_eq!(remote, updated);
@@ -1716,6 +1740,11 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
     assert_eq!(calls[1].1["users"], "U1");
     assert_eq!(calls[2].1["refresh_token"], "old-refresh");
     assert_eq!(calls[3].0, "chat.postMessage");
+    assert_eq!(
+        calls[3].1["blocks"][1]["elements"][0]["value"],
+        "test-capability"
+    );
+    assert_eq!(calls[4].1["blocks"].as_array().unwrap().len(), 1);
     assert_eq!(calls[3].2, "Bearer new-token");
     assert_eq!(calls[4].0, "chat.update");
     assert_eq!(calls[4].1["ts"], "123.456");

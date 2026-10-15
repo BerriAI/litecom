@@ -29,7 +29,7 @@ impl Store {
     pub(crate) fn enqueue_notifications(&self, event_id: i64) -> Result<()> {
         // Persist each delivery in the same transaction as its task transition.
         // A stopped delivery worker must not lose events, however long it is offline.
-        self.db.execute("INSERT OR IGNORE INTO deliveries(event_id,channel_id,next_attempt) SELECT e.sequence,c.id,CASE WHEN e.kind='queued' THEN e.created_at+5 ELSE 0 END FROM events e JOIN tasks t ON t.id=e.task_id JOIN channels c ON c.user_id=t.owner_id OR c.user_id=t.requester_id WHERE e.sequence=? AND c.verified=1 AND e.kind IN ('queued','awaiting_approval','approved','declined','execution_finished','cancelled','received','download_verified','recovered','cloud_attention','permission_requested') AND (e.kind NOT IN ('queued','awaiting_approval','cloud_attention','permission_requested') OR c.user_id=t.owner_id)",[event_id])?;
+        self.db.execute("INSERT OR IGNORE INTO deliveries(event_id,channel_id,next_attempt) SELECT e.sequence,c.id,CASE WHEN e.kind='queued' THEN e.created_at+5 ELSE 0 END FROM events e JOIN tasks t ON t.id=e.task_id JOIN channels c ON c.user_id=t.owner_id OR c.user_id=t.requester_id WHERE e.sequence=? AND c.verified=1 AND e.kind IN ('queued','awaiting_approval','approved','completed','declined','execution_finished','cancelled','received','download_verified','recovered','cloud_attention','permission_requested','permission_decided') AND (e.kind NOT IN ('queued','awaiting_approval','cloud_attention','permission_requested','permission_decided') OR c.user_id=t.owner_id)",[event_id])?;
         Ok(())
     }
     pub fn enable_phone(&self, p: &Principal) -> Result<()> {
@@ -63,6 +63,7 @@ impl Store {
     }
     pub fn disable_channel(&self, p: &Principal, channel_id: &str) -> Result<()> {
         p.human()?;
+        self.db.execute("DELETE FROM channel_actions WHERE channel_id=? AND EXISTS(SELECT 1 FROM channels WHERE id=? AND user_id=?)",params![channel_id,channel_id,p.user_id])?;
         self.db.execute("UPDATE deliveries SET state='cancelled' WHERE channel_id=? AND state IN ('pending','sending') AND EXISTS(SELECT 1 FROM channels WHERE id=? AND user_id=?)",params![channel_id,channel_id,p.user_id])?;
         self.db.execute(
             "UPDATE channels SET verified=0 WHERE id=? AND user_id=?",
@@ -104,8 +105,11 @@ pub async fn run(state: AppState) {
         });
         match next {
             Ok(Some(d)) => {
-                let title = match state.db().and_then(|db| db.delivery_title(&d)) {
-                    Ok(title) => title,
+                let (title, action) = match state
+                    .db()
+                    .and_then(|db| Ok((db.delivery_title(&d)?, db.channel_action(&d)?)))
+                {
+                    Ok(value) => value,
                     Err(error) => {
                         tracing::warn!(%error,"could not read notification state");
                         continue;
@@ -113,14 +117,58 @@ pub async fn run(state: AppState) {
                 };
                 let body = format!("Litecom: {title} {}/request/{}", state.origin, d.task_id);
                 let result = match d.channel_kind.as_str() {
-                    "slack" => send_slack(&state, &d, &body).await,
+                    "slack" => {
+                        let action = action.as_ref().filter(|a| {
+                            state.providers.slack_signing_secret().is_some()
+                                && format!(
+                                    "{}\n\nDetails: {}/request/{}",
+                                    a.body, state.origin, d.task_id
+                                )
+                                .encode_utf16()
+                                .count()
+                                    <= 40_000
+                        });
+                        let message = action
+                            .map(|a| {
+                                format!(
+                                    "{}\n\nDetails: {}/request/{}",
+                                    a.body, state.origin, d.task_id
+                                )
+                            })
+                            .unwrap_or_else(|| body.clone());
+                        send_slack(&state, &d, &message, action.map(|a| a.token.as_str())).await
+                    }
                     "email" => {
+                        let action = action
+                            .as_ref()
+                            .filter(|_| state.providers.email_replies_available());
+                        let message=action.map(|a|format!("{}\n\nReply with Approve or Decline on the first line.\n\nDetails: {}/request/{}",a.body,state.origin,d.task_id)).unwrap_or_else(||body.clone());
                         state
                             .providers
-                            .email(&d.destination, "Litecom request update", &body)
+                            .email_notice(
+                                &d.destination,
+                                "Litecom request update",
+                                &message,
+                                action.map(|a| a.token.as_str()),
+                            )
                             .await
                     }
-                    _ => state.providers.sms(&d.destination, &body).await,
+                    _ => {
+                        let message = action
+                            .as_ref()
+                            .filter(|_| state.providers.twilio_verification().is_some())
+                            .map(|a| {
+                                format!(
+                                    "{}\n\nReply APPROVE {} or DECLINE {}.\nDetails: {}/request/{}",
+                                    a.body, a.code, a.code, state.origin, d.task_id
+                                )
+                            });
+                        // Twilio's message-body limit is 1,600 characters. Never truncate consent.
+                        let message = message
+                            .filter(|v| v.encode_utf16().count() <= 1600)
+                            .unwrap_or(body);
+                        state.providers.sms(&d.destination, &message).await
+                    }
                 };
                 if let Err(error) = state.db().and_then(|db| db.delivery_result(&d, &result)) {
                     tracing::error!(?error, "could not record notification delivery");
@@ -135,7 +183,12 @@ pub async fn run(state: AppState) {
     }
 }
 
-async fn send_slack(state: &AppState, d: &Delivery, body: &str) -> Result<String> {
+async fn send_slack(
+    state: &AppState,
+    d: &Delivery,
+    body: &str,
+    action: Option<&str>,
+) -> Result<String> {
     if state.providers.dev {
         eprintln!(
             "[LOCAL DEVELOPMENT — no Slack message sent] {}: {body}",
@@ -161,6 +214,7 @@ async fn send_slack(state: &AppState, d: &Delivery, body: &str) -> Result<String
             &updated,
             body,
             d.previous.as_deref(),
+            action,
         )
         .await
 }

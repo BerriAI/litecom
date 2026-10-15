@@ -18,9 +18,12 @@ parser.add_argument('--url', default='http://127.0.0.1:4141')
 parser.add_argument('--dev-log', type=Path, required=True)
 parser.add_argument('--binary', type=Path, default=Path('target/debug/litecom'))
 parser.add_argument('--with-service', action='store_true')
+parser.add_argument('--busy-setup', action='store_true', help='Repeat setup while the actual service is running an agent')
 parser.add_argument('--file-mib', type=int, default=0, help='Exercise a streamed attachment of this size')
 parser.add_argument('--approval', choices=['phone','email'], default='phone')
 args = parser.parse_args()
+if args.busy_setup and not args.with_service:
+    parser.error('--busy-setup requires --with-service')
 binary = args.binary.resolve()
 connection = 'qa-' + str(time.time_ns())
 screenshots = Path('.preview/onboarding')
@@ -65,13 +68,16 @@ with tempfile.TemporaryDirectory(prefix='litecom-onboarding-') as directory:
     programs = root/'bin'
     programs.mkdir()
     fake = programs/'codex'
-    fake.write_text('''#!/bin/sh
+    fixture = '''#!/bin/sh
 cat >/dev/null
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --output-last-message ]; then shift; cp reply.fixture "$1"; fi
   shift
 done
-''')
+'''
+    if args.busy_setup:
+        fixture = fixture.replace('cat >/dev/null', 'cat >/dev/null\necho $$ > agent-started\nsleep 45')
+    fake.write_text(fixture)
     fake.chmod(0o700)
     attachment = work/'notes.txt'
     if args.file_mib:
@@ -160,14 +166,26 @@ done
             assert asked.returncode == 0, asked.stderr
             request_url = re.search(re.escape(args.url)+r'/request/[a-f0-9-]+',asked.stdout).group(0)
             page.goto(request_url)
-            expect(page.get_by_role('button',name='Approve run',exact=True)).to_be_visible(timeout=15000)
+            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=15000)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Run approval overflow'
             page.screenshot(path=str(screenshots/'approve-run-mobile.png'),full_page=True)
-            page.get_by_role('button',name='Approve run',exact=True).click()
-            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=120000 if args.file_mib else 20000)
-            expect(page.locator('main')).to_contain_text('The requested notes are attached.')
-            page.screenshot(path=str(screenshots/'approve-result-mobile.png'),full_page=True)
             page.get_by_role('button',name='Approve',exact=True).click()
+            if args.busy_setup:
+                deadline = time.monotonic()+15
+                while not (work/'agent-started').exists():
+                    assert time.monotonic()<deadline, 'Native agent did not start'
+                    time.sleep(.1)
+                agent_pid=int((work/'agent-started').read_text())
+                time.sleep(20)
+                busy_repeat=subprocess.run(command,env=env,cwd=work,capture_output=True,text=True,timeout=40)
+                assert busy_repeat.returncode==0, busy_repeat.stderr
+                assert 'Listening for requests.' in busy_repeat.stdout
+                os.kill(agent_pid,0)
+                print('PASS: repeat setup recognizes a busy background agent without restarting it.',flush=True)
+            expect(page.get_by_role('button',name='Revoke access',exact=True)).to_be_visible(timeout=120000 if args.file_mib or args.busy_setup else 20000)
+            expect(page.locator('main')).to_contain_text('The requested notes are attached.')
+            page.screenshot(path=str(screenshots/'result-mobile.png'),full_page=True)
+            assert page.get_by_role('button',name='Approve',exact=True).count()==0
             expect(page.get_by_role('button',name='Revoke access')).to_be_visible()
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()
@@ -191,7 +209,7 @@ done
             terminal.close()
             terminal = None
             assert (root/'config'/'connections'/f'{connection}.json').exists()
-            print('PASS: phone-first terminal setup, one channel choice, native detection, default folder, repeat setup, self request, launch approval, sharing approval, verified download, revoked-connection recovery; fake agent and local delivery.')
+            print('PASS: phone-first terminal setup, one channel choice, native detection, default folder, repeat setup, self request, one request approval, automatic delivery, verified download, revoked-connection recovery; fake agent and local delivery.')
             print('Measured setup: 3 terminal confirmations + '+('5 browser buttons + 5 typed fields' if args.approval=='email' else '3 browser buttons + 3 typed fields')+'. Installation, server address, code reading and selection navigation are additional prerequisites/work.')
             if args.with_service:
                 print('PASS: actual macOS background startup and queue heartbeat; temporary service removed in cleanup.')

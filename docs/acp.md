@@ -17,7 +17,7 @@ litecom setup --agent codex-acp
 
 The adapter includes a compatible Codex dependency and uses your existing login and configuration. Its selected mode determines which operations need permission; Litecom forwards the requests it emits. Direct `--agent codex` uses the local CLI and denies additional permissions instead of forwarding them.
 
-Version 2.2.2 passed a live file-operation test: project instructions, one-time tool approval in Litecom, separate sharing approval, and exact file download. The test selected the adapter's read-only mode to require tool approval. Broader tools and default-mode behavior still need validation.
+Before the single-approval change, version 2.2.2 passed a live file-operation test: project instructions, one-time tool approval in Litecom, separate sharing approval, and exact file download. The test selected the adapter's read-only mode to require tool approval. Broader tools and default-mode behavior still need validation.
 
 ### Pi
 
@@ -48,9 +48,9 @@ The maintained adapter projects are [Codex ACP](https://github.com/agentclientpr
 
 ## Handle a request
 
-1. **Approve run** starts the selected agent in a new session in your working folder.
+1. **Approve** authorizes the request and its result delivery, then starts the selected agent in your working folder.
 2. If the agent asks for tool permission, review the proposed operation and select **Approve once** or **Decline operation**. Each additional permission is a separate decision.
-3. Review the final reply and files, then select **Approve** to share them.
+3. The final reply and files are sent automatically. No second sharing approval is needed.
 
 Litecom never chooses an ACP “always allow” option. A request without a one-time choice, with insufficient operation details, or for another session is declined. An operation changed while awaiting approval stops the run. Canceling a request stops the local agent process; effects already completed are not undone.
 
@@ -60,10 +60,10 @@ The selected agent's existing permissions and hooks still apply. Some tools can 
 
 If the adapter reports that authentication is required, sign in using that agent's supported login flow and send a new request. Litecom does not collect its provider password. A disconnected or interrupted run is not automatically repeated.
 
-An agent must return the requested reply and attachment list. Malformed output leaves a private diagnostic file and is not published. Attachments must be regular files inside the selected working folder, within Litecom's transfer limits.
+An agent must return the requested reply and attachment list. Malformed output leaves a private diagnostic file and is not published. Attachments must be regular files inside the selected working folder, without escaping through symlinks.
 
 ## Validation
 
-Tests use the official SDK on both sides of a local stream and exercise the real Litecom HTTP permission API. They cover one-time approval, rejection, session isolation, changing operation scope, cancellation, private reasoning, and separate sharing approval.
+Tests use the official SDK on both sides of a local stream and exercise the real Litecom HTTP permission API. They cover one-time approval, rejection, session isolation, changing operation scope, cancellation, private reasoning, and automatic result delivery after request approval.
 
 The browser check also runs a deterministic ACP subprocess through terminal setup, mobile review, refusal, cancellation, and an exact file download. The same flow passed using the unmodified, published `pi-acp` 0.0.34 package and a simulated Pi RPC process, including extension confirmations and exclusion of thought chunks. Those tests made no model calls. Codex has the live evidence described above; other live agents and their native context integrations remain unverified.

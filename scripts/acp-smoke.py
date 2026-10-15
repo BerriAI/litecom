@@ -145,13 +145,13 @@ for line in sys.stdin:
                     text=subprocess.check_output([binary,'ask','me',f'Create a note for the {mode} scenario and send it to me.'],env=env,text=True)
                     url=re.search(re.escape(origin)+r'/request/[a-f0-9-]+',text).group(0)
                     page.goto(url)
-                    page.get_by_role('button',name='Approve run',exact=True).click(timeout=15000)
+                    page.get_by_role('button',name='Approve',exact=True).click(timeout=15000)
                     expect(page.get_by_role('button',name='Approve once',exact=True)).to_be_visible(timeout=15000)
                     assert not note.exists(), 'Agent acted before tool approval'
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     expect(page.locator('.permission')).to_contain_text(str(work.resolve()/'note.txt'))
                     expect(page.locator('.permission')).to_contain_text('Only written after approval.')
-                    assert page.locator('.permission').bounding_box()['y'] < page.get_by_text('Run approved ·', exact=False).bounding_box()['y']
+                    assert page.locator('.permission').bounding_box()['y'] < page.get_by_text('Request approved', exact=True).bounding_box()['y']
                     if mode=='cancel':
                         pid=int((work/'agent.pid').read_text())
                         page.get_by_role('button',name='Cancel request',exact=True).click()
@@ -167,19 +167,19 @@ for line in sys.stdin:
                         page.get_by_role('button',name='Approve once',exact=True).click()
                     else:
                         page.get_by_role('button',name='Decline operation',exact=True).click()
-                    expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=15000)
+                    expect(page.get_by_role('button',name='Revoke access',exact=True)).to_be_visible(timeout=15000)
                     decision=json.loads((work/'decision.json').read_text())
                     assert decision['optionId']==(('yes' if args.pi_acp else 'once') if mode=='approve' else 'no')
                     assert note.exists()==(mode=='approve')
                     assert 'private thought' not in page.locator('main').inner_text()
-                    page.get_by_role('button',name='Approve',exact=True).click()
+                    assert page.get_by_role('button',name='Approve',exact=True).count()==0
                     if mode=='approve':
                         with page.expect_download() as download:
                             page.get_by_role('link',name='note.txt',exact=True).click()
                         assert Path(download.value.path()).read_bytes()==b'Only written after approval.\n'
                     else:
                         expect(page.locator('main')).to_contain_text('No note was created.')
-            print(f'PASS: {args.agent} ACP setup, native subprocess, exact one-time approval, declined operation, separate sharing, verified attachment, private thoughts, cancellation.')
+            print(f'PASS: {args.agent} ACP setup, native subprocess, exact one-time approval, declined operation, automatic result delivery, verified attachment, private thoughts, cancellation.')
         finally:
             browser.close()
             for process in reversed(processes):

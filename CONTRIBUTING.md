@@ -1,6 +1,6 @@
 # Contributing
 
-Litecom is an unreleased Rust project. Keep the CLI, background service, and relay in one binary. Prefer a complete, understandable user flow over more configuration or infrastructure.
+Litecom is a Rust project. Keep the CLI, background service, and relay in one binary. Prefer a complete, understandable user flow over more configuration or infrastructure.
 
 ## Reuse before building
 
@@ -104,7 +104,7 @@ cargo build --locked
 .litecom/qa/bin/python scripts/live-agent-smoke.py --agent opencode
 ```
 
-These tests call a real model through the agent's existing configuration and incur its normal usage. They create two local test accounts, request a calculation in a temporary folder, approve execution, review the result, and verify the downloaded bytes. They check project instructions and privacy between the two approvals. No messages are sent, no MCP settings or startup services are installed, and temporary data is removed afterward.
+These tests call a real model through the agent's existing configuration and incur its normal usage. They create two local test accounts, request a calculation in a temporary folder, approve the request once, and verify the automatically delivered bytes. They check project instructions and that execution waits for approval. No messages are sent, no MCP settings or startup services are installed, and temporary data is removed afterward.
 
 Private screenshots and summaries are saved under `.preview/live-agent/`. A failed test also retains native diagnostics there; inspect these locally and do not publish credentials or account details. A provider spending limit or missing permission is a failure to investigate, not a reason to bypass it or silently switch accounts.
 

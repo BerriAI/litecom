@@ -31,7 +31,7 @@ impl Principal {
     pub fn human(&self) -> Result<()> {
         require(
             self.role == Role::Human,
-            "Open Litecom in your browser to approve this change.",
+            "Only you can approve this change, from a connected channel or Litecom.",
         )
     }
 }
@@ -88,6 +88,8 @@ pub enum Action {
         argv: Vec<String>,
         cwd: String,
         acting_account: String,
+        #[serde(default)]
+        share_result: bool,
     },
     Harness {
         title: String,
@@ -102,6 +104,8 @@ pub enum Action {
         workspace: String,
         permissions: Vec<String>,
         acting_account: String,
+        #[serde(default)]
+        share_result: bool,
     },
     Cloud {
         title: String,
@@ -110,10 +114,21 @@ pub enum Action {
         provider: AgentKind,
         acting_account: String,
         connection_revision: String,
+        #[serde(default)]
+        share_result: bool,
     },
 }
 
 impl Action {
+    /// Missing on older proposals, whose approval covered execution only.
+    pub fn shares_result(&self) -> bool {
+        match self {
+            Self::Command { share_result, .. }
+            | Self::Harness { share_result, .. }
+            | Self::Cloud { share_result, .. } => *share_result,
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         let (title, description, account) = match self {
             Self::Command {
@@ -122,6 +137,7 @@ impl Action {
                 argv,
                 cwd,
                 acting_account,
+                ..
             } => {
                 validate(
                     !argv.is_empty() && argv.iter().all(|v| !v.contains('\0')),
@@ -144,6 +160,7 @@ impl Action {
                 executable,
                 arguments,
                 mcp,
+                ..
             } => {
                 validate(
                     matches!(
@@ -194,6 +211,7 @@ impl Action {
                 provider,
                 acting_account,
                 connection_revision,
+                ..
             } => {
                 validate(
                     uuid::Uuid::parse_str(connection_revision).is_ok(),

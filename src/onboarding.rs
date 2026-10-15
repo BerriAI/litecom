@@ -314,7 +314,7 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
     saved.runner = Some(settings.agent.command().into());
     saved.save_named(connection)?;
     println!(
-        "\n{} · {}\nEach request asks before launching your agent and before sharing its result.",
+        "\n{} · {}\nApprove a request once. Your agent does the work and sends back the result.",
         settings.agent.name(),
         settings.workspace.display()
     );
@@ -343,7 +343,8 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         println!(
             "Starting Litecom in the background. It will start again when you sign in to this computer."
         );
-        if restart_worker || !service::status(connection).unwrap_or(false) {
+        let reused_worker = !restart_worker && service::status(connection).unwrap_or(false);
+        if !reused_worker {
             service::install(connection)?;
         }
         // Check the actual queue heartbeat, not merely the service installation.
@@ -351,7 +352,11 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         let since = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_secs() as i64
-            - 2;
+            - if reused_worker {
+                crate::store::LEASE_TTL
+            } else {
+                2
+            };
         let mut ready = false;
         for _ in 0..10 {
             tokio::time::sleep(Duration::from_secs(1)).await;

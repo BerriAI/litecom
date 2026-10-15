@@ -45,18 +45,19 @@ function notice(text) {
   clearTimeout(notice.timer);
   notice.timer = setTimeout(() => (el.style.display = "none"), 6000);
 }
-function error(err) {
-  const old = document.querySelector("#page-error");
+function error(err, id = "page-error") {
+  const old = document.getElementById(id);
+  if (old?.textContent === err.message) return;
   if (old) old.remove();
   const el = document.createElement("p");
-  el.id = "page-error";
+  el.id = id;
   el.className = "error";
   el.setAttribute("role", "alert");
   el.textContent = err.message;
   app.prepend(el);
 }
 const badge = (s, t) =>
-  `<span class="badge">${esc(s === "completed" && t?.revoked_at ? "Access revoked" : s === "completed" && t?.expires_at != null && t.expires_at <= Date.now() / 1000 ? "Expired" : { queued: "Waiting for agent", preparing: "Preparing", awaiting_approval: "Ready for review", approved: "Approved · waiting for agent", executing: "Running", cancel_requested: "Cancellation requested", completed: "Available", declined: "Declined", cancelled: "Cancelled", failed: "Needs attention", expired: "Expired" }[s] || s)}</span>`;
+  `<span class="badge" data-status="${esc(s)}">${esc(s === "completed" && t?.revoked_at ? "Access revoked" : s === "completed" && t?.expires_at != null && t.expires_at <= Date.now() / 1000 ? "Expired" : { queued: "Waiting for agent", preparing: "Preparing", awaiting_approval: "Ready for review", approved: "Approved · waiting for agent", executing: "Running", cancel_requested: "Cancellation requested", completed: "Available", declined: "Declined", cancelled: "Cancelled", failed: "Needs attention", expired: "Expired" }[s] || s)}</span>`;
 const files = (items) =>
   items.length
     ? `<ul class="files">${items.map((f) => `<li><a href="/api/files/${encodeURIComponent(f.id)}" data-download="${esc(f.id)}" data-name="${esc(f.name)}" data-sha256="${esc(f.sha256)}" download>${esc(f.name)}</a><small>${(f.size / 1024).toFixed(1)} KB</small></li>`).join("")}</ul>`
@@ -97,15 +98,22 @@ function permissionCard(permission) {
       ? { ...operation }
       : operation;
   if (fields?.title === permission.title) delete fields.title;
-  return `<section class="card permission"><p class="preview-label">Your approval is needed</p><h2>${esc(permission.title)}</h2><p>Allow this operation once. You will review the result before sharing.</p>${operationFields(fields)}<div class="actions"><button class="primary" data-action="approve-permission" data-id="${esc(permission.id)}">Approve once</button><button data-action="decline-permission" data-id="${esc(permission.id)}">Decline operation</button></div></section>`;
+  return `<section class="card permission"><p class="preview-label">Your approval is needed</p><h2>${esc(permission.title)}</h2><p>This operation needs additional permission. Allow it once for this request.</p>${operationFields(fields)}<div class="actions"><button class="primary" data-action="approve-permission" data-id="${esc(permission.id)}">Approve once</button><button data-action="decline-permission" data-id="${esc(permission.id)}">Decline operation</button></div></section>`;
 }
 function draftCard(draft, status) {
   const action = draft.action;
-  const body = `<p class="preview-label">${action ? "Run approval" : "Exact reply"} · version ${draft.version}</p><div class="prose">${esc(draft.text)}</div>${files(draft.attachments)}${action ? `<h2>${esc(action.title)}</h2><p>${esc(action.description)}</p><p class="muted">Acts as ${esc(action.acting_account)}.</p>${action.workspace ? `<p class="muted subtitle">Folder: <code>${esc(action.workspace)}</code></p>` : ""}<details><summary>Operation and access</summary><pre>${esc(JSON.stringify(action, null, 2))}</pre></details><p class="banner">Approval lets the selected agent perform this operation. Agent replies and files need a separate sharing approval.</p>` : ""}${status === "awaiting_approval" ? `<div class="actions"><button class="primary" data-action="approve">${action ? "Approve run" : "Approve"}</button><button data-action="decline">Decline</button></div>` : ""}`;
+  const body = action
+    ? `<p>${action.share_result ? "Approve to let your agent do this and send back the result." : "Approve to run this request. This older proposal requires a separate result review."}</p><details><summary>Agent and access</summary><h2>${esc(action.title)}</h2><p>${esc(action.description)}</p><p class="muted">Acts as ${esc(action.acting_account)}.</p>${action.workspace ? `<p class="muted subtitle">Folder: <code>${esc(action.workspace)}</code></p>` : ""}<pre>${esc(JSON.stringify(action, null, 2))}</pre></details>`
+    : `<h2>${status === "completed" ? "Result" : "Reply"}</h2><div class="prose">${esc(draft.text)}</div>${files(draft.attachments)}`;
+  const controls =
+    status === "awaiting_approval"
+      ? `<div class="actions"><button class="primary" data-action="approve">Approve</button><button data-action="decline">Decline</button></div>`
+      : "";
   return action && ["approved", "executing"].includes(status)
-    ? `<details class="card"><summary>Run approved · ${esc(action.title)}</summary>${body}</details>`
-    : `<section class="card">${body}</section>`;
+    ? `<details class="card"><summary>Request approved</summary>${body}</details>`
+    : `<section class="card">${body}${controls}</section>`;
 }
+
 async function boot() {
   try {
     capabilities = await api("/api/capabilities");
@@ -157,7 +165,7 @@ function login() {
     ? requested
     : null;
   if (chosen) sessionStorage.setItem("approval-channel", chosen);
-  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Review what leaves your account. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${chosen ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>` : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${["Phone", "Slack", "Email"].map((c, i) => `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`).join("")}</div></fieldset>`}<label>Your name<input name="name" autocomplete="name" required></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone connects all your agents to one account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
+  app.innerHTML = `<section class="narrow"><h1>Your agents, connected.</h1><p class="muted">Ask for something. Approve the request once. Pick it up from any of your agents.</p>${capabilities.development ? '<p class="banner">Local development. Codes appear in the relay terminal; no phone messages are sent.</p>' : ""}<form id="login">${chosen ? `<input type="hidden" name="channel" value="${chosen}"><p class="banner">Approve requests on ${esc(chosen)}. You can add channels later.</p>` : `<fieldset><legend>Where do you want to approve requests?</legend><div class="choices">${["Phone", "Slack", "Email"].map((c, i) => `<label><input type="radio" name="channel" value="${c.toLowerCase()}" ${!i ? "checked" : ""}>${c}</label>`).join("")}</div></fieldset>`}<label>Your name<input name="name" autocomplete="name" required></label><label>Phone number<input name="phone" type="tel" autocomplete="tel" placeholder="+1 415 555 0123" required></label><p class="muted subtitle">Your phone connects all your agents to one account. Choose Phone to receive request notifications by text. Message rates may apply; reply STOP to unsubscribe.</p><button class="primary" ${!capabilities.phone ? "disabled" : ""}>Send sign-in code</button>${!capabilities.phone ? '<p class="error">Phone delivery is not enabled on this server. Ask its owner to connect a messaging provider.</p>' : ""}</form></section>`;
 }
 
 function slackSetup() {
@@ -196,6 +204,21 @@ function emailSetup() {
 
 async function render() {
   const parts = location.pathname.split("/").filter(Boolean);
+  const title =
+    {
+      request: "Request",
+      connect: "Connect agent",
+      invite: "Add contact",
+      contacts: "Contacts",
+      agents: "Agents",
+      settings: "Account",
+    }[parts[0]] || "Inbox";
+  document.title = `${title} · Litecom`;
+  document.querySelectorAll("#nav a").forEach((link) => {
+    if (new URL(link.href).pathname === location.pathname)
+      link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
   if (parts[0] === "request" && parts[1]) return taskPage(parts[1]);
   if (parts[0] === "connect" && parts[1]) return connectPage(parts[1]);
   if (parts[0] === "invite" && parts[1]) return invitePage(parts[1]);
@@ -261,6 +284,14 @@ async function taskPage(id, update, previous) {
   ]);
   // A poll may finish after typing or another action began. Do not replace that UI.
   if (previous && (currentTask !== previous || busy || editingTask())) return;
+  const oldVersion = currentTask?.draft?.version;
+  const focused = app.contains(document.activeElement)
+    ? document.activeElement
+    : null;
+  const focusAction = focused?.dataset.action;
+  const opened = [...app.querySelectorAll("details[open] > summary")].map(
+    (el) => el.textContent,
+  );
   currentTask = t;
   const owner = t.owner_id === profile.id,
     requester = t.requester_id === profile.id,
@@ -270,7 +301,19 @@ async function taskPage(id, update, previous) {
   const editable =
     owner && ["queued", "preparing", "awaiting_approval"].includes(t.status);
   const d = owner ? t.draft : null;
-  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner ? "Review request" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="card"><h2>Requested</h2><div class="prose">${esc(t.request)}</div></div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">This request is saved. The selected agent will pick it up when it connects.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="card"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
+  app.innerHTML = `<p><a href="/">← Inbox</a></p><div class="row"><h1>${owner && !requester ? esc(names.get(t.requester_id) || "Your contact") + " asks" : "Your request"}</h1>${badge(t.status, t)}</div><p class="muted">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${agent ? " · " + esc(agent.name) : ""}</p><div class="card"><h2>Requested</h2><div class="prose">${esc(t.request)}</div></div>${t.downloads?.length ? `<p class="muted subtitle">${t.downloads.length} file download${t.downloads.length === 1 ? "" : "s"} verified by the recipient.</p>` : ""}${t.revoked_at ? '<p class="banner">Access has been revoked. Files already downloaded cannot be recalled.</p>' : ""}${t.status === "queued" ? '<p class="banner">This request is saved. The selected agent will pick it up when it connects.</p>' : ""}${(t.permissions || []).map(permissionCard).join("")}${d ? draftCard(d, t.status) : ""}${t.response && !owner ? `<section class="card"><h2>Response</h2><div class="prose">${esc(t.response.text)}</div>${files(t.response.attachments)}</section>` : ""}${t.execution ? `<section class="card"><h2>Cloud session</h2><p class="prose">${esc(t.execution.message)}</p>${t.execution.url ? `<a href="${esc(t.execution.url)}" target="_blank" rel="noopener noreferrer">Open in Devin ↗</a>` : ""}</section>` : ""}${t.receipt ? `<section class="card"><h2>Action result</h2><p class="prose">${esc(t.receipt.summary)}</p></section>` : ""}${editable ? `<details class="card"><summary>${d ? "Edit response" : "Prepare a response yourself"}</summary><form id="draft"><label>Reply<textarea name="text">${esc(d?.text || "")}</textarea></label><label>Attach files<input name="files" type="file" multiple></label><p class="muted subtitle">Saving a change requires a fresh approval.</p><button>Save for review</button></form></details>` : ""}${requester && t.status === "completed" && !t.revoked_at ? `<div class="actions">${t.received_at ? '<p class="muted">Received.</p>' : '<button data-action="received">Mark received</button>'}</div>` : ""}${!["declined", "cancelled", "failed", "expired"].includes(t.status) ? `<div class="actions"><button class="danger" data-action="cancel">${owner && t.status === "completed" ? "Revoke access" : "Cancel request"}</button></div>` : ""}`;
+  if (oldVersion === t.draft?.version) {
+    app.querySelectorAll("details > summary").forEach((el) => {
+      if (opened.includes(el.textContent)) el.parentElement.open = true;
+    });
+  }
+  if (focused && !focused.isConnected) {
+    const replacement =
+      oldVersion === t.draft?.version && focusAction
+        ? app.querySelector(`[data-action="${CSS.escape(focusAction)}"]`)
+        : null;
+    (replacement || app).focus({ preventScroll: true });
+  }
 }
 async function contactsPage() {
   const contacts = await api("/api/contacts");
@@ -306,15 +349,22 @@ async function settingsPage() {
   const rows = ["phone", "email", "slack"]
     .map((kind) => {
       const channel = channels.find((c) => c.kind === kind && c.verified);
+      const instructions = capabilities.direct_approvals?.[kind]
+        ? {
+            phone: "Reply APPROVE and the request code by text.",
+            email: "Reply Approve to the request email.",
+            slack: "Tap Approve in the Slack message.",
+          }[kind]
+        : "Open the link in your notification to review.";
       const addAction = {
         phone: "enable-phone",
         email: "add-email",
         slack: "add-slack",
       }[kind];
-      return `<div class="card"><div class="row"><h3>${labels[kind]}</h3><span class="muted subtitle">${channel ? "Connected" : "Not connected"}</span></div>${channel?.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="${channel.delivery_status === "failed" ? "error" : "muted subtitle"}">${deliveryLabels[channel.delivery_status]}</p>` : ""}<div class="actions">${capabilities[kind] ? `<button data-action="${addAction}">${channel ? (kind === "phone" ? "Keep phone enabled" : "Reconnect " + labels[kind]) : "Connect " + labels[kind]}</button>` : '<p class="muted subtitle">Not enabled on this server.</p>'}${channel ? `<button data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>` : ""}</div></div>`;
+      return `<div class="card"><div class="row"><h3>${labels[kind]}</h3><span class="muted subtitle">${channel ? "Connected" : "Not connected"}</span></div><p class="muted subtitle">${instructions}</p>${channel?.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="${channel.delivery_status === "failed" ? "error" : "muted subtitle"}">${deliveryLabels[channel.delivery_status]}</p>` : ""}<div class="actions">${capabilities[kind] ? `<button data-action="${addAction}">${channel ? (kind === "phone" ? "Keep phone enabled" : "Reconnect " + labels[kind]) : "Connect " + labels[kind]}</button>` : '<p class="muted subtitle">Not enabled on this server.</p>'}${channel ? `<button data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>` : ""}</div></div>`;
     })
     .join("");
-  app.innerHTML = `<h1>Account</h1><p class="muted">Signed in as ${esc(profile.name)}.</p><h2>Approval channels</h2><p class="muted">Each destination opens the same live review. Add or remove one without changing your phone account. Reply STOP to stop texts.</p>${rows}${capabilities.development ? '<p class="banner">Local development: notifications print in the relay terminal.</p>' : ""}<h2>Connected apps</h2>${connections.map((c) => `<div class="card row"><span>${esc(c.label)}</span><button data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("")}<button data-action="logout">Sign out</button>`;
+  app.innerHTML = `<h1>Account</h1><p class="muted">Signed in as ${esc(profile.name)}.</p><h2>Approval channels</h2><p class="muted">Approve from a connected channel. One decision updates them all. Add or remove channels without changing your phone account. Reply STOP to stop texts.</p>${rows}${capabilities.development ? '<p class="banner">Local development: notifications print in the relay terminal.</p>' : ""}<h2>Connected apps</h2>${connections.map((c) => `<div class="card row"><span>${esc(c.label)}</span><button data-action="revoke-connection" data-id="${esc(c.id)}">Disconnect</button></div>`).join("")}<button data-action="logout">Sign out</button>`;
 }
 document.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -597,6 +647,7 @@ setInterval(async () => {
   try {
     const previous = currentTask;
     const t = await api(`/api/tasks/${previous.id}`);
+    document.getElementById("sync-error")?.remove();
     if (currentTask !== previous || busy || editingTask()) return;
     if (
       t.updated_at !== currentTask.updated_at ||
@@ -610,7 +661,12 @@ setInterval(async () => {
     )
       await taskPage(t.id, t, previous);
   } catch (err) {
-    notice(err.message);
+    error(
+      {
+        message: `Live updates paused. ${err.message} Retrying automatically…`,
+      },
+      "sync-error",
+    );
   }
 }, 4000);
 boot();

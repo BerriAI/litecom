@@ -20,7 +20,7 @@ impl Connection {
         Action::Cloud {
             title: "Run Devin for this request".into(),
             description: format!(
-                "Start a cloud session in {} using this Devin account's existing repositories, context, tools, and default security profile. It can make changes within that access. Your Devin plan and its normal charges apply. Review the reply and files before Litecom shares them.",
+                "Start a cloud session in {} using this Devin account's existing repositories, context, tools, and default security profile. It can make changes within that access. Your Devin plan and its normal charges apply. Litecom will send the final reply and requested files to the requester automatically.",
                 self.org_id
             ),
             instruction: request.into(),
@@ -30,6 +30,7 @@ impl Connection {
                 self.principal_name, self.principal_id, self.org_id
             ),
             connection_revision: self.revision.clone(),
+            share_result: true,
         }
     }
 }
@@ -243,7 +244,7 @@ impl Devin {
     }
     pub async fn start(&self, c: &Connection, task: &str, request: &str) -> Result<Session> {
         let prompt = format!(
-            "The owner approved this Litecom request. Use the organization's existing context and permitted tools. Do not send the final reply or attachments to the requester through another channel. Return a complete reply for the owner to review in Litecom. Upload requested files as attachments to this session, and put their attachment IDs or exact filenames in files. Do not attach unrelated material or credentials. Explain permission denials and unfinished work honestly. Request (JSON): {}",
+            "The owner approved execution of this Litecom request and delivery of its result. Use the organization's existing context and permitted tools. Do not send the final reply or attachments to the requester through another channel. Return the complete reply to Litecom for delivery to the requester. Upload requested files as attachments to this session, and put their attachment IDs or exact filenames in files. Do not attach unrelated material or credentials. Explain permission denials and unfinished work honestly. Request (JSON): {}",
             serde_json::to_string(request)?
         );
         // No model, output-token, ACU, bypass-approval, or security-profile override.

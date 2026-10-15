@@ -188,7 +188,7 @@ impl Rig {
 }
 
 #[tokio::test]
-async fn devin_persists_session_and_stages_exact_private_output_after_restart() {
+async fn devin_persists_session_and_delivers_exact_output_after_one_approval() {
     let r = Rig::new().await;
     r.state.db().unwrap().enable_phone(&r.a).unwrap();
     r.state.db().unwrap().enable_phone(&r.b).unwrap();
@@ -270,7 +270,7 @@ async fn devin_persists_session_and_stages_exact_private_output_after_restart() 
     r.provider.lock().unwrap().fail_second_file = false;
     r.tick().await;
     let staged = r.owner(&task.id);
-    assert_eq!(staged.status, Status::AwaitingApproval);
+    assert_eq!(staged.status, Status::Completed);
     let draft = staged.draft.unwrap();
     assert_eq!(draft.text, "Private cloud reply");
     assert_eq!(draft.attachments.len(), 2);
@@ -287,8 +287,18 @@ async fn devin_persists_session_and_stages_exact_private_output_after_restart() 
             )
             .is_err()
         );
-        assert!(db.download(&r.a, &draft.attachments[0].id).is_err());
-        assert!(db.get_task(&r.a, &task.id).unwrap().response.is_none());
+        assert!(db.download(&r.a, &draft.attachments[0].id).is_ok());
+        assert!(db.get_task(&r.a, &task.id).unwrap().response.is_some());
+        assert_eq!(
+            db.db
+                .query_row(
+                    "SELECT COUNT(*) FROM approvals WHERE task_id=?",
+                    [&task.id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
         assert_eq!(
             db.db
                 .query_row("SELECT COUNT(*) FROM artifacts", [], |row| row
@@ -306,7 +316,6 @@ async fn devin_persists_session_and_stages_exact_private_output_after_restart() 
             "Completed job token copy is removed"
         );
     }
-    r.approve(&task.id);
     assert_eq!(
         r.state
             .db()

@@ -11,6 +11,9 @@ Litecom owns account and contact mapping, request routing, human approval, and c
 | [pi-acp](https://github.com/svkozak/pi-acp) | External Pi adapter, used without a Litecom fork. |
 | [Tokio](https://github.com/tokio-rs/tokio) and [Axum](https://github.com/tokio-rs/axum) | Background runtime and HTTP server. |
 | [SQLite through rusqlite](https://github.com/rusqlite/rusqlite) | Transactional state and database snapshots. |
+| [async-imap](https://github.com/async-email/async-imap) and [mail-parser](https://github.com/stalwartlabs/mail-parser) | Receive approval replies through standard IMAP and parse MIME email. |
+| [rustls](https://github.com/rustls/rustls) | TLS for the receiving mailbox and HTTP/SMTP transports. |
+| [Geist](https://github.com/vercel/geist-font) | Bundled UI typefaces, under the SIL Open Font License. |
 | [Lettre](https://github.com/lettre/lettre) | SMTP email delivery. |
 | [RustCrypto](https://github.com/RustCrypto/AEADs) | AES-GCM encryption; related RustCrypto crates provide hashes and HMAC. |
 | [Dialoguer](https://github.com/console-rs/dialoguer) | Terminal setup prompts. |

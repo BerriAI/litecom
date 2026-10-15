@@ -1,0 +1,44 @@
+name: Verify release downloads
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            extension: tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            extension: tar.gz
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            extension: tar.gz
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            extension: tar.gz
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            extension: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*
+          path: target/distrib
+          merge-multiple: true
+      - name: Test the extracted executable without Rust or Node on PATH
+        run: python scripts/check-package.py target/distrib/litecom-${{ matrix.target }}.${{ matrix.extension }}

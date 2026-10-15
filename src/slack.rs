@@ -253,6 +253,7 @@ impl Slack {
         destination: &SlackDestination,
         body: &str,
         previous: Option<&str>,
+        action: Option<&str>,
     ) -> Result<String> {
         let previous: Option<Value> = previous.and_then(|s| serde_json::from_str(s).ok());
         let ts = previous
@@ -264,7 +265,28 @@ impl Slack {
         } else {
             "chat.postMessage"
         };
-        let mut payload = json!({"channel":destination.channel,"text":body,"unfurl_links":false,"unfurl_media":false});
+        let mut blocks = Vec::new();
+        let mut chunk = String::new();
+        let mut units = 0;
+        for ch in body.chars() {
+            if units + ch.len_utf16() > 3000 {
+                blocks.push(json!({"type":"section","text":{"type":"plain_text","text":chunk}}));
+                chunk = String::new();
+                units = 0;
+            }
+            chunk.push(ch);
+            units += ch.len_utf16();
+        }
+        if !chunk.is_empty() {
+            blocks.push(json!({"type":"section","text":{"type":"plain_text","text":chunk}}));
+        }
+        if let Some(token) = action {
+            blocks.push(json!({"type":"actions","elements":[
+                {"type":"button","text":{"type":"plain_text","text":"Approve"},"style":"primary","action_id":"litecom_approve","value":token},
+                {"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token}
+            ]}));
+        }
+        let mut payload = json!({"channel":destination.channel,"text":body,"blocks":blocks,"parse":"none","link_names":false,"unfurl_links":false,"unfurl_media":false});
         if let Some(ts) = ts {
             payload["ts"] = json!(ts);
         }

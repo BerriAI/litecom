@@ -12,6 +12,8 @@ pub struct Providers {
     email: Option<Email>,
     pub slack: Option<crate::slack::Slack>,
     pub dev: bool,
+    slack_signing: Option<String>,
+    pub(crate) imap: Option<crate::email_replies::Inbox>,
 }
 #[derive(Clone)]
 struct Twilio {
@@ -23,6 +25,7 @@ struct Twilio {
 struct Email {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: Mailbox,
+    reply_to: Option<Mailbox>,
 }
 impl Providers {
     pub fn development() -> Result<Self> {
@@ -36,6 +39,8 @@ impl Providers {
             email: None,
             slack: None,
             dev: true,
+            slack_signing: None,
+            imap: None,
         })
     }
     pub fn from_env(dev: bool) -> Result<Self> {
@@ -74,6 +79,13 @@ impl Providers {
                 }
                 Some(Email {
                     transport: transport.build(),
+                    reply_to: get("SMTP_REPLY_TO")
+                        .map(|v| {
+                            v.parse::<Mailbox>().map_err(|_| {
+                                Error::Invalid("SMTP_REPLY_TO must be an email address.".into())
+                            })
+                        })
+                        .transpose()?,
                     from: from.parse().map_err(|_| {
                         Error::Invalid("SMTP_FROM must be a valid sender address.".into())
                     })?,
@@ -102,7 +114,39 @@ impl Providers {
             email,
             slack,
             dev,
+            slack_signing: get("SLACK_SIGNING_SECRET"),
+            imap: crate::email_replies::Inbox::from_env()?,
         })
+    }
+    pub(crate) fn twilio_verification(&self) -> Option<(&str, &str)> {
+        if self.dev {
+            return None;
+        }
+        self.twilio
+            .as_ref()
+            .map(|p| (p.sid.as_str(), p.token.as_str()))
+    }
+    pub(crate) fn slack_signing_secret(&self) -> Option<&str> {
+        if self.dev {
+            None
+        } else {
+            self.slack_signing.as_deref()
+        }
+    }
+    pub(crate) fn email_replies_available(&self) -> bool {
+        !self.dev && self.imap.is_some()
+    }
+    #[cfg(test)]
+    pub(crate) fn test_replies(twilio_sid: &str, twilio_token: &str, slack_secret: &str) -> Self {
+        let mut value = Self::development().unwrap();
+        value.dev = false;
+        value.twilio = Some(Twilio {
+            sid: twilio_sid.into(),
+            token: twilio_token.into(),
+            service: String::new(),
+        });
+        value.slack_signing = Some(slack_secret.into());
+        value
     }
     pub fn phone_available(&self) -> bool {
         self.dev || self.twilio.is_some()
@@ -114,6 +158,15 @@ impl Providers {
         &self.client
     }
     pub async fn email(&self, to: &str, subject: &str, body: &str) -> Result<String> {
+        self.email_notice(to, subject, body, None).await
+    }
+    pub(crate) async fn email_notice(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+        action: Option<&str>,
+    ) -> Result<String> {
         let to = crate::channels::email_address(to)?;
         if self.dev {
             eprintln!("[LOCAL DEVELOPMENT — no email sent] {to}: {body}");
@@ -122,14 +175,21 @@ impl Providers {
         let provider = self.email.as_ref().ok_or_else(|| {
             Error::Unavailable("Email delivery is not enabled on this server.".into())
         })?;
-        let message_id = format!("<{}@litecom>", crate::crypto::id());
-        let message = Message::builder()
+        let local = action
+            .map(|token| format!("litecom-approve-{token}"))
+            .unwrap_or_else(crate::crypto::id);
+        let message_id = format!("<{local}@{}>", provider.from.email.domain());
+        let mut builder = Message::builder()
             .from(provider.from.clone())
             .to(to
                 .parse()
                 .map_err(|_| Error::Invalid("Enter a valid email address.".into()))?)
             .subject(subject)
-            .message_id(Some(message_id.clone()))
+            .message_id(Some(message_id.clone()));
+        if let Some(reply_to) = &provider.reply_to {
+            builder = builder.reply_to(reply_to.clone());
+        }
+        let message = builder
             .body(body.to_owned())
             .map_err(|_| Error::Invalid("The email could not be prepared.".into()))?;
         provider.transport.send(message).await.map_err(|_|Error::Unavailable("The mail server did not accept this message. Try again or ask its operator to check delivery.".into()))?;

@@ -124,7 +124,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-soak-') as directory:
 
     def operation():
         return {'kind': 'command', 'title': 'Protocol fixture', 'description': 'No process is executed in this test.',
-                'argv': ['fixture'], 'cwd': '/fixture', 'acting_account': 'Test owner'}
+                'argv': ['fixture'], 'cwd': '/fixture', 'acting_account': 'Test owner', 'share_result': True}
 
     try:
         start_relay()
@@ -214,10 +214,11 @@ with tempfile.TemporaryDirectory(prefix='litecom-soak-') as directory:
                 b.call(path, {'digest': permission['digest'], 'decision': verdict})
                 result = {'text': 'Operation '+verdict+'; fixture output', 'attachment_ids': [file['id']], 'action': None}
                 task = runner.call('/api/tasks/'+task['id']+'/result', {'lease': work['lease'], 'draft': result})
-                counts['separate_execution_and_sharing'] += 1
+                assert task['status']=='completed'
+                counts['single_approval_delivery'] += 1
             else:
                 task = prepare(task, 'Private body '+hashlib.sha256(payload).hexdigest(), [file['id']])
-            if sender is a:
+            if sender is a and mode not in (5,6):
                 view = a.call('/api/tasks/'+task['id'])
                 assert view['draft'] is None and view['response'] is None
             if mode == 0:
@@ -236,8 +237,9 @@ with tempfile.TemporaryDirectory(prefix='litecom-soak-') as directory:
                 assert sender.call('/api/tasks/'+task['id'])['response'] is None
                 counts['cancel_before_sharing'] += 1
             else:
-                decision(task)
-                decision(task)  # Safe duplicate approval.
+                if mode not in (5,6):
+                    decision(task)
+                    decision(task)  # Safe duplicate approval.
                 received = sender.call('/api/files/'+file['id'], raw=True)
                 assert received == payload
                 sender.call('/api/files/'+file['id']+'/received', {'sha256': '0'*64}, expected=400)

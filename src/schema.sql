@@ -84,3 +84,10 @@ CREATE TABLE IF NOT EXISTS tool_permissions (
   task_id TEXT NOT NULL REFERENCES tasks(id), id TEXT NOT NULL,
   decision TEXT, data BLOB NOT NULL, PRIMARY KEY(task_id,id)
 );
+
+CREATE TABLE IF NOT EXISTS channel_actions (
+  token_hash TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE,
+  channel_id TEXT NOT NULL REFERENCES channels(id), task_id TEXT NOT NULL REFERENCES tasks(id),
+  target_key TEXT NOT NULL, data BLOB NOT NULL,
+  UNIQUE(channel_id,task_id,target_key)
+);

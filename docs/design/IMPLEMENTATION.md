@@ -20,7 +20,7 @@ flowchart TD
 
 Litecom owns identity, contacts, durable requests, approvals, and delivery. The selected harness supplies reasoning, context, and execution. The OS service stays alive after the terminal closes; model work happens on requests, not an endless model polling loop. Start with one running job per computer and persistent queues. No separate workflow engine or message broker.
 
-After initial setup, no per-request approval should require returning to the computer. Run, tool, and sharing decisions go through the selected Phone, Slack, or Email channel. Adapters must forward necessary permission decisions remotely or report an explicit unsupported operation; a hidden local confirmation prompt cannot be part of the normal flow.
+After initial setup, no per-request approval should require returning to the computer. Request and additional tool decisions go through the selected Phone, Slack, or Email channel. Adapters must forward necessary permission decisions remotely or report an explicit unsupported operation; a hidden local confirmation prompt cannot be part of the normal flow.
 
 Use one Rust repository and binary: a terminal client, the background worker, and a relay with Tokio, Axum, SQLite, encrypted payload storage, and small browser pages. Computers connect outbound. The relay routes requests and stores status; users do not open ports. Local wakeups use an authenticated outbound notification stream and resume from durable task state.
 
@@ -59,7 +59,7 @@ The relay hosts discoverable Agent Cards and authenticated per-account A2A endpo
 
 Use the SDK’s actual enum names, including its required prefix. Owner approval is application authorization; it is not an instruction for the requesting agent to approve itself. Revoking a completed result changes access, not its historical task state. Receipt acknowledgement is separate from A2A completion: the receiving adapter/page confirms retrieval; an attempted HTTP response alone is insufficient.
 
-Only safe progress is visible before approval. Private drafts, source filenames, tool output, and reasoning must not leak through task history, streams, or artifacts. After sharing approval, publish text/data parts and authenticated file references. After action approval, return only receipts/results within that approved scope. No bearer secrets in artifact URLs.
+Only safe progress is visible before approval. Private drafts, source filenames, tool output, and reasoning must not leak through task history, streams, or artifacts. The single request approval authorizes execution and publication of the final text/data parts and authenticated file references. After action approval, return only receipts/results within that approved scope. No bearer secrets in artifact URLs.
 
 ## General actions, with a real approval boundary
 
@@ -67,7 +67,7 @@ Only safe progress is visible before approval. Private drafts, source filenames,
 
 Requests are ordinary instructions for the selected agent. Litecom does not classify them into GitHub, email, or other service-specific actions. The agent uses its existing tools, connections, and context to work out how to fulfill them. Litecom supplies routing, approval, and result delivery. Adding a new service to the agent must not require adding an integration to Litecom.
 
-1. **Prepare:** use authorized reads and an isolated staging area to inspect context, draft content, and propose work. No changes to external systems or the live workspace yet.
+1. **Prepare:** construct the request and selected agent scope without launching the agent or reading its workspace.
 2. **Review:** show the recipient, requested outcome, affected resources, acting account, allowed operations, and any publication. Show a diff or concrete command when already known; expandable details preserve readability.
 3. **Approve:** record the human’s decision against an immutable plan and scope. Sharing binds exact content; an action binds authorized work, not unknowable future output bytes.
 4. **Execute:** continue the selected harness with only the approved permissions. Pause before operations outside that scope. Broker individual tool calls where a broader task boundary cannot be enforced.
@@ -79,7 +79,7 @@ This permits shell commands, code changes, MCP writes, PRs, deployments, and per
 
 Enforcement belongs outside the model. Tool permission callbacks, constrained credentials, filesystem/process/network restrictions, and connector checks must cover every execution path, including subprocesses and hooks. A prompt saying “wait for approval,” an MCP annotation, or an ACP connection alone does not provide that guarantee. If an adapter cannot mediate a tool or confine a task, pause for specific permission or require interactive continuation; do not advertise unattended execution for that combination.
 
-Approval is an authenticated POST. GET only opens review. Store decisions atomically with queued execution/publication; retries reuse the same operation ID. Check external state after an ambiguous timeout before retrying a write. Multistep actions are not atomic: show completed effects and recovery without claiming rollback. Record approval, execution, and result separately so “Approved” never means “Succeeded.”
+Browser approval is an authenticated POST. Direct channel approvals require verified provider identity and an exact-proposal capability. GET only opens review. Store decisions atomically with queued execution/publication; retries reuse the same operation ID. Check external state after an ambiguous timeout before retrying a write. Multistep actions are not atomic: show completed effects and recovery without claiming rollback. Record approval, execution, and result separately so “Approved” never means “Succeeded.”
 
 ### GitHub access example
 

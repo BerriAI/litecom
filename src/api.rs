@@ -134,6 +134,8 @@ pub fn router(state: AppState) -> Router {
             get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
         )
         .route("/api/capabilities", get(capabilities))
+        .route("/webhooks/twilio", post(crate::channel_replies::twilio))
+        .route("/webhooks/slack", post(crate::channel_replies::slack))
         .route(
             "/auth/start",
             post(start_login).layer(DefaultBodyLimit::max(16 * 1024)),
@@ -200,6 +202,24 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/{id}/received", post(download_received))
         .route("/api/work/claim", post(claim))
         .route("/api/events", get(events))
+        .route(
+            "/fonts/geist.woff2",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "font/woff2")],
+                    include_bytes!("web/fonts/geist.woff2").as_slice(),
+                )
+            }),
+        )
+        .route(
+            "/fonts/geist-mono.woff2",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "font/woff2")],
+                    include_bytes!("web/fonts/geist-mono.woff2").as_slice(),
+                )
+            }),
+        )
         .route(
             "/app.js",
             get(|| async {
@@ -269,7 +289,7 @@ async fn security_headers(request: axum::extract::Request, next: Next) -> Respon
 }
 async fn capabilities(State(s): State<AppState>) -> Json<Value> {
     Json(
-        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev}),
+        json!({"phone":s.providers.phone_available(),"email":s.providers.email_available(),"slack":s.providers.slack.is_some(),"development":s.providers.dev,"direct_approvals":{"phone":s.providers.twilio_verification().is_some(),"slack":s.providers.slack_signing_secret().is_some(),"email":s.providers.email_replies_available()}}),
     )
 }
 #[derive(Deserialize)]

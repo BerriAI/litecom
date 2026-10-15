@@ -1,0 +1,3 @@
+# Steps inserted by cargo-dist into its generated release workflow.
+- name: Test before packaging
+  run: cargo test --locked
