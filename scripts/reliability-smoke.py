@@ -109,10 +109,17 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 print('PASS: 205 requests remain reachable without duplicates; large request/reply survives exact approval.',flush=True)
 
             if args.case in ('all', 'routing'):
-                a.goto(origin)
-                a.get_by_text('Ask an agent', exact=True).click()
+                named = api(a, '/api/agents', {'name': 'Studio Mac · Codex', 'kind': 'local', 'make_default': True})
+                a.goto(origin+'/?ask=me')
                 own_agents = api(a, '/api/agents')
                 other_agents = api(a, '/api/agents?owner_id='+person_b['id'])
+                agent_picker = a.locator('select[name="agent"]')
+                expect(agent_picker).to_have_value(named['id'])
+                expect(agent_picker.locator('option:checked')).to_have_text(named['name'])
+                expect(agent_picker.locator('option')).to_have_count(len(own_agents))
+                # A link to another agent must take precedence over the default.
+                a.goto(origin+'/?ask=me&agent='+own_agents[1]['id'])
+                expect(agent_picker).to_have_value(own_agents[1]['id'])
                 held = []
                 a.route('**/api/agents?owner_id=*', lambda route: held.append(route))
                 who = a.locator('select[name="owner"]')
@@ -129,7 +136,8 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
                 a.wait_for_timeout(100)
                 stale.fulfill(json=other_agents)
                 a.wait_for_timeout(100)
-                expect(a.locator('select[name="agent"] option').nth(1)).to_have_attribute('value', own_agents[0]['id'])
+                expect(a.locator('select[name="agent"]')).to_have_value(own_agents[0]['id'])
+                expect(a.locator('select[name="agent"] option')).to_have_count(len(own_agents))
                 a.unroute('**/api/agents?owner_id=*')
                 print('PASS: changing contacts quickly cannot replace the selected person\'s agents with a stale response.', flush=True)
 

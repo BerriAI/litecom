@@ -429,7 +429,7 @@ async function inbox() {
     )
     .join(
       "",
-    )}</select></label><label>Agent<select name="agent"><option value="">Default agent</option>${agents.map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}</option>`).join("")}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
+    )}</select></label><label>Agent<select name="agent" required>${agentOptions(agents)}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
   const requestedAgent = new URLSearchParams(location.search).get("agent");
   if (agents.some((agent) => agent.id === requestedAgent)) {
     document.querySelector('#ask select[name="agent"]').value = requestedAgent;
@@ -502,6 +502,16 @@ async function taskPage(id, update, previous) {
 function agentLabel(agent) {
   const name = agent.name === "Default" ? "Local agent" : agent.name;
   return agent.local?.harness ? `${name} · ${agent.local.harness}` : name;
+}
+function agentOptions(agents) {
+  return agents.length
+    ? agents
+        .map(
+          (agent) =>
+            `<option value="${esc(agent.id)}" ${agent.is_default ? "selected" : ""}>${esc(agentLabel(agent))}</option>`,
+        )
+        .join("")
+    : '<option value="">No agents available</option>';
 }
 function agentSummary(agents) {
   return agents.filter((agent) => agent.connected).map((agent) => esc(agentLabel(agent))).join(" / ") || "No agents connected";
@@ -745,6 +755,8 @@ document.addEventListener("submit", async (e) => {
       notice("Email connected.");
       await boot();
     } else if (form.id === "ask") {
+      if (form.elements.agent.disabled || !data.get("agent"))
+        throw new Error("Choose an available agent before sending.");
       const t = await api("/api/tasks", {
         owner_id: data.get("owner"),
         agent_id: data.get("agent") || null,
@@ -840,20 +852,19 @@ document.addEventListener("change", async (e) => {
     const form = e.target.form,
       owner = e.target.value,
       select = form.elements.agent;
-    select.innerHTML = '<option value="">Default agent</option>';
+    select.innerHTML = '<option value="">Loading agents…</option>';
     select.disabled = true;
     try {
       const agents = await api(
         "/api/agents?owner_id=" + encodeURIComponent(owner),
       );
       if (!form.isConnected || form.elements.owner.value !== owner) return;
-      select.innerHTML =
-        '<option value="">Default agent</option>' +
-        agents
-          .map((a) => `<option value="${esc(a.id)}">${esc(agentLabel(a))}</option>`)
-          .join("");
+      select.innerHTML = agentOptions(agents);
     } catch (err) {
-      if (form.isConnected && form.elements.owner.value === owner) error(err);
+      if (form.isConnected && form.elements.owner.value === owner) {
+        select.innerHTML = '<option value="">Choose a person to retry</option>';
+        error(err);
+      }
     } finally {
       if (form.isConnected && form.elements.owner.value === owner)
         select.disabled = false;
