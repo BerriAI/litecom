@@ -46,7 +46,7 @@ for arg in sys.argv[1:]:
 os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
 """); curl.chmod(0o700)
     with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
-    origin=f'http://127.0.0.1:{port}'; log=root/'relay.log'; connection=None
+    origin=f'http://127.0.0.1:{port}'; log=root/'relay.log'; connections=[]
     with log.open('w') as output, sync_playwright() as p:
         relay=subprocess.Popen([binary,'relay','--listen',f'127.0.0.1:{port}','--public-url',origin,'--data',root/'relay','--dev'],env=env,stdout=output,stderr=output)
         browser=p.chromium.launch(channel='chrome',headless=True)
@@ -68,6 +68,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             page.get_by_role('button',name='Connect local agent',exact=True).click()
             command=page.get_by_label('Terminal command').input_value()
             connection=re.search(r"--connection '([^']+)'",command).group(1)
+            connections.append(connection)
             page.reload(); expect(page.get_by_label('Terminal command')).to_have_value(command)
             page.screenshot(path=str(shots/'command-mobile.png'),full_page=True)
             result=subprocess.run(command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
@@ -125,7 +126,35 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()
             assert Path(download.value.path()).read_bytes()==(work/'notes.txt').read_bytes()
+            # A named second agent must receive its own connection command,
+            # not silently connect another worker to the first agent.
+            first_config=(root/'config/connections'/f'{connection}.json').read_bytes()
+            page.goto(origin+'/agents')
+            page.get_by_text('Add another local agent',exact=True).click()
+            page.get_by_label('Name',exact=True).fill('Second computer')
+            page.get_by_role('button',name='Create agent',exact=True).click()
+            expect(page.get_by_role('heading',name='Connect Second computer',exact=True)).to_be_visible()
+            second_command=page.get_by_label('Terminal command').input_value()
+            second_connection=re.search(r"--connection '([^']+)'",second_command).group(1)
+            connections.append(second_connection)
+            second_agent=next(a for a in page.request.get(origin+'/api/agents').json() if a['name']=='Second computer')
+            result=subprocess.run(second_command,shell=True,executable='/bin/sh',env=env,cwd=work,stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=60)
+            assert result.returncode==0,(result.stdout,result.stderr)
+            expect(page.locator('#connect-status')).to_contain_text('Connected.',timeout=20000)
+            second_config=json.loads((root/'config/connections'/f'{second_connection}.json').read_text())
+            assert second_config['agent_id']==second_agent['id']
+            assert (root/'config/connections'/f'{connection}.json').read_bytes()==first_config
+            page.locator('summary[aria-label="Manage Second computer"]').click()
+            with page.expect_request(lambda r: r.url==origin+'/api/connections/local' and r.method=='POST') as reconnect:
+                page.get_by_role('button',name='Connect Second computer',exact=True).click()
+            assert reconnect.value.post_data_json=={'agent_id':second_agent['id']}
+            for width in [320,1100]:
+                page.set_viewport_size({'width':width,'height':900})
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                page.screenshot(path=str(shots/f'named-agent-{width}.png'),full_page=True)
+            print('PASS: named agent creation connects that exact agent; reconnect targets it; first connection preserved; 320/1100px.')
             print(('Fresh cargo-dist install (mirrored downloads). ' if args.fresh_installer else '')+'PASS: copied command with zero prompts; native MCP setup and asks to Ishaan/self; actual background service; refresh and repeat; one approval; exact download.')
         finally:
-            if connection: subprocess.run([binary,'--connection',connection,'service','remove'],env=env,capture_output=True,timeout=30)
+            for connection in connections:
+                subprocess.run([binary,'--connection',connection,'service','remove'],env=env,capture_output=True,timeout=30)
             browser.close(); relay.terminate(); relay.wait(timeout=15)

@@ -527,20 +527,27 @@ async function agentsPage() {
   } catch {
     sessionStorage.removeItem("local-pairing");
   }
-  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2>${esc(a.name)}${a.is_default && a.name.toLowerCase() !== "default" ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : "Not connected"}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
+  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2>${esc(a.name)}${a.is_default && a.name.toLowerCase() !== "default" ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${a.last_seen_at ? "Last connected " + new Date(a.last_seen_at * 1000).toLocaleString() : "Not connected"}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${a.kind === "local" ? `<button data-action="connect-local" data-id="${esc(a.id)}" aria-label="Connect ${esc(a.name)}">Connect</button>` : ""}${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
   showLocalCommand();
   await pollLocalConnection();
 }
 
 const shellQuote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 const psQuote = (value) => "'" + value.replaceAll("'", "''") + "'";
-async function connectLocal() {
+async function connectLocal(agentId) {
   const agents = await api("/api/agents");
-  const agent =
-    agents.find((a) => a.kind === "local") ||
-    (await api("/api/agents", { name: "This computer", kind: "local" }));
+  const agent = agentId
+    ? agents.find((a) => a.id === agentId && a.kind === "local")
+    : agents.find((a) => a.kind === "local" && a.is_default) ||
+      agents.find((a) => a.kind === "local") ||
+      (await api("/api/agents", { name: "This computer", kind: "local" }));
+  if (!agent)
+    throw new Error(
+      "This agent is no longer available. Refresh and try again.",
+    );
   localPairing = await api("/api/connections/local", { agent_id: agent.id });
   localPairing.agent_id = agent.id;
+  localPairing.agent_name = agent.name;
   localPairing.started = Date.now();
   sessionStorage.setItem("local-pairing", JSON.stringify(localPairing));
   showLocalCommand();
@@ -556,7 +563,7 @@ function showLocalCommand() {
   const command = windows
     ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
     : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
-  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect this computer</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your installed agent and adds MCP. The agent runs in the background. Requests need your approval.</p><p>If several agents are installed, Litecom uses the first detected agent. You can change it later with setup.</p></details></section>`;
+  target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into a terminal in your working folder.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>What this sets up</summary><p>Installs Litecom, connects your installed agent and adds MCP. The agent runs in the background. Requests need your approval.</p><p>If several agents are installed, Litecom uses the first detected agent. You can change it later with setup.</p></details></section>`;
 }
 async function pollLocalConnection() {
   if (!localPairing || !document.getElementById("connect-status") || busy)
@@ -765,11 +772,12 @@ document.addEventListener("submit", async (e) => {
       await api("/api/contacts", { invite: url.pathname.split("/")[2] });
       await render();
     } else if (form.id === "agent") {
-      await api("/api/agents", {
+      const agent = await api("/api/agents", {
         name: data.get("name"),
         kind: data.get("kind"),
       });
       await render();
+      await connectLocal(agent.id);
     } else if (form.id === "devin") {
       const result = await api("/api/agents/devin", {
         name: data.get("name"),
@@ -861,7 +869,7 @@ document.addEventListener("click", async (e) => {
   button.disabled = true;
   try {
     const { action, id } = button.dataset;
-    if (action === "connect-local") return await connectLocal();
+    if (action === "connect-local") return await connectLocal(id);
     if (action === "copy-connect") {
       await navigator.clipboard.writeText(
         document.getElementById("connect-command").value,
