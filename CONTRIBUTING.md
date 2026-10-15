@@ -98,6 +98,8 @@ npm install --prefix .litecom/codex-adapter --ignore-scripts --no-audit --no-fun
 
 The test starts the adapter in read-only mode. When a permission is requested, it prints the path to a private proposal file. Inspect the exact operation, then write `approve` or `decline` to the printed `.decision` path. The test clicks the corresponding Litecom control. It never selects a persistent grant; a decline will normally prevent the expected file result and fail the success check. The default test deadline is five minutes and can be changed with `--timeout`.
 
+On Windows, `./scripts/windows-service-smoke.ps1` checks the built release executable against a temporary Task Scheduler task. It distinguishes installed/stopped from running, then exercises stop and removal. The task has no automatic trigger and is removed during cleanup; this check does not connect an account or model.
+
 ## Container checks
 
 The [self-hosting guide](docs/self-host.md) covers the Compose deployment. To test the container without sending messages or calling a model:

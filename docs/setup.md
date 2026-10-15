@@ -93,6 +93,8 @@ The worker runs as your signed-in OS user. Closing the terminal or coding app do
 
 `service remove` removes automatic startup and preserves your account and settings. It does not revoke remote credentials. Use **Settings → Connected apps → Disconnect** to revoke a connection.
 
+Repeating setup reuses an identical installed executable. When replacing a different build on Windows, stop Litecom's workers and close agent sessions using its MCP connection first, then rerun setup.
+
 macOS uses a per-user LaunchAgent; Linux uses a systemd user service; Windows uses a sign-in task. Only macOS startup has been exercised locally. Native agent configuration is reused; environment-only provider secrets are not copied into startup definitions.
 
 To keep everything in the terminal:

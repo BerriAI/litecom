@@ -37,3 +37,7 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: cargo build --release --locked
+      - name: Verify Windows background-task states
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-service-smoke.ps1

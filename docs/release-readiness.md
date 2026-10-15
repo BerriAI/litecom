@@ -34,7 +34,7 @@ External prerequisites will be recorded when they become relevant. They must not
 
 ## Evidence from the Rust build
 
-- `cargo test --locked`: 53 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, and backup/recovery. These are local tests, not provider or cloud-agent validation.
+- `cargo test --locked`: 55 tests passed on the development Mac, including real loopback HTTP, SDK MCP negotiation, native MCP configuration, A2A task serialization/routing, and backup/recovery. These are local tests, not provider or cloud-agent validation.
 - `cargo clippy --all-targets -- -D warnings`: passed.
 - `scripts/ui-smoke.py`: passed using two isolated Chrome contexts at desktop and phone widths. It verifies phone-account test authentication, mutual contact acceptance, private draft visibility, approval, a byte-verified download, receipt, and revocation. Delivery was explicitly local development mode.
 - README source commands replace the removed TypeScript scaffold. Rust is the product implementation; browser assets are bundled static files.
@@ -51,6 +51,7 @@ Still absent: a deployed hosted endpoint, published installers, actual delivery 
 - Cursor configuration tests preserve comments, unrelated servers, symlinked dotfiles, and a private backup. Native CLI fixtures reject an apparently successful save when the expected connection is absent. Setup probes the exact saved Litecom executable through the official MCP SDK before adding it to the agent.
 - Codex and Claude use the shared collision and retry handling. Codex's structured CLI output and Claude's saved JSON preserve exact argument boundaries; malformed configuration is not treated as an empty configuration. Claude additionally checks the effective user scope and connected status through its native CLI.
 - The full setup smoke passed with Codex 0.160.0 and Claude Code 2.1.296: actual terminal/browser pairing, preserved server-name collision, unchanged configuration on retry, disabled connection rejection without creating a duplicate, and malformed configuration preservation. Claude reports a connected MCP server; Codex returns the exact saved command and arguments. These checks use temporary profiles and make no model calls.
+- Repeating binary installation preserves an identical executable; the Windows test additionally holds a read-only shared handle to exercise replacement restrictions. Windows service status reads Task Scheduler's numeric running state instead of treating every installed task as running. `scripts/windows-service-smoke.ps1` is configured in CI to check real stopped/running/removed states; its result must be verified separately from the local macOS tests.
 
 ## Live native execution
 

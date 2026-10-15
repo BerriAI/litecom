@@ -20,15 +20,31 @@ fn binary() -> Result<PathBuf> {
 pub fn install_binary() -> Result<PathBuf> {
     let dest = binary()?;
     let source = std::env::current_exe()?;
-    if source != dest {
-        config::write_private(&dest, &std::fs::read(source)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o700))?;
-        }
+    copy_binary(&source, &dest)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o700))?;
     }
     Ok(dest)
+}
+fn copy_binary(source: &Path, dest: &Path) -> Result<bool> {
+    if source == dest {
+        return Ok(false);
+    }
+    let bytes = std::fs::read(source)?;
+    match std::fs::read(dest) {
+        Ok(installed) if installed == bytes => return Ok(false),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("Cannot check the installed Litecom executable."),
+    }
+    // Repeating setup must not replace an identical executable. Windows can
+    // read a running executable but refuses to replace it while it is in use.
+    config::write_private(dest, &bytes).context(
+        "Cannot update the installed Litecom executable. Stop its background workers and close agent sessions using Litecom, then retry setup.",
+    )?;
+    Ok(true)
 }
 pub fn log_path(connection: &str) -> Result<PathBuf> {
     config::ClientConfig::path(connection)?;
@@ -297,12 +313,77 @@ pub fn status(connection: &str) -> Result<bool> {
         ])
         .output()?;
     #[cfg(target_os = "windows")]
-    let output = Command::new("schtasks")
-        .args(["/Query", "/TN", &label(connection)?])
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &windows_status_script(connection)?,
+        ])
         .output()?;
     #[cfg(target_os = "macos")]
     return Ok(output.status.success()
         && String::from_utf8_lossy(&output.stdout).contains("state = running"));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "4");
+    #[cfg(target_os = "linux")]
     Ok(output.status.success())
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_status_script(connection: &str) -> Result<String> {
+    // Task Scheduler's invariant numeric state distinguishes Running (4) from
+    // Ready (3). schtasks /Query succeeds for both, and its labels are localized.
+    Ok(format!(
+        "$ErrorActionPreference = 'Stop'; $scheduler = New-Object -ComObject Schedule.Service; $scheduler.Connect(); [int]$scheduler.GetFolder('\\').GetTask('{}').State",
+        label(connection)?
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeating_binary_install_preserves_the_running_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let installed = temp.path().join("bin/litecom");
+        std::fs::write(&source, b"first binary").unwrap();
+        assert!(copy_binary(&source, &installed).unwrap());
+        let modified = std::fs::metadata(&installed).unwrap().modified().unwrap();
+        #[cfg(windows)]
+        let running = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // A running Windows binary can be read, but cannot be replaced.
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(&installed)
+                .unwrap()
+        };
+        assert!(!copy_binary(&source, &installed).unwrap());
+        assert_eq!(
+            std::fs::metadata(&installed).unwrap().modified().unwrap(),
+            modified
+        );
+        std::fs::write(&source, b"updated binary").unwrap();
+        #[cfg(windows)]
+        {
+            assert!(copy_binary(&source, &installed).is_err());
+            assert_eq!(std::fs::read(&installed).unwrap(), b"first binary");
+            drop(running);
+        }
+        assert!(copy_binary(&source, &installed).unwrap());
+        assert_eq!(std::fs::read(&installed).unwrap(), b"updated binary");
+    }
+
+    #[test]
+    fn windows_status_uses_validated_names_and_numeric_task_state() {
+        let script = windows_status_script("qa-status").unwrap();
+        assert!(script.contains("GetTask('org.litecom.qa-status').State"));
+        assert!(script.contains("[int]"));
+        assert!(windows_status_script("bad'; Write-Output '4").is_err());
+    }
 }
