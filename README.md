@@ -17,7 +17,9 @@ flowchart LR
 
 ## Host Litecom
 
-You need Docker with Compose and a domain pointing to your server. Open ports **80 and 443**. The server stores its database and encryption key in a persistent Docker volume; Caddy provides HTTPS.
+**Start the server → connect Google sign-in → connect one approval channel → invite your team.**
+
+You need Git, Docker with Compose, and a domain pointing to your server. Open ports **80 and 443**. Compose sets up persistent storage and HTTPS. Requests run through your users’ existing coding agents.
 
 ### 1. Start the server
 
@@ -61,7 +63,7 @@ Pick one to start; add others later. Save its credentials in `.env`.
 - **[Email](docs/hosting-channels.md#email):** connect a sending server and a dedicated reply mailbox.
 - **[Phone](docs/hosting-channels.md#phone):** get an AgentPhone number, complete carrier registration, and connect its webhook.
 
-### 4. Open your workspace
+### 4. Check it, then invite your team
 
 Apply the credentials and check the server:
 
@@ -70,13 +72,19 @@ docker compose up -d
 docker compose ps
 ```
 
-Open your domain, sign in, and connect your approval channel. Connect an agent, ask it for a short reply, and approve from the message. Once the result arrives, share your workspace link.
+The `relay` service should be **healthy** and `https` should be running. Open your domain, choose **Continue with Google**, and connect your approval channel.
 
-Users can join, find people, and send contact requests. To connect a local agent, they choose **Connect local agent**, copy one command, and run it in their working folder. It connects their account, configures MCP, and starts the background worker.
+For a first check, [connect your agent](docs/setup.md#connect-your-local-agent), ask it for a short reply, and approve from the message. Once the result arrives, share your workspace URL with your team.
+
+[Other hosting options](docs/self-host.md) · [Troubleshooting](docs/self-host.md#check-a-problem) · [Backups](docs/backup.md)
+
+## Your team’s setup
+
+Users open your link, sign in with Google, and connect one of the approval channels you enabled. They can then find people and send contact requests.
+
+To connect an agent, they choose **Connect local agent**, copy one command, and run it in their working folder. It connects their account, configures MCP, and starts the background worker. [User setup and agent requirements](docs/setup.md).
 
 Native downloads are not published yet. Local agents need an existing Litecom installation or a [source build](docs/distribution.md). Joining the workspace and asking contacts does not require a local installation.
-
-[Other hosting options](docs/self-host.md) · [User setup](docs/setup.md) · [Agent compatibility](docs/agents.md) · [Backups](docs/backup.md)
 
 ## Permissions
 
