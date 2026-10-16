@@ -1743,7 +1743,7 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
                 json!({"ok":true,"access_token":"old-token","token_type":"bot","refresh_token":"old-refresh","expires_in":1,"authed_user":{"id":"U1"},"team":{"id":"T1"}})
             }
             "conversations.open" => json!({"ok":true,"channel":{"id":"D1"}}),
-            "chat.update" if payload["text"].as_str().unwrap().encode_utf16().count() > 4000 => {
+            "chat.update" if payload["text"].as_str().unwrap().len() > 4000 => {
                 json!({"ok":false,"error":"msg_too_long"})
             }
             "chat.postMessage" | "chat.update" => json!({"ok":true,"ts":"123.456"}),
@@ -1811,7 +1811,7 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
     }
 
     // Slack accepts a long initial card but rejects chat.update when its
-    // fallback text exceeds 4,000 characters, even with valid full blocks.
+    // fallback text exceeds 4,000 bytes, even with valid full blocks.
     // Exercise the durable delivery path so an approval updates that same card.
     for decision in [Decision::Approve, Decision::Decline] {
         let f = Fixture::new();
@@ -1919,7 +1919,7 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
         let (method, payload, _) = calls.last().unwrap();
         assert_eq!(method, "chat.update");
         assert_eq!(payload["ts"], "123.456");
-        assert!(payload["text"].as_str().unwrap().encode_utf16().count() <= 4000);
+        assert!(payload["text"].as_str().unwrap().len() <= 4000);
         assert_eq!(payload["blocks"][0]["text"], crate::slack::markdown(&body));
         let buttons = payload["blocks"][1]["elements"].as_array().unwrap();
         assert_eq!(buttons.len(), 1);

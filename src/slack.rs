@@ -186,19 +186,20 @@ fn rich_payload(body: &str, blocks: Vec<Value>) -> Result<Value> {
         attachments: vec![],
     })
     .map_err(sdk_error)?;
-    // chat.update rejects fallback text longer than 4,000 characters, even
-    // when the full content fits in blocks (and chat.postMessage accepted it).
+    // chat.update rejects fallback text over 4,000 UTF-8 bytes in production,
+    // even when its character count is within the documented limit and the
+    // full content fits in blocks (and chat.postMessage accepted it).
     // Keep the complete approval scope in blocks; shorten only the preview.
-    if body.encode_utf16().count() > 4000 {
+    if body.len() > 4000 {
         let suffix = "\n\n… Open the message for the full details.";
-        let mut remaining = 4000 - suffix.encode_utf16().count();
+        let mut remaining = 4000 - suffix.len();
         let mut preview = String::new();
         for ch in body.chars() {
-            if ch.len_utf16() > remaining {
+            if ch.len_utf8() > remaining {
                 break;
             }
             preview.push(ch);
-            remaining -= ch.len_utf16();
+            remaining -= ch.len_utf8();
         }
         preview.push_str(suffix);
         payload["text"] = json!(preview);

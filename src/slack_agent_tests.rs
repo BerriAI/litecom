@@ -1024,7 +1024,7 @@ async fn long_slack_replies_are_split_without_losing_unicode_or_reprocessing() {
         .iter()
         .filter(|(p, _)| p == "/chat.postMessage")
         .map(|(_, body)| {
-            assert!(body["text"].as_str().unwrap().encode_utf16().count() <= 4000);
+            assert!(body["text"].as_str().unwrap().len() <= 4000);
             // The notification preview is bounded; the displayed reply is complete.
             assert_eq!(body["blocks"][0]["type"], "markdown");
             body["blocks"][0]["text"].as_str().unwrap()
