@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.23/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.24/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,20 +26,36 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.23/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.24/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.23).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.24).
 
 ## Update an existing installation
 
-Litecom does not update automatically, and there is no `litecom update` command.
+Run this in your own terminal or existing agent chat:
 
-1. Run `litecom runs --active` and wait for active requests to finish. On Windows, also stop your background workers and close agent chats using Litecom before replacing the executable.
-2. Run the installer above, then check `litecom --version`.
-3. Restart each connection with `litecom --connection NAME service start`. Use the name after `--connection` in your original setup command, or `default` if it had no name. Your account, settings, and saved results stay in place. You do not need to sign in again.
+```sh
+litecom update
+```
 
-Check the connection with `litecom --connection NAME doctor`. If you skipped macOS permission setup, run `litecom approve`.
+`litecom upgrade` is an alias. The command downloads the newest published release (including alpha releases), verifies its checksum, and updates both the CLI and installed worker/MCP executable. It pauses new requests, waits up to ten minutes for active requests to finish, and restarts only the background workers that were running. Saved connections, agent choices, folders, MCP configuration, and service environment stay in place. No sign-in or pairing is needed.
+
+Use `litecom update --check` to check without installing, or `litecom update --wait 1800` to allow thirty minutes for active work. Run it outside a Litecom-dispatched request: that request itself would keep its worker busy. If an update is interrupted, the server's temporary pause expires within three minutes. A failed download leaves the installation alone; a failed replacement restores the previous executables. A restart failure lists the connections that need attention.
+
+The server must support updates (alpha.24 or later). Self-hosters should upgrade the server first. This command does not restart a self-hosted relay or manually started `litecom worker` processes; restart those through your normal process manager when idle.
+
+Already-open chats can keep using CLI tools. Start a new Codex, Claude Code, or other agent chat when you want its refreshed MCP tool catalog. Updating does not grant additional operating-system permissions; run `litecom approve` if you previously skipped permission setup.
+
+### Upgrading from alpha.23 or earlier
+
+Older builds do not have the update command. On macOS or Linux, run the following once, using your team's Litecom URL:
+
+```sh
+curl -fsSL https://YOUR-SERVER/install.sh | sh -s -- update
+```
+
+This installs the new command and runs it against your saved connections. On Windows, run the versioned PowerShell installer above, then `litecom update`. Future upgrades use `litecom update` on every platform. Litecom does not install updates automatically.
 
 Local connections have no routine sign-in expiry. If a connection was revoked or its credentials were lost, run `litecom reconnect`; it keeps the saved agent and folder. Browser sessions expire separately and offer **Sign in again** on the current page.
 

@@ -7,7 +7,7 @@ impl Store {
         self.transaction(|| {
             self.db.execute_batch("UPDATE credentials SET revoked=1;
                 DELETE FROM otp; DELETE FROM local_pairings; DELETE FROM devices; DELETE FROM channel_challenges;
-                DELETE FROM login_states;
+                DELETE FROM login_states; DELETE FROM settings WHERE key LIKE 'worker-update:%';
                 DELETE FROM oauth_links; DELETE FROM channel_actions; DELETE FROM deliveries; DELETE FROM channels;
                 DELETE FROM cloud_jobs; DELETE FROM tool_permissions; DELETE FROM slack_jobs;
                 UPDATE agents SET config=NULL,last_seen_at=NULL;

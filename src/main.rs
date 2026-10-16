@@ -49,6 +49,9 @@ enum Command {
     },
     /// Connect this computer or harness to your account.
     Setup(Setup),
+    /// Update this installation and restart its existing background workers.
+    #[command(visible_alias = "upgrade")]
+    Update(litecom::update::Options),
     /// Reconnect a disconnected device, keeping its saved agent and folder.
     Reconnect,
     /// Finish system permission setup for agents already connected on this computer.
@@ -266,6 +269,7 @@ async fn run(cli: Cli) -> Result<()> {
             litecom::runs::logs(id.as_deref(), follow, raw).await?
         }
         Command::Uninstall { all } => litecom::uninstall::run(all).await?,
+        Command::Update(options) => litecom::update::run(options).await?,
         Command::Approve => litecom::folder_access::approve().await?,
         Command::ReadTools { session } => litecom::read_tools::serve(&session).await?,
         Command::CheckAccess { result } => {
@@ -464,5 +468,21 @@ async fn shutdown() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    #[test]
+    fn update_and_upgrade_share_the_same_options() {
+        for name in ["update", "upgrade"] {
+            let cli = Cli::try_parse_from(["litecom", name, "--check", "--wait", "1800"]).unwrap();
+            let Some(Command::Update(options)) = cli.command else {
+                panic!("Missing update command")
+            };
+            assert!(options.check);
+            assert_eq!(options.wait, 1800);
+        }
     }
 }

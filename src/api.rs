@@ -285,6 +285,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/{id}", get(download))
         .route("/api/files/{id}/received", post(download_received))
         .route("/api/work/claim", post(claim))
+        .route("/api/work/update", post(worker_update))
         .route("/api/tasks/{id}/read/slack", post(crate::slack_reads::read))
         .route("/api/work/prepare", post(claim_preparation))
         .route("/api/events", get(events))
@@ -1242,6 +1243,22 @@ async fn download(
         HeaderValue::from_str(&file.sha256).map_err(|e| Error::Internal(e.into()))?,
     );
     Ok(response)
+}
+#[derive(Deserialize)]
+struct WorkerUpdate {
+    id: String,
+    #[serde(default)]
+    release: bool,
+}
+async fn worker_update(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Json(v): Json<WorkerUpdate>,
+) -> Result<Json<Value>> {
+    let p = s.principal(&h, true)?;
+    Ok(Json(
+        json!({"active": s.db()?.worker_update(&p, &v.id, v.release)?}),
+    ))
 }
 #[derive(Deserialize)]
 struct WorkerCapabilities {

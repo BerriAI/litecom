@@ -1,6 +1,6 @@
 [package]
 name = "litecom"
-version = "0.1.0-alpha.23"
+version = "0.1.0-alpha.24"
 edition = "2024"
 rust-version = "1.88"
 description = "Ask someone's agent. They approve. It gets done."
@@ -31,6 +31,7 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
 rmcp = { version = "3.5.1", features = ["transport-io", "client", "transport-child-process"] }
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

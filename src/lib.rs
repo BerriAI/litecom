@@ -38,3 +38,5 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 pub mod uninstall;
+
+pub mod update;

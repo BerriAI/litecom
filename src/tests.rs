@@ -28,6 +28,9 @@ mod slack_agent_tests;
 #[path = "security_tests.rs"]
 mod security_tests;
 
+#[path = "update_tests.rs"]
+mod update_tests;
+
 #[path = "room_tests.rs"]
 mod room_tests;
 

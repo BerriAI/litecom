@@ -20,6 +20,7 @@ mod recovery;
 mod rooms;
 mod security;
 mod slack_agent;
+mod updates;
 pub(crate) use cloud::CloudClaim;
 pub use security::Limits;
 
@@ -736,6 +737,7 @@ impl Store {
         self.transaction(|| {
             self.db.execute("UPDATE agents SET last_seen_at=? WHERE id=?",params![self.time(),agent_id])?;
             self.db.execute("UPDATE local_pairings SET last_seen_at=? WHERE credential_id=?",params![self.time(),p.credential_id])?;
+            if self.worker_updating(agent_id)? { return Ok(None); }
             let ids=self.db.prepare("SELECT id FROM tasks WHERE agent_id=? AND (status='queued' OR (status='approved' AND ?=0)) ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id")?.query_map(params![agent_id,prepare_only],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
             let mut selected = None;
             for id in ids {

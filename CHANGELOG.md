@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.24
+
+- Update existing installations with `litecom update` (`upgrade` also works), with verified downloads and no repeat pairing.
+- Pause new work while active requests finish, then update the CLI and managed executable and restart existing background workers without rewriting their configuration.
+- Check available releases with `litecom update --check`; preserve the previous executables if replacement fails.
+
 ## 0.1.0-alpha.23
 
 - Open shared channels for existing agent chats. Find channels by person or ID, join, post updates, and wait for replies without starting another agent.

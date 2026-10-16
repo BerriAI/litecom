@@ -381,6 +381,83 @@ pub fn status(connection: &str) -> Result<bool> {
     Ok(output.status.success())
 }
 
+/// Update only services owned by this configuration directory. Never rewrite
+/// their PATH, environment, startup policy, or working directory during upgrade.
+pub(crate) fn running_owned(connection: &str) -> Result<bool> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let path = service_path(connection)?;
+        if !path.try_exists()? {
+            return Ok(false);
+        }
+        let content = std::fs::read_to_string(&path)?;
+        let home = config::home()?.canonicalize()?;
+        #[cfg(target_os = "macos")]
+        let owned = content.contains(&format!(
+            "<key>LITECOM_HOME</key><string>{}</string>",
+            xml(&home.to_string_lossy())
+        )) && content.contains(&format!(
+            "<string>{}</string>",
+            xml(&binary()?.to_string_lossy())
+        ));
+        #[cfg(target_os = "linux")]
+        let owned = content.contains(&format!(
+            "Environment={}",
+            systemd_quote(&format!("LITECOM_HOME={}", home.display()))
+        )) && content.contains(&format!(
+            "ExecStart={} ",
+            systemd_quote(&binary()?.to_string_lossy().replace('$', "$$"))
+        ));
+        if !owned {
+            bail!(
+                "The startup service for {connection} belongs to another installation. It was preserved."
+            );
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let executable = binary()?.to_string_lossy().replace('\'', "''");
+        let output = Command::new("powershell.exe").args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            &format!("$ErrorActionPreference='Stop'; $task = {}; if (-not $task) {{ exit 0 }}; if ($task.Actions.Execute -ne '{executable}') {{ throw 'The startup task belongs to another installation.' }}; Write-Output present", windows_task_lookup(connection)?)
+        ]).output()?;
+        if !output.status.success() {
+            bail!("Cannot verify startup ownership for {connection}.");
+        }
+        if String::from_utf8_lossy(&output.stdout).trim().is_empty() {
+            return Ok(false);
+        }
+    }
+    status(connection)
+}
+
+pub(crate) fn start_existing(connection: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    checked(
+        Command::new("launchctl")
+            .arg("bootstrap")
+            .arg(format!("gui/{}", unsafe { libc::getuid() }))
+            .arg(service_path(connection)?),
+    )?;
+    #[cfg(target_os = "linux")]
+    checked(Command::new("systemctl").args([
+        "--user",
+        "start",
+        &format!("{}.service", label(connection)?),
+    ]))?;
+    #[cfg(target_os = "windows")]
+    checked(Command::new("powershell.exe").args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &format!(
+            "$ErrorActionPreference='Stop'; Start-ScheduledTask -TaskName '{}'",
+            label(connection)?
+        ),
+    ]))?;
+    Ok(())
+}
+
 #[cfg(any(target_os = "windows", test))]
 fn windows_install_script(connection: &str, executable: &Path, home: &Path) -> Result<String> {
     fn powershell_literal(value: &str) -> String {
