@@ -26,7 +26,7 @@ npm install -g pi-acp@0.0.34
 litecom setup --agent pi
 ```
 
-Choose your approval channel, connect your Litecom account, and confirm a working folder. Setup adds Litecom's tools through `pi mcp add`. Litecom starts the adapter; the adapter starts your existing Pi in RPC mode. Pi keeps its model configuration, skills, extensions, and tools. No separate Litecom model or API key is needed.
+Choose your approval channel and connect your Litecom account. New connections use your home folder. Setup adds Litecom's tools through `pi mcp add`. Litecom starts the adapter; the adapter starts your existing Pi in RPC mode. Pi keeps its model configuration, skills, extensions, and tools. No separate Litecom model or API key is needed.
 
 Pi's ordinary tools keep their native access. Extension confirmation prompts are forwarded for one-time approval. Multiple-choice extension prompts are declined because Litecom's approval controls cannot select between their meanings. Free-text extension prompts are unsupported by this adapter. `pi-acp` 0.0.34 does not apply ACP session MCP settings, so Litecom uses Pi's native MCP configuration.
 
@@ -38,7 +38,7 @@ For another installed ACP agent:
 litecom setup --acp /absolute/path/to/your-agent
 ```
 
-Replace the path with that agent's executable. Add `--acp-arg=VALUE` for each required argument. Choose your working folder when prompted. Your Litecom connection and agent selection are saved; you do not need to keep this terminal open after background startup succeeds.
+Replace the path with that agent's executable. Add `--acp-arg=VALUE` for each required argument. The agent starts in your home folder by default. Pass `--workspace /absolute/folder` to use another folder. Your Litecom connection and agent selection are saved; you do not need to keep this terminal open after background startup succeeds.
 
 Litecom supplies its MCP tools to session-capable adapters automatically. Named Pi, Cursor, OpenCode, OpenClaw, and Hermes connections also save tools in the agent's native settings during setup. For a custom ACP executable, use `litecom mcp-config` if you also want tools in its ordinary sessions. `--no-mcp` skips adding tools and disables session injection; it does not remove an existing native connection. Direct Codex and Claude Code connections remain available alongside their ACP adapters.
 

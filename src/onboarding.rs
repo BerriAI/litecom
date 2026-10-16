@@ -33,7 +33,7 @@ pub struct Setup {
     /// Argument for the ACP executable; repeat for multiple arguments.
     #[arg(long, requires = "acp", allow_hyphen_values = true)]
     pub acp_arg: Vec<String>,
-    /// Folder your agent can use for this connection's work and attachments.
+    /// Folder for this connection's work and attachments (default: your home folder).
     #[arg(long)]
     pub workspace: Option<PathBuf>,
     /// Connect for sending requests only; skip the receiving worker.
@@ -366,15 +366,34 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
 
 fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
     let theme = dialoguer::theme::ColorfulTheme::default();
-    let saved_runner = RunnerConfig::load(connection).ok();
-    let settings = if let Some(mut saved) =
-        saved_runner.filter(|_| options.agent.is_none() && options.acp.is_none())
+    let mut saved_runner: Option<RunnerConfig> =
+        match std::fs::read(RunnerConfig::path(connection)?) {
+            Ok(bytes) => Some(
+                serde_json::from_slice(&bytes)
+                    .context("Your saved agent settings could not be read. Check the connection's runner configuration.")?,
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+    let workspace = match options
+        .workspace
+        .clone()
+        .or_else(|| saved_runner.as_ref().map(|saved| saved.workspace.clone()))
     {
-        if let Some(path) = &options.workspace {
-            saved.workspace = path
-                .canonicalize()
-                .context("Choose an existing working folder.")?;
-        }
+        Some(path) => path,
+        None => directories::BaseDirs::new()
+            .context("Cannot find your home folder. Pass --workspace /absolute/folder.")?
+            .home_dir()
+            .to_path_buf(),
+    }
+    .canonicalize()
+    .context("Choose an existing folder with --workspace /absolute/folder.")?;
+    if let Some(saved) = &mut saved_runner {
+        saved.workspace = workspace.clone();
+    }
+    let settings = if let Some(saved) = saved_runner.filter(|saved| {
+        options.agent.is_none() && options.acp.is_none() && saved.validate().is_ok()
+    }) {
         saved
     } else {
         let detected = runner::detect();
@@ -425,18 +444,6 @@ fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
                 )?;
             detected[choice].clone()
         };
-        let workspace = match &options.workspace {
-            Some(path) => path.clone(),
-            None if options.connect_code.is_some() => std::env::current_dir()?,
-            None => PathBuf::from(
-                dialoguer::Input::<String>::with_theme(&theme)
-                    .with_prompt("Folder your agent can work in")
-                    .default(std::env::current_dir()?.to_string_lossy().into())
-                    .interact_text()?,
-            ),
-        }
-        .canonicalize()
-        .context("Choose an existing folder.")?;
         RunnerConfig {
             agent,
             executable,

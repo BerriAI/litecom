@@ -56,6 +56,7 @@ try:
         assert result.returncode == 0, result.stdout
         saved = root/'config/connections/default.runner.json'
         assert json.loads(saved.read_text())['agent'] == 'claude'
+        assert Path(json.loads(saved.read_text())['workspace']) == Path.home().resolve(), 'New setup must use the home folder, not the launch directory.'
         for label in ['Codex', 'Claude Code', 'OpenCode', 'pi', 'OpenClaw', 'Hermes', 'Cursor', 'Codex (ACP)', 'Claude Agent (ACP)']:
             assert label in result.stdout, result.stdout
         before = saved.read_bytes()
@@ -65,6 +66,30 @@ try:
         result = subprocess.run(prefix+['--agent', 'opencode'], env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         assert json.loads(saved.read_text())['agent'] == 'open_code'
+        # An explicit folder survives a retry and an agent switch from another directory.
+        work = root/'chosen-folder'
+        work.mkdir()
+        result = subprocess.run(prefix+['--workspace', str(work)], env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        result = subprocess.run(prefix+['--agent', 'codex'], env=env, cwd=programs, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert Path(json.loads(saved.read_text())['workspace']) == work.resolve()
+        result = subprocess.run(prefix, env=env, cwd=programs, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert Path(json.loads(saved.read_text())['workspace']) == work.resolve()
+        # A missing folder must not silently broaden an existing connection to home.
+        before = saved.read_bytes()
+        work.rmdir()
+        result = subprocess.run(prefix+['--agent', 'opencode'], env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        assert result.returncode != 0 and saved.read_bytes() == before
+        assert '--workspace' in result.stderr
+        work.mkdir()
+        # Replacing a missing executable still preserves the selected folder.
+        (programs/'codex').rename(programs/'codex-removed')
+        result = subprocess.run(prefix+['--agent', 'opencode'], env=env, cwd=programs, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert Path(json.loads(saved.read_text())['workspace']) == work.resolve()
+        (programs/'codex-removed').rename(programs/'codex')
         # First setup without a terminal must not consume the pairing code.
         env['LITECOM_HOME'] = str(root/'noninteractive')
         result = subprocess.run(prefix, env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True)
@@ -80,7 +105,7 @@ try:
         result = subprocess.run(prefix, env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True, text=True)
         assert result.returncode != 0 and 'No coding agents found' in result.stderr
         assert len(polls) == 2
-        print('PASS: every supported agent listed; non-default selection through piped stdin; saved choice reused; explicit override; no-terminal, one-agent and no-agent cases.')
+        print('PASS: every supported agent listed; non-default selection through piped stdin; saved choice reused; explicit override; home-folder default and saved-folder preservation; no-terminal, one-agent and no-agent cases.')
 finally:
     server.shutdown()
     server.server_close()

@@ -4,7 +4,7 @@ Litecom uses one executable for the client, background worker, and shared server
 
 ## Connect from your workspace
 
-Open your host's Litecom link, sign in, and choose **Connect local agent → Copy command**. Paste the command into a terminal in your agent's working folder and press Enter.
+Open your host's Litecom link, sign in, and choose **Connect local agent → Copy command**. Paste the command into any terminal and press Enter. New connections use your home folder (`~`).
 
 The command downloads the native executable for your computer, connects your account, configures MCP, and starts the background worker. You do not need Rust or a source checkout. Wait for **Connected** in the browser and **Listening for requests** in the terminal, then close the terminal. [Full setup guide](setup.md).
 
@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.16/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.17/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,10 +26,10 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.16/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.17/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.16).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.17).
 
 ## Build from source
 

@@ -18,6 +18,14 @@ litecom --connection NAME setup --relay https://YOUR-SERVER
 
 Replace the address with your host’s URL. This alternative selects an approval channel and opens browser pairing. A returning valid connection reuses saved settings. `--requester-only` configures sending without a receiving worker; `--connection NAME` gives another harness its own revocable connection.
 
+New connections start in your home folder (`~`), regardless of where you run setup. Rerunning setup or switching agents keeps the saved folder. To use a different folder:
+
+```sh
+litecom --connection NAME setup --workspace /absolute/folder
+```
+
+Replace `/absolute/folder` with the folder you want the agent to use. On macOS/Linux, `--workspace ~` selects your home folder; in PowerShell, use `--workspace "$HOME"`. The selected folder appears in setup output and each request’s **Agent and access** details. Your agent’s tool permissions still apply.
+
 ## Background operation
 
 The worker runs as your signed-in OS user. Closing the terminal or coding app does not stop it. Sleeping, signing out, or shutting down the computer makes its local agent unavailable. Requests remain queued. Devin sessions are monitored by the relay and can continue while your computer is off. See [cloud agents](cloud-agents.md) for connection requirements.

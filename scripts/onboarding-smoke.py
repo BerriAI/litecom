@@ -89,7 +89,7 @@ done
     (work/'reply.fixture').write_text(json.dumps({'text':'The requested notes are attached.', 'files':[str(attachment)]}))
     env = dict(os.environ, LITECOM_HOME=str(root/'config'), PATH=str(programs)+os.pathsep+os.environ['PATH'])
     prefix = [str(binary), '--connection', connection]
-    command = prefix+['setup', '--relay', args.url, '--no-mcp', '--no-browser']
+    command = prefix+['setup', '--relay', args.url, '--no-mcp', '--no-browser', '--workspace', str(work)]
     if not args.with_service:
         command.append('--no-background')
     terminal = worker = None
@@ -104,8 +104,6 @@ done
                 os.write(terminal.master,b'\x1b[B')
             terminal.enter()
             terminal.until('Which agent should handle your requests?')
-            terminal.enter()
-            terminal.until('Folder your agent can work in')
             terminal.enter()
             output = terminal.until('?approve='+args.approval)
             url = re.search(re.escape(args.url)+r'/connect/[A-Za-z0-9-]+\?approve='+args.approval,output).group(0)
@@ -134,7 +132,7 @@ done
                 page.get_by_role('button',name='Connect email',exact=True).click()
             expect(page.get_by_role('heading',name='Connect this agent?')).to_be_visible()
             page.get_by_role('button',name='Connect agent',exact=True).click()
-            terminal.until('Add a person:')
+            terminal.until('Invite someone:')
             terminal.finish()
             terminal.close()
             terminal = None
