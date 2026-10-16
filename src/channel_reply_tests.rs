@@ -52,6 +52,42 @@ fn slack_actor() -> ChannelActor {
         channel: "D1".into(),
     }
 }
+
+#[test]
+fn all_approval_channels_enforce_current_workspace_membership() {
+    for kind in ["slack", "email", "phone"] {
+        let mut f = Fixture::new();
+        let mut delivery = destination(&f, kind);
+        let task = f.draft("workspace-policy", Some(action()));
+        delivery.task_id = task.id.clone();
+        let approval = f.store.channel_action(&delivery).unwrap().unwrap();
+        let (actor, key) = match kind {
+            "slack" => (slack_actor(), approval.token),
+            "email" => (
+                ChannelActor::Email("moe@example.com".into()),
+                approval.token,
+            ),
+            _ => (ChannelActor::Phone("+14155550102".into()), approval.code),
+        };
+        f.store.workspace_policy = Some(crate::google::Google::new(
+            "test-client".into(),
+            "secret".into(),
+            "example.com",
+        ));
+        assert!(
+            f.store
+                .channel_decide(&actor, &key, Decision::Approve)
+                .is_err()
+        );
+        assert_eq!(count(&f.store, &task.id), 0);
+        super::security_tests::allow_member(&f.store, &f.b.user_id);
+        super::security_tests::allow_member(&f.store, &f.a.user_id);
+        f.store
+            .channel_decide(&actor, &key, Decision::Approve)
+            .unwrap();
+        assert_eq!(count(&f.store, &task.id), 1);
+    }
+}
 fn count(store: &Store, task: &str) -> i64 {
     store
         .db
@@ -697,6 +733,91 @@ fn email_requires_reply_capability_and_connected_sender() {
     assert_eq!(count(&state.db().unwrap(), &task.id), 1);
 }
 
+#[tokio::test]
+async fn channel_read_only_decisions_downgrade_actions_and_replays_cannot_escalate() {
+    for kind in ["slack", "email", "phone"] {
+        let f = Fixture::new();
+        let mut delivery = destination(&f, kind);
+        let settings = crate::runner::RunnerConfig {
+            agent: crate::runner::NativeAgent::Codex,
+            executable: std::env::current_exe().unwrap(),
+            workspace: std::env::temp_dir(),
+            arguments: vec![],
+            mcp: None,
+        };
+        let task = f.draft("downgrade", Some(settings.action("Create a file")));
+        delivery.task_id = task.id.clone();
+        let card = f.store.channel_action(&delivery).unwrap().unwrap();
+        assert!(card.read_only && card.actions);
+        let (url, _, server) = phone_server().await;
+        let state = AppState::new(
+            f.store,
+            "https://relay.example".into(),
+            Providers::test_replies(&url, "slack-secret"),
+        );
+        let app = router(state.clone());
+        match kind {
+            "slack" => {
+                let payload = serde_json::json!({"type":"block_actions","user":{"id":"U1"},"team":{"id":"T1"},"channel":{"id":"D1"},"actions":[{"action_id":"litecom_read_only","value":card.token}]}).to_string();
+                let body = url::form_urlencoded::Serializer::new(String::new())
+                    .append_pair("payload", &payload)
+                    .finish();
+                let time = crate::store::now();
+                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"slack-secret").unwrap();
+                mac.update(format!("v0:{time}:{body}").as_bytes());
+                let response = app
+                    .oneshot(
+                        Request::post("/webhooks/slack")
+                            .header("x-slack-request-timestamp", time.to_string())
+                            .header(
+                                "x-slack-signature",
+                                format!("v0={}", hex::encode(mac.finalize().into_bytes())),
+                            )
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+            "email" => {
+                let mail = format!(
+                    "From: moe@example.com\r\nIn-Reply-To: <litecom-approve-{}@relay.example>\r\nContent-Type: text/plain\r\n\r\nRead-only",
+                    card.token
+                );
+                assert!(crate::email_replies::process(&state, mail.as_bytes()).unwrap());
+            }
+            _ => {
+                let event = phone_event(&format!("READONLY {}", card.code), "+14155550102");
+                assert_eq!(
+                    app.oneshot(signed_phone_request(&event, crate::store::now()))
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::OK
+                );
+            }
+        }
+        let (actor, key) = if kind == "phone" {
+            (ChannelActor::Phone("+14155550102".into()), &card.code)
+        } else if kind == "email" {
+            (ChannelActor::Email("moe@example.com".into()), &card.token)
+        } else {
+            (slack_actor(), &card.token)
+        };
+        state
+            .db()
+            .unwrap()
+            .channel_decide(&actor, key, Decision::Approve)
+            .unwrap();
+        let approved = state.db().unwrap().get_task(&f.b, &task.id).unwrap();
+        assert_eq!(approved.approved_access, Some(RunAccess::ReadOnly));
+        assert!(approved.draft.unwrap().action.unwrap().read_only());
+        assert_eq!(count(&state.db().unwrap(), &task.id), 1);
+        server.abort();
+    }
+}
+
 #[test]
 fn slack_cards_keep_ask_from_and_where_after_the_decision_without_dumping_context() {
     for decision in [Decision::Approve, Decision::Decline] {
@@ -707,6 +828,7 @@ fn slack_cards_keep_ask_from_and_where_after_the_decision_without_dumping_contex
             .create_task_with_source(
                 &f.a,
                 NewTask {
+                    ask_only: false,
                     owner_id: f.b.user_id.clone(),
                     agent_id: Some(f.agent.clone()),
                     request: "Find the Lens PRs. Quoted Slack context: private context dump".into(),
@@ -747,7 +869,10 @@ fn slack_cards_keep_ask_from_and_where_after_the_decision_without_dumping_contex
                 "Where: [Slack thread](https://example.slack.com/archives/C1/p1000000001)"
             )
         );
-        assert!(card.body.contains("reply and files with everyone"));
+        assert!(
+            card.body.contains("answer and requested files")
+                && card.body.contains("everyone in the source Slack channel")
+        );
         assert!(!card.body.contains("private context dump"));
         f.store
             .channel_decide(&slack_actor(), &card.token, decision.clone())

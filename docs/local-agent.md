@@ -116,7 +116,7 @@ If a connection cannot be removed, the command explains what needs attention. Re
 | What you see | Next action |
 | --- | --- |
 | Server cannot be reached | Retry `litecom --connection NAME setup` when the server is available; saved settings remain intact. |
-| Connection expired or disconnected | Run `litecom --connection NAME setup`; it opens pairing again. `litecom --connection NAME setup --reconnect` also starts this explicitly. |
+| Connection disconnected or credentials lost | Run `litecom reconnect` and choose the connection if asked. The saved agent and folder are kept. Ordinary upgrades and restarts do not require sign-in. |
 | No coding agents found | Install and sign in to a supported coding agent, then rerun `litecom --connection NAME setup`. Your existing account is preserved. |
 | Folder unavailable | Reconnect the volume, or run `litecom --connection NAME setup --workspace /absolute/folder`. |
 | MCP server name already exists | Setup preserves the other server and selects an unused name. A matching, enabled Litecom connection is reused. |

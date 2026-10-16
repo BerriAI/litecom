@@ -127,6 +127,7 @@ fn directory_preserves_private_fields_and_blocking_without_contact_approval() {
     assert!(!json.contains("phone") && !json.contains("invite") && !json.contains("token"));
     assert!(f.store.people(&f.bw).is_err());
     let request = || NewTask {
+        ask_only: false,
         owner_id: f.b.user_id.clone(),
         agent_id: None,
         request: "hello".into(),
@@ -264,6 +265,7 @@ fn v2_migration_preserves_accounts_connections_files_and_old_email_challenges() 
             .create_task(
                 &a,
                 NewTask {
+                    ask_only: false,
                     owner_id: b.user_id.clone(),
                     agent_id: None,
                     request: "note".into(),

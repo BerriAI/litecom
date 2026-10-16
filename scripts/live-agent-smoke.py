@@ -164,16 +164,17 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
                 'report what you did. Follow the project instructions. Work only in this folder; '
                 'do not use external services, network tools, or other agents.'
             )
+            requester.get_by_role('combobox', name='Access', exact=True).select_option('actions')
             requester.get_by_role('button', name='Send request', exact=True).click()
             requester.wait_for_url('**/request/*')
             task_url = requester.url
             task_id = task_url.rsplit('/', 1)[1]
             owner.goto(task_url)
-            expect(owner.get_by_role('button', name='Approve', exact=True)).to_be_visible(timeout=15000)
+            expect(owner.locator('button[data-action="approve"]')).to_be_visible(timeout=15000)
             assert not (work / 'result.txt').exists(), 'Agent changed files before run approval'
             owner.screenshot(path=str(evidence / 'run-mobile.png'), full_page=True)
             started = time.monotonic()
-            owner.get_by_role('button', name='Approve', exact=True).click()
+            owner.locator('button[data-action="approve"]').click()
             print('Run approved; waiting for the real agent.', flush=True)
             previous = None
             while time.monotonic() - started < args.timeout:
@@ -220,7 +221,7 @@ with tempfile.TemporaryDirectory(prefix='litecom-live-') as folder:
             assert (work / 'result.txt').read_bytes() == expected, 'Actual file operation produced incorrect bytes'
             hidden = requester.request.get(origin + '/api/tasks/' + task_id).json()
             assert hidden['response'] is not None and hidden['draft'] is None
-            assert owner.get_by_role('button', name='Approve', exact=True).count()==0
+            assert owner.locator('button[data-action="approve"]').count()==0
             owner.screenshot(path=str(evidence / 'review-mobile.png'), full_page=True)
             expect(requester.get_by_role('link', name='result.txt', exact=True)).to_be_visible(timeout=15000)
             with requester.expect_download() as download:

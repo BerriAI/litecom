@@ -25,6 +25,9 @@ mod reliability_tests;
 #[path = "slack_agent_tests.rs"]
 mod slack_agent_tests;
 
+#[path = "security_tests.rs"]
+mod security_tests;
+
 fn user(store: &Store, name: &str, phone: &str) -> (Principal, Session) {
     let (challenge, code) = store.begin_login(name, phone, "browser").unwrap();
     let session = store.verify_login(&challenge.id, &code, "browser").unwrap();
@@ -79,6 +82,7 @@ impl Fixture {
             .create_task(
                 &self.a,
                 NewTask {
+                    ask_only: false,
                     owner_id: self.b.user_id.clone(),
                     agent_id: None,
                     request: "Please send the document".into(),
@@ -227,6 +231,7 @@ fn workspace_requests_need_no_contact_acceptance_and_names_cannot_override_ident
         .create_task(
             &f.a,
             NewTask {
+                ask_only: false,
                 owner_id: c.user_id.clone(),
                 agent_id: None,
                 request: "hi".into(),
@@ -264,6 +269,7 @@ fn self_requests_and_named_cloud_routing_work_without_contacts() {
         .create_task(
             &f.bw,
             NewTask {
+                ask_only: false,
                 owner_id: f.b.user_id.clone(),
                 agent_id: Some(devin.id.clone()),
                 request: "Run my tests".into(),
@@ -534,6 +540,7 @@ fn persisted_state_survives_restart_and_wrong_key_fails() {
         .create_task(
             &a,
             NewTask {
+                ask_only: false,
                 owner_id: a.user_id.clone(),
                 agent_id: None,
                 request: "my task".into(),
@@ -549,7 +556,8 @@ fn persisted_state_survives_restart_and_wrong_key_fails() {
 }
 #[test]
 fn pagination_does_not_skip_equal_timestamps_and_idempotency_rejects_change() {
-    let f = Fixture::new();
+    let mut f = Fixture::new();
+    f.store.limits.requests_per_minute = 200;
     for i in 0..105 {
         f.request(&i.to_string());
     }
@@ -567,6 +575,7 @@ fn pagination_does_not_skip_equal_timestamps_and_idempotency_rejects_change() {
             .create_task(
                 &f.a,
                 NewTask {
+                    ask_only: false,
                     owner_id: f.b.user_id.clone(),
                     agent_id: None,
                     request: "changed".into(),
@@ -1166,6 +1175,7 @@ fi
                 .create_task(
                     &f.a,
                     NewTask {
+                        ask_only: false,
                         owner_id: f.b.user_id.clone(),
                         agent_id: Some(f.agent.clone()),
                         request: "Please prepare another file".into(),
@@ -1584,7 +1594,10 @@ fn slack_linking_requires_the_original_human_session_and_single_use_exchange() {
     let pairs = url
         .query_pairs()
         .collect::<std::collections::HashMap<_, _>>();
-    assert_eq!(pairs["scope"], "chat:write,im:write");
+    assert_eq!(
+        pairs["scope"],
+        "chat:write,im:write,channels:history,groups:history,channels:read,groups:read"
+    );
     assert!(!pairs.contains_key("code_challenge"));
     f.store.take_slack_link(&start.state).unwrap();
     assert!(f.store.take_slack_link(&start.state).is_err());
@@ -1747,7 +1760,7 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
             &destination,
             "Ready for review",
             None,
-            Some("test-capability"),
+            Some(("test-capability", false, true)),
             "https://litecom.example/request/test",
         )
         .await

@@ -134,13 +134,19 @@ pub async fn run(state: AppState) {
                         let message = action
                             .map(|a| a.body.clone())
                             .unwrap_or_else(|| format!("{summary}\n\n{title}"));
-                        send_slack(&state, &d, &message, action.map(|a| a.token.as_str())).await
+                        send_slack(
+                            &state,
+                            &d,
+                            &message,
+                            action.map(|a| (a.token.as_str(), a.read_only, a.actions)),
+                        )
+                        .await
                     }
                     "email" => {
                         let action = action
                             .as_ref()
                             .filter(|_| state.providers.email_replies_available());
-                        let message=action.map(|a|format!("{}\n\nReply with Approve or Decline on the first line.\n\nDetails: {}/request/{}",a.body,state.origin,d.task_id)).unwrap_or_else(||body.clone());
+                        let message=action.map(|a|format!("{}\n\nReply with Approve, Read-only or Decline on the first line.\n\nDetails: {}/request/{}",a.body,state.origin,d.task_id)).unwrap_or_else(||body.clone());
                         state
                             .providers
                             .email_notice(
@@ -157,8 +163,8 @@ pub async fn run(state: AppState) {
                             .filter(|_| state.providers.phone_provider().is_some())
                             .map(|a| {
                                 format!(
-                                    "{}\n\nReply APPROVE {} or DECLINE {}.\nDetails: {}/request/{}",
-                                    a.body, a.code, a.code, state.origin, d.task_id
+                                    "{}\n\nReply APPROVE {}, READONLY {} or DECLINE {}.\nDetails: {}/request/{}",
+                                    a.body, a.code, a.code, a.code, state.origin, d.task_id
                                 )
                             });
                         // Send the complete request; never truncate the scope being approved.
@@ -183,7 +189,7 @@ async fn send_slack(
     state: &AppState,
     d: &Delivery,
     body: &str,
-    action: Option<&str>,
+    action: Option<(&str, bool, bool)>,
 ) -> Result<String> {
     if state.providers.dev {
         eprintln!(

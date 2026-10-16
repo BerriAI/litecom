@@ -94,6 +94,37 @@ function notice(text) {
   notice.timer = setTimeout(() => (el.style.display = "none"), 6000);
 }
 function error(err, id = "page-error") {
+  if (err.status === 401 && profile) {
+    // Keep the page and form in place. Signing in returns to this exact URL;
+    // never silently repeat the failed approval or form submission.
+    if (document.getElementById(id)?.dataset.reauth) return;
+    document.getElementById(id)?.remove();
+    const banner = document.createElement("div");
+    banner.id = id;
+    banner.dataset.reauth = "true";
+    banner.className = "banner";
+    banner.setAttribute("role", "alert");
+    const link = document.createElement("a");
+    link.className = "button primary";
+    link.textContent = "Sign in again";
+    const next = location.pathname + location.search;
+    link.href = capabilities.google
+      ? `/api/auth/google?next=${encodeURIComponent(next)}`
+      : next;
+    link.addEventListener("click", () => {
+      const form = document.querySelector("#ask");
+      if (!form) return;
+      try {
+        sessionStorage.setItem("resume-ask", JSON.stringify({
+          user: profile.id, path: next, at: Date.now(),
+          fields: Object.fromEntries(new FormData(form)), requestId: form.dataset.requestId,
+        }));
+      } catch { /* Sign-in still works if this browser cannot keep a draft. */ }
+    });
+    banner.append("Your session expired. ", link);
+    app.prepend(banner);
+    return;
+  }
   const old = document.getElementById(id);
   if (old?.textContent === err.message) return;
   if (old) old.remove();
@@ -149,13 +180,19 @@ function permissionCard(permission) {
   return `<section class="card permission"><p class="eyebrow">Permission needed</p><h2>${esc(permission.title)}</h2><p>Allow this operation once for this request.</p>${operationFields(fields)}<div class="actions"><button class="primary" data-action="approve-permission" data-id="${esc(permission.id)}">Approve once</button><button data-action="decline-permission" data-id="${esc(permission.id)}">Decline operation</button></div></section>`;
 }
 function draftCard(draft, status) {
+  const askOnly = currentTask?.ask_only;
+  const canRead = ["codex", "claude"].includes(draft.action?.runner);
   const action = draft.action;
-  const body = action
+  const body = askOnly && canRead && status === "awaiting_approval"
+    ? `<p>Your agent can read local files, GitHub and Slack and send an answer. It cannot edit files or take actions in apps.</p>`
+    : action?.kind === "read_only"
+    ? `<p>Approved read-only. Your agent can read local files, GitHub and Slack and return an answer.</p>`
+    : action
     ? `<p>${action.share_result ? "Approve to run this request and send back the result." : "Approve to run this request. This older proposal requires a separate result review."}</p><details><summary>Agent and access</summary><h2>${esc(action.title)}</h2><p>${esc(action.description)}</p><p class="muted">Acts as ${esc(action.acting_account)}.</p>${action.workspace ? `<p class="muted subtitle">Folder: <code>${esc(action.workspace)}</code></p>` : ""}<details><summary>Technical details</summary><pre>${esc(JSON.stringify(action, null, 2))}</pre></details></details>`
     : `<h2>${status === "completed" ? "Result" : "Reply"}</h2><div class="prose">${esc(draft.text)}</div>${files(draft.attachments)}`;
   const controls =
     status === "awaiting_approval"
-      ? `<div class="actions"><button class="primary" data-action="approve">Approve</button><button data-action="decline">Decline</button></div>`
+      ? `<div class="actions">${action && canRead ? `<button class="primary" data-action="approve-read-only">Approve read-only</button>${!askOnly ? '<button data-action="approve">Approve actions</button>' : ''}` : action && askOnly ? '<p>Read-only runs need an updated local Codex or Claude Code connection.</p>' : '<button class="primary" data-action="approve">Approve</button>'}<button data-action="decline">Decline</button></div>`
       : "";
   return action && ["approved", "executing"].includes(status)
     ? `<details class="card"><summary>Request approved</summary>${body}</details>`
@@ -431,11 +468,30 @@ async function inbox() {
     )
     .join(
       "",
-    )}</select></label><label>Agent<select name="agent" required>${agentOptions(agents)}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
+    )}</select></label><label>Agent<select name="agent" required>${agentOptions(agents)}</select></label><label>What do you need?<textarea name="request" placeholder="Find the launch notes and send me the final PDF." required></textarea></label><label>Access<select name="access"><option value="read_only">Ask only · no actions</option><option value="actions">Request actions</option></select></label><button class="primary">Send request</button></form></details><div class="request-list">${tasks.length ? tasks.map((t) => `<article class="request-row"><div class="row"><a class="title-link" href="/request/${encodeURIComponent(t.id)}">${esc(t.request.length > 180 ? t.request.slice(0, 180) + "…" : t.request)}</a>${badge(t.status, t)}</div><p class="muted subtitle">${esc(names.get(t.requester_id) || "Contact")} → ${esc(names.get(t.owner_id) || "Contact")}${t.received_at ? " · Received" : ""}${t.revoked_at ? " · Access revoked" : ""}</p></article>`).join("") : query ? '<div class="empty"><p>No older requests.</p></div>' : '<div class="empty"><h2>No requests yet</h2><p>Ask an agent above, or <a href="/workspace">find someone to ask</a>.</p></div>'}</div>`;
   const requestedAgent = new URLSearchParams(location.search).get("agent");
   if (agents.some((agent) => agent.id === requestedAgent)) {
     document.querySelector('#ask select[name="agent"]').value = requestedAgent;
   }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem("resume-ask") || "null");
+    if (saved) {
+      sessionStorage.removeItem("resume-ask");
+      if (saved.user === profile.id && saved.path === location.pathname + location.search && Date.now() - saved.at < 3600000) {
+        const form = document.querySelector("#ask");
+        const owner = form.elements.owner;
+        if ([...owner.options].some((o) => o.value === saved.fields.owner)) {
+          owner.value = saved.fields.owner;
+          form.elements.agent.innerHTML = agentOptions(await api("/api/agents?owner_id=" + encodeURIComponent(owner.value)));
+          if ([...form.elements.agent.options].some((o) => o.value === saved.fields.agent)) form.elements.agent.value = saved.fields.agent;
+        }
+        form.elements.request.value = saved.fields.request || "";
+        form.elements.access.value = saved.fields.access === "actions" ? "actions" : "read_only";
+        if (saved.requestId) form.dataset.requestId = saved.requestId;
+        document.querySelector(".composer").open = true;
+      }
+    }
+  } catch { sessionStorage.removeItem("resume-ask"); }
   const last = tasks.at(-1);
   if (query || tasks.length === 100) {
     const paging = document.createElement("nav");
@@ -780,6 +836,7 @@ document.addEventListener("submit", async (e) => {
         owner_id: data.get("owner"),
         agent_id: data.get("agent") || null,
         request: data.get("request"),
+        ask_only: data.get("access") !== "actions",
         idempotency_key:
           form.dataset.requestId ||
           (form.dataset.requestId = crypto.randomUUID()),
@@ -1014,12 +1071,13 @@ document.addEventListener("click", async (e) => {
         digest: permission.digest,
         decision: action === "approve-permission" ? "approve" : "decline",
       });
-    } else if (action === "approve" || action === "decline") {
+    } else if (["approve", "approve-read-only", "decline"].includes(action)) {
       const d = currentTask.draft;
       await api(`/api/tasks/${currentTask.id}/decision`, {
         version: d.version,
         digest: d.digest,
-        decision: action,
+        decision: action === "approve-read-only" ? "approve" : action,
+        read_only: action === "approve-read-only",
       });
     } else if (action === "cancel" || action === "received")
       await api(`/api/tasks/${currentTask.id}/${action}`, {});

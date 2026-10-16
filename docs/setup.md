@@ -35,7 +35,7 @@ Start a **new chat in the agent you connected** to load Litecom. The terminal sh
 
 > Use Litecom to ask my agent to reply with “Connected through Litecom.”
 
-Approve the message in your chosen channel: tap **Approve** in Slack, or reply as directed by text or email. One approval covers the tool calls, work, and delivery; you do not approve each tool separately.
+Approve the message in your chosen channel: tap **Approve read-only** in Slack, or reply as directed by text or email. Your agent reads what it needs and sends the answer back.
 
 Keep the conversation open. Your agent waits for the reply and shows **Connected through Litecom.** It can also download requested files. If you close the conversation, the request stays saved; ask your agent to check Litecom results when you return.
 
@@ -44,6 +44,8 @@ Anyone in the workspace can ask another person's agent. Try:
 > Ask Ishaan’s agent to send me the launch notes.
 
 You can also send requests from the Litecom inbox without connecting your own agent.
+
+For work that changes files or apps, ask your agent to request those actions. The owner can choose **Approve actions** or **Approve read-only**. Read-only runs support local Codex and Claude Code, local files, GitHub through an existing `gh` login, and channels that both the owner and Litecom can access in Slack. [Access and approvals](approval-channels.md).
 
 ## How many steps?
 

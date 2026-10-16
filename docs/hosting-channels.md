@@ -15,13 +15,13 @@ Create a Slack app using [server-side OAuth](https://docs.slack.dev/authenticati
 3. In Litecom, choose **Connect Slack** and allow the app. To serve other Slack workspaces, enable distribution in the Slack app’s settings; their administrators may restrict installation.
 4. Send a test request and approve it in the resulting DM. Verify that the result arrives and the original approval message updates.
 
-The generated [Slack app manifest](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/) requests only `chat:write` and `im:write`. For manual setup, the OAuth callback is `/oauth/slack/callback` and the Interactivity request URL is `/webhooks/slack`, both under your public HTTPS address.
+The generated [Slack app manifest](https://docs.slack.dev/app-manifests/configuring-apps-with-app-manifests/) requests `chat:write` and `im:write` for approvals, plus `channels:read`, `groups:read`, `channels:history`, and `groups:history` for approved Slack reads. For manual setup, the OAuth callback is `/oauth/slack/callback` and the Interactivity request URL is `/webhooks/slack`, both under your public HTTPS address.
 
 Do not enable Slack's public-client PKCE option for this server-side app. Token rotation is supported. Workspace administrators may need to allow installation.
 
-Litecom opens a DM with the installing user. It requests no message-history access. Incoming buttons require [Slack's signing secret and timestamp verification](https://docs.slack.dev/authentication/verifying-requests-from-slack/) and the linked workspace, user, and DM channel. The action is bound to the exact proposal. Provider tokens remain encrypted on the relay.
+Litecom opens a DM with the installing user. Read-only requests can read channels and threads that both the owner and app can access. Incoming buttons require [Slack's signing secret and timestamp verification](https://docs.slack.dev/authentication/verifying-requests-from-slack/) and the linked workspace, user, and DM channel. The action is bound to the exact proposal. Provider tokens remain encrypted on the relay.
 
-To also start requests with `@Litecom`, [enable the optional Slack agent](slack-agent.md). It uses this same app and adds message-history permissions. Approval DMs work without it.
+To also start requests with `@Litecom`, [enable the optional Slack agent](slack-agent.md). It uses this same app and adds mention intake and file uploads. Approval DMs work without it.
 
 ## Email
 
@@ -48,7 +48,7 @@ IMAP_PASSWORD
 
 The mailbox must receive mail for `SMTP_FROM`. If it has a different address, set `SMTP_REPLY_TO` to that address. Use the mail server's application password when required. Restart the relay after changing its environment.
 
-Litecom reads INBOX over TLS using `async-imap` and parses replies with `mail-parser`. It preserves read/unread flags, never deletes mail, and checkpoints message UIDs so restarts do not reprocess the inbox. Only an explicit first-line `Approve` or `Decline`, a matching connected sender, and the private reference from the original notification can decide a request. Automatic replies, forwarded quotes, unknown references, and links opened by mail scanners do not approve anything.
+Litecom reads INBOX over TLS using `async-imap` and parses replies with `mail-parser`. It preserves read/unread flags, never deletes mail, and checkpoints message UIDs so restarts do not reprocess the inbox. Only an explicit first-line `Approve`, `Read-only` or `Decline`, a matching connected sender, and the private reference from the original notification can decide a request. Automatic replies, forwarded quotes, unknown references, and links opened by mail scanners do not approve anything.
 
 Treat that mailbox and the connected email accounts as approval credentials. Do not auto-forward request emails to untrusted recipients or give untrusted agents access to them. SMTP acceptance does not prove inbox delivery; verify receiving and replying with your actual mail service.
 

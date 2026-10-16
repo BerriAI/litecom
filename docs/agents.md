@@ -23,11 +23,19 @@ All local adapters currently collect attachments from the selected local folder.
 
 To use an installed agent not detected by the picker, use its [ACP command](acp.md#other-acp-agents). If no local agent is available, setup preserves your Litecom account and explains the missing requirement. You can still send requests with `litecom ask` or connect Devin.
 
+## Read-only requests
+
+Native Codex and Claude Code support **Approve read-only** for local files, GitHub and Slack. Use an updated Litecom worker and native CLI; verified versions are Codex 0.160.0 and Claude Code 2.1.296. Claude requires `--restricted` support (2.1.248 or later). If the native CLI cannot apply the restrictions, the request stops instead of falling back to full access.
+
+Your existing native login stays in place. GitHub reads use your installed, signed-in `gh` CLI. Slack reads use your Litecom Slack connection and channels that both you and the app can access. Other tools are unavailable in this mode. [Read access and approval](approval-channels.md) explains how to request actions when needed.
+
+Computer administrators and native runtimes remain trusted. Claude's managed hooks follow administrator policy; see [the read-only boundary](../SECURITY.md#read-only-approval). ACP and cloud agents currently require action approval.
+
 ## Browser and desktop tools
 
 Litecom starts a background CLI or ACP session. It uses the configuration available to that process; tools provided only inside a desktop application do not automatically carry over. Browser or desktop requests need those tools configured in the receiving agent.
 
-Your request approval authorizes the agent’s tool calls for that run. Litecom answers Codex and ACP permission checks automatically; Claude Code runs with permission checks bypassed for that process. It does not change your global agent settings.
+**Approve actions** authorizes the agent’s tool calls for that run. Litecom answers Codex and ACP permission checks automatically; Claude Code runs with permission checks bypassed for that process. It does not change your global agent settings.
 
 On macOS, setup requests folder, screen-recording, and accessibility access from the background worker. Allow the system prompts and enable any access shown as missing in System Settings. Computer-control tools must already be available to your agent. Other applications may still require their own permissions or sign-in; setup cannot grant access on their behalf.
 

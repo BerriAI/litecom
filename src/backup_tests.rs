@@ -27,6 +27,7 @@ fn live_backup_restores_data_without_reviving_access_or_running_actions() {
             .create_task(
                 &a,
                 NewTask {
+                    ask_only: false,
                     owner_id: b.user_id.clone(),
                     agent_id: None,
                     request: "Please send a note".into(),
@@ -159,6 +160,7 @@ fn live_backup_restores_data_without_reviving_access_or_running_actions() {
         .create_task(
             &fresh_b,
             NewTask {
+                ask_only: false,
                 owner_id: fresh_b.user_id.clone(),
                 agent_id: None,
                 request: "Confirm the recovered agent works".into(),

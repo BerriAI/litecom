@@ -17,8 +17,10 @@ mod files;
 mod identities;
 mod permissions;
 mod recovery;
+mod security;
 mod slack_agent;
 pub(crate) use cloud::CloudClaim;
+pub use security::Limits;
 
 pub const LEASE_TTL: i64 = 120;
 
@@ -46,6 +48,9 @@ pub struct Store {
     pub(crate) db: Connection,
     pub(crate) vault: Vault,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    pub(crate) workspace_policy: Option<crate::google::Google>,
+    pub limits: Limits,
+    uploads: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
 }
 
 impl Store {
@@ -62,7 +67,7 @@ impl Store {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;")?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         conflict(
-            version <= 3,
+            version <= 4,
             "This database was created by a newer Litecom version.",
         )?;
         db.execute_batch(include_str!("schema.sql"))?;
@@ -70,6 +75,9 @@ impl Store {
             db,
             vault: Vault::new(key),
             clock,
+            workspace_policy: None,
+            limits: Limits::default(),
+            uploads: Arc::default(),
         };
         let check: Option<Vec<u8>> = store
             .db
@@ -142,6 +150,11 @@ impl Store {
         // Older builds abandoned delivery after eight attempts. Retry active
         // destinations, while preserving the user's choice to disconnect one.
         store.db.execute("UPDATE deliveries SET state=CASE WHEN EXISTS(SELECT 1 FROM channels c WHERE c.id=deliveries.channel_id AND c.verified=1) THEN 'pending' ELSE 'cancelled' END WHERE state='failed'",[])?;
+        // Upgrade live device connections without resurrecting expired or revoked
+        // credentials. Browser sessions keep their normal lifetime.
+        store.db.execute("UPDATE credentials SET expires_at=? WHERE role='agent' AND revoked=0 AND expires_at>? AND expires_at<?", params![i64::MAX,store.time(),i64::MAX])?;
+        // New read-only action variants cannot be decoded safely by older relays.
+        store.db.pragma_update(None, "user_version", 4)?;
         Ok(store)
     }
 
@@ -539,12 +552,14 @@ impl Store {
         Ok(())
     }
     fn authorized(&self, p: &Principal, task: &Task) -> Result<()> {
+        self.check_workspace(&p.user_id)?;
         require(
             task.view.owner_id == p.user_id || task.view.requester_id == p.user_id,
             "This request belongs to another account.",
         )
     }
     fn owner(&self, p: &Principal, task: &Task) -> Result<()> {
+        self.check_workspace(&p.user_id)?;
         require(
             task.view.owner_id == p.user_id,
             "Only the owner can change this response.",
@@ -603,17 +618,20 @@ impl Store {
             "Provide a request ID for safe retries.",
         )?;
         self.transaction(|| {
+            self.check_workspace(&p.user_id)?;
+            self.check_workspace(&input.owner_id)?;
             require(p.user_id==input.owner_id || self.requests_allowed(&p.user_id,&input.owner_id)?,"Requests between these accounts are blocked.")?;
             // Bind retries to the original requested selector, not today's default.
             let request_hash=hash(serde_json::to_vec(&(&input.owner_id,&input.agent_id,input.request.trim()))?);
             if let Some(existing)=self.db.query_row("SELECT id FROM tasks WHERE requester_id=? AND idempotency_key=?",params![p.user_id,input.idempotency_key],|r|r.get::<_,String>(0)).optional()? {
                 let task=self.task(&existing)?;
-                conflict(task.request_hash==request_hash,"This request ID was already used for different work.")?;
+                conflict(task.request_hash==request_hash && task.view.ask_only==input.ask_only,"This request ID was already used for different work.")?;
                 return self.projection(p,task);
             }
             let agent=self.agents(p,&input.owner_id)?.into_iter().find(|a|input.agent_id.as_ref().map(|id|id==&a.id).unwrap_or(a.is_default)).ok_or(Error::NotFound)?;
+            self.check_request_capacity(&p.user_id)?;
             let time=self.time();
-            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),created_at:time,updated_at:time,expires_at:None,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None,source};
+            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),ask_only:input.ask_only,approved_access:None,created_at:time,updated_at:time,expires_at:None,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None,source};
             self.db.execute("INSERT INTO tasks(id,requester_id,owner_id,agent_id,idempotency_key,status,created_at,updated_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)",params![task.view.id,task.view.requester_id,task.view.owner_id,task.view.agent_id,input.idempotency_key,task.view.status.as_str(),time,time,task.view.expires_at.unwrap_or(i64::MAX),self.vault.seal(&task,&format!("task:{}",task.view.id))?])?;
             self.save(&mut task,"queued")?;
             self.projection(p,task)
@@ -647,6 +665,9 @@ impl Store {
     pub fn recover(&self) -> Result<()> {
         self.transaction(|| {
             for mut task in self.task_rows("SELECT id,data FROM tasks WHERE status NOT IN ('completed','declined','cancelled','failed','expired')",[])? {
+                if !self.task_workspace_allowed(&task)? && task.view.status != Status::CancelRequested {
+                    self.stop(&mut task, true)?;
+                }
                 let expired=task.view.expired(self.time());
                 let lost=task.lease_until.is_some_and(|t|t<=self.time());
                 let cloud: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_jobs WHERE task_id=? AND phase IN ('ready','starting','running'))", [&task.view.id], |r|r.get(0))?;
@@ -680,33 +701,49 @@ impl Store {
         self.claim_internal(p, agent_id)
     }
     fn claim_internal(&self, p: &Principal, agent_id: &str) -> Result<Option<WorkItem>> {
-        self.claim_phase(p, agent_id, false)
+        self.claim_phase(p, agent_id, false, false)
     }
     pub fn claim_preparation(&self, p: &Principal, agent_id: &str) -> Result<Option<WorkItem>> {
         require(
             self.owned_agent(p, agent_id)?.kind == AgentKind::Local,
             "This cloud agent is run by the relay.",
         )?;
-        self.claim_phase(p, agent_id, true)
+        self.claim_phase(p, agent_id, true, false)
+    }
+    pub fn claim_read_capable(&self, p: &Principal, agent_id: &str) -> Result<Option<WorkItem>> {
+        require(
+            self.owned_agent(p, agent_id)?.kind == AgentKind::Local,
+            "This cloud agent is run by the relay.",
+        )?;
+        self.claim_phase(p, agent_id, false, true)
     }
     fn claim_phase(
         &self,
         p: &Principal,
         agent_id: &str,
         prepare_only: bool,
+        read_capable: bool,
     ) -> Result<Option<WorkItem>> {
         require(
             p.role == Role::Agent,
             "Use an agent connection to run work.",
         )?;
         self.owned_agent(p, agent_id)?;
+        self.check_workspace(&p.user_id)?;
         self.recover()?;
         self.transaction(|| {
             self.db.execute("UPDATE agents SET last_seen_at=? WHERE id=?",params![self.time(),agent_id])?;
             self.db.execute("UPDATE local_pairings SET last_seen_at=? WHERE credential_id=?",params![self.time(),p.credential_id])?;
-            let selected=self.db.query_row("SELECT id FROM tasks WHERE agent_id=? AND (status='queued' OR (status='approved' AND ?=0)) ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id LIMIT 1",params![agent_id,prepare_only],|r|r.get::<_,String>(0)).optional()?;
-            let Some(task_id)=selected else{return Ok(None)};
-            let mut task=self.task(&task_id)?;
+            let ids=self.db.prepare("SELECT id FROM tasks WHERE agent_id=? AND (status='queued' OR (status='approved' AND ?=0)) ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id")?.query_map(params![agent_id,prepare_only],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            let mut selected = None;
+            for id in ids {
+                let task = self.task(&id)?;
+                let read_only = task.view.draft.as_ref().and_then(|d|d.action.as_ref()).is_some_and(Action::read_only);
+                if task.view.status == Status::Approved && read_only && !read_capable { continue; }
+                selected = Some(task); break;
+            }
+            let Some(mut task)=selected else{return Ok(None)};
+            let task_id=task.view.id.clone();
             let phase=if task.view.status==Status::Approved {"execute"} else {"prepare"};
             task.view.status=if phase=="execute" {Status::Executing} else {Status::Preparing};
             self.db.execute("UPDATE tool_permissions SET decision='expired' WHERE task_id=? AND decision IS NULL",[&task_id])?;
@@ -718,6 +755,7 @@ impl Store {
     }
     fn lease(&self, p: &Principal, task: &Task, lease: &str) -> Result<()> {
         self.owner(p, task)?;
+        self.check_workspace(&task.view.requester_id)?;
         require(
             p.role == Role::Agent
                 && task.lease_credential.as_deref() == Some(&p.credential_id)
@@ -748,6 +786,20 @@ impl Store {
             )?;
             Ok(task.view.status)
         })
+    }
+    pub(crate) fn check_read_lease(&self, p: &Principal, task_id: &str, lease: &str) -> Result<()> {
+        let task = self.task(task_id)?;
+        self.lease(p, &task, lease)?;
+        require(
+            task.view.status == Status::Executing
+                && task
+                    .view
+                    .draft
+                    .as_ref()
+                    .and_then(|d| d.action.as_ref())
+                    .is_some_and(Action::read_only),
+            "This read-only run is no longer approved.",
+        )
     }
     fn artifact(&self, artifact_id: &str) -> Result<Artifact> {
         let data: Vec<u8> = self
@@ -916,9 +968,21 @@ impl Store {
         digest: &str,
         decision: Decision,
     ) -> Result<TaskView> {
+        self.decide_access(p, task_id, version, digest, decision, false)
+    }
+    pub fn decide_access(
+        &self,
+        p: &Principal,
+        task_id: &str,
+        version: u32,
+        digest: &str,
+        decision: Decision,
+        read_only: bool,
+    ) -> Result<TaskView> {
         p.human()?;
         self.transaction(|| {
             let mut task=self.task(task_id)?;self.owner(p,&task)?;
+            let read_only = decision == Decision::Approve && (read_only || task.view.ask_only);
             conflict(!task.view.expired(self.time()),"This request expired.")?;
             let draft=task.view.draft.as_ref().ok_or_else(||Error::Conflict("The reply is not ready to review.".into()))?;
             conflict(version==draft.version && equal(digest,&draft.digest),"This reply changed. Review the latest version.")?;
@@ -933,6 +997,12 @@ impl Store {
                     progress.message="The reply and files were approved for sharing.".into();
                     progress.needs_attention=false;
                 }
+            }
+            if decision==Decision::Approve && task.view.draft.as_ref().is_some_and(|d|d.action.is_some()) {
+                task.view.approved_access=Some(if read_only {RunAccess::ReadOnly} else {RunAccess::Actions});
+            }
+            if read_only && let Some(action) = task.view.draft.as_mut().and_then(|d|d.action.as_mut()) {
+                *action = action.as_read_only()?;
             }
             task.decision=Some(decision.clone());
             self.db.execute("INSERT INTO approvals(task_id,version,digest,user_id,decision,created_at) VALUES(?,?,?,?,?,?)",params![task_id,version,digest,p.user_id,serde_json::to_string(&decision)?,self.time()])?;

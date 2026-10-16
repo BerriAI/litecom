@@ -247,7 +247,9 @@ impl Store {
             let (Some(user_id),Some(agent_id))=(user,agent) else{return Ok(None)};
             let active:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM agents WHERE id=? AND revoked=0)",[&agent_id],|r|r.get(0))?;
             conflict(active,"This agent was disconnected.")?;
-            let token=secret();let expires_at=self.time()+365*24*60*60;
+            // Device connections remain active until explicitly revoked. Browser
+            // sessions and one-use pairing codes still expire independently.
+            let token=secret();let expires_at=i64::MAX;
             let credential_id = id();
             self.db.execute("INSERT INTO credentials(id,user_id,agent_id,token_hash,role,label,expires_at) VALUES(?,?,?,?,'agent',?,?)",params![credential_id,user_id,agent_id,hash(&token),label,expires_at])?;
             self.db.execute("UPDATE local_pairings SET credential_id=? WHERE device_hash=?",params![credential_id,hash(device_code)])?;

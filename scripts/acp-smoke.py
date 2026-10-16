@@ -142,10 +142,10 @@ for line in sys.stdin:
                 for mode in ['approve','decline','cancel']:
                     note=work/'note.txt'
                     if note.exists(): note.unlink()
-                    text=subprocess.check_output([binary,'ask','me',f'Create a note for the {mode} scenario and send it to me.'],env=env,text=True)
+                    text=subprocess.check_output([binary,'ask','--action','me',f'Create a note for the {mode} scenario and send it to me.'],env=env,text=True)
                     url=re.search(re.escape(origin)+r'/request/[a-f0-9-]+',text).group(0)
                     page.goto(url)
-                    page.get_by_role('button',name='Approve',exact=True).click(timeout=15000)
+                    page.locator('button[data-action="approve"]').click(timeout=15000)
                     expect(page.get_by_role('button',name='Approve once',exact=True)).to_be_visible(timeout=15000)
                     assert not note.exists(), 'Agent acted before tool approval'
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
@@ -172,7 +172,7 @@ for line in sys.stdin:
                     assert decision['optionId']==(('yes' if args.pi_acp else 'once') if mode=='approve' else 'no')
                     assert note.exists()==(mode=='approve')
                     assert 'private thought' not in page.locator('main').inner_text()
-                    assert page.get_by_role('button',name='Approve',exact=True).count()==0
+                    assert page.locator('button[data-action="approve"]').count()==0
                     if mode=='approve':
                         with page.expect_download() as download:
                             page.get_by_role('link',name='note.txt',exact=True).click()

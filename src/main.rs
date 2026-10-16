@@ -44,10 +44,14 @@ enum Command {
     },
     /// Connect this computer or harness to your account.
     Setup(Setup),
+    /// Reconnect a disconnected device, keeping its saved agent and folder.
+    Reconnect,
     /// Finish system permission setup for agents already connected on this computer.
     Approve,
     #[command(hide = true)]
     CheckAccess { result: PathBuf },
+    #[command(hide = true)]
+    ReadTools { session: PathBuf },
     /// Listen for requests and run approved work with your chosen agent.
     Worker {
         /// Handle at most one queued item, then exit.
@@ -111,6 +115,9 @@ enum Command {
     },
     /// Ask a person, or use 'me' for your own agents.
     Ask {
+        /// Allow the owner to approve actions; otherwise request reading only.
+        #[arg(long)]
+        action: bool,
         contact: String,
         request: String,
         #[arg(long)]
@@ -203,11 +210,9 @@ async fn run(cli: Cli) -> Result<()> {
             }
             let data = data.unwrap_or(config::home()?.join("relay"));
             let key = config::load_key(&data)?;
-            let state = AppState::new(
-                Store::open(data.join("litecom.db"), key)?,
-                public_url.clone(),
-                Providers::from_env(dev)?,
-            );
+            let mut store = Store::open(data.join("litecom.db"), key)?;
+            store.limits = litecom::store::Limits::from_env()?;
+            let state = AppState::new(store, public_url.clone(), Providers::from_env(dev)?);
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let notifications = tokio::spawn(litecom::notifications::run(state.clone()));
             let email_replies = tokio::spawn(litecom::email_replies::run(state.clone()));
@@ -257,6 +262,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Uninstall { all } => litecom::uninstall::run(all).await?,
         Command::Approve => litecom::folder_access::approve().await?,
+        Command::ReadTools { session } => litecom::read_tools::serve(&session).await?,
         Command::CheckAccess { result } => {
             let outcome = litecom::folder_access::check_existing().await;
             let error = outcome.as_ref().err().map(|error| format!("{error:#}"));
@@ -264,6 +270,7 @@ async fn run(cli: Cli) -> Result<()> {
             outcome?;
         }
         Command::Setup(options) => litecom::onboarding::setup(options, &cli.connection).await?,
+        Command::Reconnect => litecom::onboarding::reconnect(&cli.connection).await?,
         Command::Service { action } => match action {
             ServiceCommand::Start => litecom::service::install(&cli.connection)?,
             ServiceCommand::Stop => litecom::service::stop(&cli.connection)?,
@@ -299,17 +306,19 @@ async fn run(cli: Cli) -> Result<()> {
             let client = Client::new(ClientConfig::load_named(&cli.connection)?)?;
             match other {
                 Command::Ask {
+                    action,
                     contact,
                     request,
                     agent,
                     request_id,
                 } => {
                     let task = client
-                        .ask(
+                        .ask_with_access(
                             &contact,
                             agent.as_deref(),
                             &request,
                             &request_id.unwrap_or_else(Client::request_id),
+                            !action,
                         )
                         .await?;
                     println!(

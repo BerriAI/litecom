@@ -140,6 +140,7 @@ pub async fn rpc(
                         "Push notifications are not advertised. Use GetTask.",
                     )?;
                 }
+                let ask_only = params.message.metadata.as_ref().and_then(|m|m.get("litecom")).and_then(|m|m.get("ask_only")).map(|value|value.as_bool().ok_or_else(||Error::Invalid("litecom.ask_only must be a boolean.".into()))).transpose()?.unwrap_or(false);
                 let mut texts = vec![];
                 for part in params.message.parts {
                     match part.content{PartContent::Text(text)=>texts.push(text),_=>return Err(Error::Invalid("This agent accepts text requests. Approved responses may contain files.".into()))}
@@ -150,6 +151,7 @@ pub async fn rpc(
                 let mut task = state.db()?.create_task(
                     &p,
                     NewTask {
+                    ask_only,
                         owner_id: owner.clone(),
                         agent_id: Some(agent.clone()),
                         request: texts.join("\n"),

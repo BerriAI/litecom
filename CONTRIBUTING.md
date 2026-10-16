@@ -4,7 +4,7 @@ Litecom is a Rust project. Keep the CLI, background service, and relay in one bi
 
 ## Reuse before building
 
-Prefer established open-source libraries and adapters for capabilities outside Litecom's core: account/contact mapping, request routing, human approval, and controlled delivery. Reuse authentication and cryptographic primitives, protocol SDKs, provider transports, and packaging tools. Use existing agents for reasoning and their connected tools for service actions. Do not add our own model loop or service-specific GitHub/email execution layer.
+Prefer established open-source libraries and adapters for capabilities outside Litecom's core: account/contact mapping, request routing, human approval, and controlled delivery. Reuse authentication and cryptographic primitives, protocol SDKs, provider transports, and packaging tools. Use existing agents for reasoning and their connected tools for service actions. Do not add another model loop or service-specific action layer. The read-only gateway is a narrow enforcement boundary: fixed retrieval endpoints only, no arbitrary HTTP or shell forwarding.
 
 Before adopting a dependency, check its license, maintenance, documented compatibility, permission behavior, and installation burden. Prefer released versions and verify the actual integration. For example, Pi uses the external `pi-acp` adapter through our shared ACP client; Litecom does not maintain a second Pi protocol bridge. A dependency's limitations belong in the compatibility docs.
 
@@ -25,7 +25,7 @@ The browser smoke test requires Python 3, Playwright, and installed Google Chrom
 
 ```sh
 python3 -m venv .litecom/qa
-.litecom/qa/bin/pip install playwright
+.litecom/qa/bin/pip install playwright markdown
 mkdir -p .litecom/qa-data
 ./target/debug/litecom relay \
   --public-url http://127.0.0.1:4141 \
@@ -122,6 +122,21 @@ The test starts the adapter in read-only mode. When a permission is requested, i
 On Windows, `./scripts/windows-service-smoke.ps1` checks the built release executable against a temporary Task Scheduler task. It distinguishes installed/stopped from running, then exercises stop and removal. The task has no automatic trigger and is removed during cleanup; this check does not connect an account or model.
 
 `python scripts/background-service-smoke.py --binary target/debug/litecom` exercises the installed background worker against an isolated development relay. On Windows, pass the `.exe` path. It checks noninteractive connection, a real worker heartbeat, repeat setup, stop/restart, one approved file transfer, no repeat execution, and service removal. It uses a temporary native-agent fixture, skips MCP configuration, and sends no provider messages. Run it from a normal signed-in desktop session; Linux needs a running systemd user manager. CI runs it on Linux and Windows, while macOS startup is also covered by the local browser onboarding checks.
+
+To check read-only approval, browser session recovery, and layout:
+
+```sh
+.litecom/qa/bin/python scripts/access-ui-smoke.py
+```
+
+For live read-only checks with existing native authentication and GitHub CLI login:
+
+```sh
+.litecom/qa/bin/python scripts/read-only-smoke.py --agent codex
+.litecom/qa/bin/python scripts/read-only-smoke.py --agent claude
+```
+
+These create an isolated relay, read a fixture and the public Litecom repository, and verify that a requested file write does not happen. Add `--actions` to verify the approved write instead. They use native model billing, preserve configuration, and send no Slack messages. Evidence stays in `.preview/read-only/`. Rust tests use a Slack fixture to check membership, lease expiry, and rejected mutations.
 
 ## Container checks
 

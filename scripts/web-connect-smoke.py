@@ -126,15 +126,15 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
                 assert any(tool['name']=='litecom_ask' for tool in tools['tools'])
                 sent=rpc(3,'tools/call',{'name':'litecom_ask','arguments':{'contact':'Ishaan','request':'Please share the launch notes.','request_id':'ask-ishaan'}})
                 assert not sent.get('isError'),sent
-                sent=rpc(4,'tools/call',{'name':'litecom_ask','arguments':{'contact':'me','request':'Send me the notes file.','request_id':'ask-my-agent'}})
+                sent=rpc(4,'tools/call',{'name':'litecom_ask','arguments':{'contact':'me','request':'Send me the notes file.','request_id':'ask-my-agent','requires_action':True}})
                 assert not sent.get('isError'),sent
                 task=sent['structuredContent']['request']
             finally:
                 mcp.terminate(); mcp.wait(timeout=10)
             page.goto(origin+'/request/'+task['id'])
-            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=30000)
+            expect(page.locator('button[data-action="approve"]')).to_be_visible(timeout=30000)
             assert not (work/'ran').exists(), 'Agent ran before approval'
-            page.get_by_role('button',name='Approve',exact=True).click()
+            page.locator('button[data-action="approve"]').click()
             expect(page.get_by_role('link',name='notes.txt',exact=True)).to_be_visible(timeout=30000)
             assert (work/'ran').exists()
             with page.expect_download() as download:

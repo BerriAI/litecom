@@ -45,7 +45,7 @@ fn read_key(path: &Path) -> Result<[u8; 32]> {
 }
 fn check_database(db: &Connection, key: [u8; 32]) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1..=3) {
+    if !matches!(version, 1..=4) {
         bail!("This database format is not supported by this Litecom version.")
     }
     let result: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;

@@ -51,6 +51,15 @@ impl Store {
         self.transaction(|| {
             let mut task = self.task(task_id)?;
             self.lease(p, &task, lease)?;
+            require(
+                !task
+                    .view
+                    .draft
+                    .as_ref()
+                    .and_then(|d| d.action.as_ref())
+                    .is_some_and(Action::read_only),
+                "A read-only run cannot request action permissions. Send a new action request.",
+            )?;
             conflict(
                 task.view.status == Status::Executing,
                 "This request is no longer executing.",

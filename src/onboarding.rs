@@ -94,8 +94,60 @@ pub fn open_browser(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reuse the saved connection; ask only when this computer has several.
+pub async fn reconnect(connection: &str) -> Result<()> {
+    let selected = if connection != "default" || ClientConfig::path(connection)?.exists() {
+        connection.to_owned()
+    } else {
+        let directory = config::home()?.join("connections");
+        let mut connections = Vec::new();
+        if directory.exists() {
+            for entry in std::fs::read_dir(directory)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                if let Some(name) = name.to_str().and_then(|s| s.strip_suffix(".json"))
+                    && !name.contains('.')
+                    && ClientConfig::load_named(name).is_ok()
+                {
+                    connections.push(name.to_owned());
+                }
+            }
+        }
+        connections.sort();
+        match connections.len() {
+            0 => "default".into(),
+            1 => connections.remove(0),
+            _ => {
+                let labels = connections
+                    .iter()
+                    .map(|name| {
+                        let runner = RunnerConfig::load(name).ok();
+                        format!(
+                            "{} · {name}",
+                            runner.map(|r| r.agent.name()).unwrap_or("Agent")
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let index =
+                    dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt("Which connection do you want to reconnect?")
+                        .items(&labels)
+                        .default(0)
+                        .interact()?;
+                connections.remove(index)
+            }
+        }
+    };
+    setup(Setup::default(), &selected).await
+}
+
 pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
     let path = ClientConfig::path(connection)?;
+    let previous = if path.exists() {
+        Some(ClientConfig::load_named(connection)?)
+    } else {
+        None
+    };
     let theme = dialoguer::theme::ColorfulTheme::default();
     println!("\n  litecom\n  Your people. Your agents. Your approval.\n");
     let mut verified_profile = None;
@@ -171,9 +223,9 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
                 token: token.token,
                 user_id: token.user_id,
                 agent_id: token.agent_id,
-                workspace: None,
-                runner: None,
-                approval_channel: None,
+                workspace: previous.as_ref().and_then(|c| c.workspace.clone()),
+                runner: previous.as_ref().and_then(|c| c.runner.clone()),
+                approval_channel: previous.as_ref().and_then(|c| c.approval_channel.clone()),
             }
             .save_named(connection)?;
             println!("Account connected.");
@@ -195,11 +247,23 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
                     "This server has no approval channels ready. Ask its operator to finish messaging setup."
                 );
             }
-            let choice = dialoguer::Select::with_theme(&theme)
-                .with_prompt("Where do you want to approve requests?")
-                .items(channels.iter().map(|(_, label)| *label).collect::<Vec<_>>())
-                .default(0)
-                .interact()?;
+            let saved_channel = previous
+                .as_ref()
+                .and_then(|c| c.approval_channel.as_deref());
+            let choice = if let Some(index) = channels
+                .iter()
+                .position(|(kind, _)| Some(*kind) == saved_channel)
+            {
+                index
+            } else if channels.len() == 1 {
+                0
+            } else {
+                dialoguer::Select::with_theme(&theme)
+                    .with_prompt("Where do you want to approve requests?")
+                    .items(channels.iter().map(|(_, label)| *label).collect::<Vec<_>>())
+                    .default(0)
+                    .interact()?
+            };
             let channel = channels[choice].0;
             if !options.requester_only {
                 selected_runner = Some(choose_runner(&options, connection)?);
@@ -241,14 +305,13 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
                     break token;
                 }
             };
-            let previous = ClientConfig::load_named(connection).ok();
             ClientConfig {
                 relay,
                 token: token.token,
                 user_id: token.user_id,
                 agent_id: token.agent_id,
                 workspace: previous.as_ref().and_then(|c| c.workspace.clone()),
-                runner: previous.and_then(|c| c.runner),
+                runner: previous.as_ref().and_then(|c| c.runner.clone()),
                 approval_channel: Some(channel.into()),
             }
             .save_named(connection)?;

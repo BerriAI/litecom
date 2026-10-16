@@ -98,6 +98,34 @@ fn mention(event: &str) -> Mention {
         text: "@Litecom can you get this from Moe?".into(),
     }
 }
+
+#[test]
+fn slack_intake_limits_survive_restart_and_do_not_charge_duplicate_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("relay.db");
+    let mut store = Store::with_clock(&path, [8; 32], Arc::new(|| 1000)).unwrap();
+    store.limits.slack_per_minute = 1;
+    store.enqueue_slack(mention("Ev1")).unwrap();
+    store.enqueue_slack(mention("Ev1")).unwrap();
+    assert!(matches!(
+        store.enqueue_slack(mention("Ev2")),
+        Err(crate::error::Error::RateLimited)
+    ));
+    let mut other = mention("Ev3");
+    other.user = "UOTHER".into();
+    store.enqueue_slack(other).unwrap();
+    drop(store);
+    let mut store = Store::with_clock(&path, [8; 32], Arc::new(|| 1000)).unwrap();
+    store.limits.slack_per_minute = 1;
+    store.enqueue_slack(mention("Ev1")).unwrap();
+    assert!(matches!(
+        store.enqueue_slack(mention("Ev2")),
+        Err(crate::error::Error::RateLimited)
+    ));
+    drop(store);
+    let store = Store::with_clock(&path, [8; 32], Arc::new(|| 1061)).unwrap();
+    store.enqueue_slack(mention("Ev2")).unwrap();
+}
 fn link(store: &Store, p: &Principal, user: &str, team: &str) {
     store
         .verified_channel(
@@ -318,7 +346,7 @@ async fn slack_context_becomes_one_request_and_only_owner_approval_releases_resu
         .lock()
         .unwrap()
         .push(json!({"user":"U1","ts":"999.000001","text":"Which PRs fixed Lens loading?"}));
-    t.push(vec![tool("read_thread",json!({"ts":"999.000001"})),tool("list_people",json!({})),tool("create_request",json!({"agent_id":t.agent,"request":"Find the Lens optimization PRs and whether they shipped."}))]);
+    t.push(vec![tool("read_thread",json!({"ts":"999.000001"})),tool("list_people",json!({})),tool("create_request",json!({"requires_action":true,"agent_id":t.agent,"request":"Find the Lens optimization PRs and whether they shipped."}))]);
     t.state
         .db()
         .unwrap()
@@ -486,7 +514,7 @@ async fn slack_context_becomes_one_request_and_only_owner_approval_releases_resu
 async fn injected_tools_and_foreign_recipient_cannot_act_or_change_sender() {
     let t = Test::new().await;
     link(&t.state.db().unwrap(), &t.owner, "U2", "OTHERTEAM");
-    t.push(vec![tool("approve",json!({"decision":"approve"})),tool("create_request",json!({"agent_id":t.agent,"request":"Do it now","user_id":t.owner.user_id,"channel":"SECRET"})),json!({"role":"assistant","content":"Please mention someone linked to this workspace, then @Litecom again."})]);
+    t.push(vec![tool("approve",json!({"decision":"approve"})),tool("create_request",json!({"requires_action":true,"agent_id":t.agent,"request":"Do it now","user_id":t.owner.user_id,"channel":"SECRET"})),json!({"role":"assistant","content":"Please mention someone linked to this workspace, then @Litecom again."})]);
     t.state
         .db()
         .unwrap()
@@ -527,7 +555,7 @@ async fn crashed_tool_step_reuses_the_same_request_and_claims_expire() {
     let t = Test::new().await;
     t.push(vec![tool(
         "create_request",
-        json!({"agent_id":t.agent,"request":"Find the PRs."}),
+        json!({"requires_action":true,"agent_id":t.agent,"request":"Find the PRs."}),
     )]);
     t.state
         .db()
@@ -712,7 +740,7 @@ async fn blocked_people_cannot_receive_requests_and_self_requests_still_need_app
     t.push(vec![
         tool(
             "create_request",
-            json!({"agent_id":t.agent,"request":"Find the PRs."}),
+            json!({"requires_action":true,"agent_id":t.agent,"request":"Find the PRs."}),
         ),
         json!({"role":"assistant","content":"That person is not available."}),
     ]);
@@ -808,7 +836,7 @@ async fn approved_files_arrive_in_the_source_thread_and_resume_each_saved_phase(
     for fail in [false, true] {
         let t = Test::new().await;
         t.mock.fail_file.store(fail, Ordering::SeqCst);
-        t.push(vec![tool("create_request", json!({"agent_id":t.agent,"request":"Find the logo.","summary":"Send the Litecom logo."}))]);
+        t.push(vec![tool("create_request", json!({"requires_action":true,"agent_id":t.agent,"request":"Find the logo.","summary":"Send the Litecom logo."}))]);
         t.state
             .db()
             .unwrap()

@@ -32,7 +32,7 @@ Start with a running Litecom server and [connected Slack app](hosting-channels.m
 
 For a new Slack app, open `https://YOUR_RELAY_HOST/setup/slack?agent=1` to start with the configuration prefilled. Save its credentials using [Slack setup](hosting-channels.md#slack), then reconnect from Litecom. Existing installations should update their app instead of creating another.
 
-The optional configuration adds `app_mentions:read`, `channels:history`, `groups:history`, and `files:write`; it keeps the approval app's `chat:write` and `im:write`. Slack sends mentions to `/webhooks/slack/events` and approval buttons to `/webhooks/slack`. If your app has other custom settings, keep them when reviewing the manifest changes.
+The optional configuration adds `app_mentions:read` and `files:write` to the approval and read permissions in the base app. Slack sends mentions to `/webhooks/slack/events` and approval buttons to `/webhooks/slack`. If your app has other custom settings, keep them when reviewing the manifest changes.
 
 ## Use it
 
@@ -46,9 +46,9 @@ You can also ask your own agent or name a particular connected agent, such as Mo
 
 “Can you get this from Moe?” works when the conversation supplies enough context. The hosted agent can read that thread and preceding messages in the same channel. It asks for clarification when the reference is unclear. It cannot read other channels or fetch arbitrary links.
 
-The approval DM shows **Ask**, **From**, and **Where**, with **Approve**, **Decline**, and **View request** buttons. The full request and conversation context are available under **View request**. The card keeps this context as its status changes.
+The approval DM shows **Ask**, **From**, and **Where**, with **Approve read-only**, **Decline**, and **View request** buttons. Requests that need changes also offer **Approve actions**. The full request and conversation context are available under **View request**. The card keeps this context as its status changes.
 
-One approval authorizes the agent’s tools and sharing its reply and files in the source thread. Results use Slack formatting; files arrive as Slack attachments. Channel members can access those copies under their workspace’s policies. If Slack cannot accept a file, **Download files** opens the authenticated Litecom download. Older requests approved before native file sharing retain their original download permissions. Results do not go back through the hosted model.
+Read-only approval allows retrieval; action approval also allows the agent to make changes. Both share the reply and requested files in the source thread. Results use Slack formatting; files arrive as Slack attachments. Channel members can access those copies under their workspace’s policies. If Slack cannot accept a file, **Download files** opens the authenticated Litecom download. Older requests approved before native file sharing retain their original download permissions. Results do not go back through the hosted model.
 
 ## Check it
 

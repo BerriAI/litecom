@@ -122,7 +122,7 @@ def reply():
             until('Your first request is ready.')
             request = re.search(r'http://127\.0\.0\.1:\d+/request/[a-f0-9-]+',output).group(0)
             page.goto(request)
-            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=15000)
+            expect(page.locator('button[data-action="approve"]')).to_be_visible(timeout=15000)
             task_id = request.rsplit('/',1)[1]
             task = page.request.get(origin+'/api/tasks/'+task_id).json()
             workspace = Path(task['draft']['action']['workspace'])
@@ -132,14 +132,14 @@ def reply():
             audit('request')
             page.screenshot(path=str(screenshots/'run-mobile.png'),full_page=True)
             if args.axe:
-                page.get_by_role('button',name='Approve',exact=True).focus()
+                page.locator('button[data-action="approve"]').focus()
                 page.keyboard.press('Enter')
             else:
-                page.get_by_role('button',name='Approve',exact=True).click()
+                page.locator('button[data-action="approve"]').click()
             expect(page.get_by_role('button',name='Revoke access',exact=True)).to_be_visible(timeout=20000)
             assert len(calls.read_text().splitlines())==1
             assert page.request.get(origin+'/api/tasks/'+task_id).json()['response'] is not None
-            assert page.get_by_role('button',name='Approve',exact=True).count()==0
+            assert page.locator('button[data-action="approve"]').count()==0
             expect(page.get_by_role('button',name='Revoke access')).to_be_visible()
             with page.expect_download() as download:
                 page.get_by_role('link',name='welcome.txt',exact=True).click()

@@ -96,6 +96,22 @@ Ask your own agent for a short reply. Approve once in a connected channel, then 
 
 The deployment has two services: **Litecom**, which stores its SQLite database and encryption key in the `relay-data` volume, and **Caddy**, which stores certificates in its own volumes. Local agents continue to run on their owners' computers. The server does not gain access to those computers' files by being deployed.
 
+## Resource limits
+
+The server applies these defaults without extra setup. Set a positive integer in the relay environment to change a limit, then restart it. Request counts and stored-file accounting survive restarts; retries of the same request do not consume another slot.
+
+| Environment variable | Default | Limit |
+| --- | --- | --- |
+| `LITECOM_REQUESTS_PER_MINUTE` | `60` | New requests per person per minute |
+| `LITECOM_PENDING_REQUESTS` | `200` | Unfinished requests per person |
+| `LITECOM_SLACK_PER_MINUTE` | `30` | Slack mentions per sender per minute |
+| `LITECOM_PENDING_SLACK_JOBS` | `1000` | Unfinished Slack intake jobs |
+| `LITECOM_MAX_FILE_BYTES` | `1073741824` | 1 GiB per file |
+| `LITECOM_MAX_TASK_FILE_BYTES` | `5368709120` | 5 GiB per request |
+| `LITECOM_MAX_STORED_FILE_BYTES` | `53687091200` | 50 GiB of stored attachments |
+
+Uploads allow two concurrent transfers per account and eight per server. Leave disk headroom for those temporary encrypted uploads, SQLite, logs, and backups. The attachment limit does not cover those files. Rate-limited clients receive `Retry-After: 60`; storage-limit errors keep existing files intact.
+
 ## Check a problem
 
 ```sh

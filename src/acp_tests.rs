@@ -65,6 +65,7 @@ impl Harness {
             .create_task(
                 &f.a,
                 NewTask {
+                    ask_only: false,
                     owner_id: f.b.user_id.clone(),
                     agent_id: Some(f.agent.clone()),
                     request: request.into(),

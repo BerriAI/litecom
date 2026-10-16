@@ -144,11 +144,11 @@ with tempfile.TemporaryDirectory(prefix='litecom-reliability-') as directory:
             if args.case in ('all', 'decisions'):
                 task = draft(request('Test a late approval'), 'Original private response')
                 b.goto(origin+'/request/'+task['id'])
-                expect(b.get_by_role('button', name='Approve', exact=True)).to_be_visible()
+                expect(b.locator('button[data-action="approve"]')).to_be_visible()
                 # Hold the old view exactly as a second phone/tab can have it.
                 b.route('**/api/tasks/'+task['id'], lambda route: route.fulfill(json=task))
                 revised = draft(task, 'Changed and still private')
-                b.get_by_role('button', name='Approve', exact=True).click()
+                b.locator('button[data-action="approve"]').click()
                 expect(b.get_by_role('alert')).to_contain_text('changed')
                 state = api(a, '/api/tasks/'+task['id'])
                 assert state['response'] is None and state['draft'] is None

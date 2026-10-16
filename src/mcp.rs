@@ -69,6 +69,10 @@ pub struct Ask {
     pub agent: Option<String>,
     /// The complete request. The receiving owner reviews any response or action.
     pub request: String,
+    /// Set true only when the user requested actions (edits, sending, access changes).
+    /// False asks for reading and an answer only. The owner can always downgrade to read-only.
+    #[serde(default)]
+    pub requires_action: bool,
     /// Unique ID for this request. Reuse it when retrying the same request.
     pub request_id: String,
 }
@@ -139,11 +143,12 @@ impl LitecomMcp {
             async {
                 let task = self
                     .client
-                    .ask(
+                    .ask_with_access(
                         &args.contact,
                         args.agent.as_deref(),
                         &args.request,
                         &args.request_id,
+                        !args.requires_action,
                     )
                     .await?;
                 self.wait_for_result(task).await

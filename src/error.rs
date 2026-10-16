@@ -62,11 +62,17 @@ impl IntoResponse for Error {
         } else {
             self.to_string()
         };
-        (
+        let mut response = (
             status,
             Json(json!({"error": {"code": code, "message": message}})),
         )
-            .into_response()
+            .into_response();
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            response
+                .headers_mut()
+                .insert("retry-after", axum::http::HeaderValue::from_static("60"));
+        }
+        response
     }
 }
 

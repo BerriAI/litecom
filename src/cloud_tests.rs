@@ -154,6 +154,7 @@ impl Rig {
             .create_task(
                 &self.a,
                 NewTask {
+                    ask_only: false,
                     owner_id: self.b.user_id.clone(),
                     agent_id: None,
                     request: "Find the notes and picture.".into(),

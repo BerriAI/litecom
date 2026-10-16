@@ -92,6 +92,11 @@ impl Store {
             .query_map([], Self::agent_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         for agent in agents {
+            match self.check_workspace(&agent.owner_id) {
+                Ok(()) => {}
+                Err(Error::Forbidden(_)) => continue,
+                Err(error) => return Err(error),
+            }
             let Some(connection) = self.devin_connection(&agent.id)? else {
                 continue;
             };
@@ -170,7 +175,7 @@ impl Store {
             task.view.status,
             Status::Executing | Status::CancelRequested
         ) {
-            if task.view.expired(self.time()) {
+            if task.view.expired(self.time()) || !self.task_workspace_allowed(&task)? {
                 task.view.status = Status::CancelRequested;
             }
             task.lease_until = Some(self.time() + LEASE_TTL);

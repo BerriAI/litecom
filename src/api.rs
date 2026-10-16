@@ -32,7 +32,8 @@ pub struct AppState {
     limits: Arc<Mutex<HashMap<String, (Instant, u32)>>>,
 }
 impl AppState {
-    pub fn new(store: Store, origin: String, providers: Providers) -> Self {
+    pub fn new(mut store: Store, origin: String, providers: Providers) -> Self {
+        store.workspace_policy = providers.google.clone();
         Self {
             store: Arc::new(Mutex::new(store)),
             origin: origin.trim_end_matches('/').into(),
@@ -95,17 +96,7 @@ impl AppState {
         Ok(p)
     }
     pub(crate) fn check_workspace(&self, p: &Principal) -> Result<()> {
-        if let Some(google) = &self.providers.google {
-            let identity = self.db()?.google_identity_for(&p.user_id)?;
-            require(
-                match identity {
-                    Some(identity) => google.permits(&identity),
-                    None => !google.restricts_workspace(),
-                },
-                "Sign in with a Google account from this server's approved workspace.",
-            )?;
-        }
-        Ok(())
+        self.db()?.check_workspace(&p.user_id)
     }
     fn cookie(&self, name: &str, value: &str, http_only: bool, age: i64) -> String {
         format!(
@@ -275,10 +266,14 @@ pub fn router(state: AppState) -> Router {
             "/api/tasks/{id}/permissions/{permission}/decision",
             post(decide_permission),
         )
-        .route("/api/tasks/{id}/files", post(upload))
+        .route(
+            "/api/tasks/{id}/files",
+            post(upload).layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/files/{id}", get(download))
         .route("/api/files/{id}/received", post(download_received))
         .route("/api/work/claim", post(claim))
+        .route("/api/tasks/{id}/read/slack", post(crate::slack_reads::read))
         .route("/api/work/prepare", post(claim_preparation))
         .route("/api/events", get(events))
         .route(
@@ -329,7 +324,7 @@ pub fn router(state: AppState) -> Router {
         .fallback(get(|| async {
             axum::response::Html(include_str!("web/index.html"))
         }))
-        .layer(DefaultBodyLimit::disable())
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             authenticate_api,
@@ -933,6 +928,8 @@ struct DecisionInput {
     version: u32,
     digest: String,
     decision: Decision,
+    #[serde(default)]
+    read_only: bool,
 }
 async fn decide(
     State(s): State<AppState>,
@@ -941,9 +938,14 @@ async fn decide(
     Json(v): Json<DecisionInput>,
 ) -> Result<Json<TaskView>> {
     let p = s.principal(&h, true)?;
-    Ok(Json(
-        s.db()?.decide(&p, &id, v.version, &v.digest, v.decision)?,
-    ))
+    Ok(Json(s.db()?.decide_access(
+        &p,
+        &id,
+        v.version,
+        &v.digest,
+        v.decision,
+        v.read_only,
+    )?))
 }
 async fn cancel(
     State(s): State<AppState>,
@@ -1063,7 +1065,7 @@ async fn upload(
         let mut parts = Multipart::from_request(request, &s)
             .await
             .map_err(|_| Error::Invalid("Provide a multipart file upload.".into()))?;
-        let metadata = parts
+        let mut metadata = parts
             .next_field()
             .await
             .map_err(|_| Error::Invalid("The upload was interrupted.".into()))?
@@ -1078,13 +1080,21 @@ async fn upload(
             name: String,
             media_type: String,
         }
-        let metadata: Metadata = serde_json::from_slice(
-            &metadata
-                .bytes()
-                .await
-                .map_err(|_| Error::Invalid("Invalid file metadata.".into()))?,
-        )
-        .map_err(|_| Error::Invalid("Provide valid JSON file metadata.".into()))?;
+        let mut metadata_bytes = Vec::new();
+        while let Some(chunk) = metadata
+            .chunk()
+            .await
+            .map_err(|_| Error::Invalid("Invalid file metadata.".into()))?
+        {
+            validate(
+                metadata_bytes.len().saturating_add(chunk.len()) <= 64 * 1024,
+                "File metadata is too large.",
+            )?;
+            metadata_bytes.extend_from_slice(&chunk);
+        }
+        drop(metadata);
+        let metadata: Metadata = serde_json::from_slice(&metadata_bytes)
+            .map_err(|_| Error::Invalid("Provide valid JSON file metadata.".into()))?;
         let mut upload = s.db()?.begin_upload(
             &p,
             &id,
@@ -1122,8 +1132,10 @@ async fn upload(
         )?));
     }
     // Compatibility for existing API callers; native and browser clients stream multipart.
-    let Json(v) = Json::<UploadInput>::from_request(request, &s)
+    let bytes = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
         .await
+        .map_err(|_| Error::Invalid("Use multipart upload for files larger than 1 MiB.".into()))?;
+    let v: UploadInput = serde_json::from_slice(&bytes)
         .map_err(|_| Error::Invalid("Provide a valid file upload.".into()))?;
     let data = STANDARD
         .decode(v.data)
@@ -1219,10 +1231,23 @@ async fn download(
     );
     Ok(response)
 }
-async fn claim(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Option<WorkItem>>> {
+#[derive(Deserialize)]
+struct WorkerCapabilities {
+    #[serde(default)]
+    read_only: bool,
+}
+async fn claim(
+    State(s): State<AppState>,
+    h: HeaderMap,
+    Query(q): Query<WorkerCapabilities>,
+) -> Result<Json<Option<WorkItem>>> {
     let p = s.principal(&h, true)?;
     let agent = p.agent_id.as_deref().ok_or(Error::Unauthorized)?;
-    Ok(Json(s.db()?.claim(&p, agent)?))
+    Ok(Json(if q.read_only {
+        s.db()?.claim_read_capable(&p, agent)?
+    } else {
+        s.db()?.claim(&p, agent)?
+    }))
 }
 async fn claim_preparation(
     State(s): State<AppState>,

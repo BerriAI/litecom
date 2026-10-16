@@ -16,31 +16,60 @@ pub(crate) async fn reply(
     dir: &Path,
     renewal: &mut WorkLease<'_>,
 ) -> Result<AgentReply> {
+    launch(settings, work, dir, renewal, None).await
+}
+
+pub(crate) async fn reply_read_only(
+    settings: &RunnerConfig,
+    work: &WorkItem,
+    dir: &Path,
+    renewal: &mut WorkLease<'_>,
+    session: &Path,
+) -> Result<AgentReply> {
+    launch(settings, work, dir, renewal, Some(session)).await
+}
+
+async fn launch(
+    settings: &RunnerConfig,
+    work: &WorkItem,
+    dir: &Path,
+    renewal: &mut WorkLease<'_>,
+    read_session: Option<&Path>,
+) -> Result<AgentReply> {
+    let isolated = read_session.map(|p| p.parent().expect("session parent").join("agent"));
+    if let Some(path) = &isolated {
+        config::private_dir(path)?;
+    }
+    let cwd = isolated.as_deref().unwrap_or(&settings.workspace);
     let stderr = dir.join("agent-error.log");
     config::write_private(&stderr, b"")?;
     let mut command = tokio::process::Command::new(&settings.executable);
     command
         .args(["app-server", "--listen", "stdio://"])
-        .current_dir(&settings.workspace)
-        .env("PWD", &settings.workspace)
+        .current_dir(cwd)
+        .env("PWD", cwd)
         .env_remove("LITECOM_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(std::fs::File::create(stderr)?)
         .kill_on_drop(true);
+    if read_session.is_some() {
+        crate::read_only::codex_startup(&mut command);
+    }
     #[cfg(unix)]
     command.process_group(0);
     let mut child = command
         .spawn()
         .context("Could not start Codex app-server. Update Codex, then retry.")?;
     let _group = ProcessGroup(child.id());
-    converse(
+    converse_inner(
         child.stdout.take().context("Missing Codex output")?,
         child.stdin.take().context("Missing Codex input")?,
         settings,
         work,
         dir,
         renewal,
+        read_session,
     )
     .await
 }
@@ -69,6 +98,7 @@ struct Session {
     mcp_items: BTreeSet<String>,
     output: Option<String>,
     unanswered_interaction: bool,
+    read_only: bool,
 }
 impl Session {
     fn belongs(&self, params: &Value) -> bool {
@@ -88,7 +118,7 @@ impl Session {
     }
 
     fn approval(&self, method: &str, params: &Value) -> Option<Value> {
-        if !self.owns_request(method, params) {
+        if self.read_only || !self.owns_request(method, params) {
             return None;
         }
         match method {
@@ -165,20 +195,36 @@ impl Session {
     fn final_reply(&self, output: &str) -> Result<AgentReply> {
         let mut reply: AgentReply = serde_json::from_str(output)
             .context("Codex's reply did not match the expected format.")?;
-        if self.unanswered_interaction {
+        if self.unanswered_interaction && self.read_only {
+            reply.text.push_str("\n\nA tool operation was blocked by read-only access. Changes need a new action request.");
+        } else if self.unanswered_interaction {
             reply.text.push_str("\n\nLitecom could not answer an interactive prompt; this does not mean the owner declined. The owner needs to review that step in their agent before retrying.");
         }
         Ok(reply)
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn converse(
+    reader: impl AsyncRead + Unpin,
+    writer: impl AsyncWrite + Unpin,
+    settings: &RunnerConfig,
+    work: &WorkItem,
+    dir: &Path,
+    renewal: &mut WorkLease<'_>,
+) -> Result<AgentReply> {
+    converse_inner(reader, writer, settings, work, dir, renewal, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn converse_inner(
     reader: impl AsyncRead + Unpin,
     mut writer: impl AsyncWrite + Unpin,
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
     renewal: &mut WorkLease<'_>,
+    read_session: Option<&Path>,
 ) -> Result<AgentReply> {
     authorized(renewal).await?;
     let log = dir.join("agent-events.jsonl");
@@ -194,7 +240,10 @@ pub(crate) async fn converse(
     .await?;
     let mut lines = BufReader::new(reader).lines();
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
-    let mut session = Session::default();
+    let mut session = Session {
+        read_only: read_session.is_some(),
+        ..Default::default()
+    };
     loop {
         let line = tokio::select! {
             line = lines.next_line() => line?.context("Codex disconnected before returning a result. Check private run diagnostics.")?,
@@ -202,8 +251,12 @@ pub(crate) async fn converse(
         };
         let message: Value =
             serde_json::from_str(&line).context("Codex returned invalid protocol data.")?;
-        log.write_all(line.as_bytes()).await?;
-        log.write_all(b"\n").await?;
+        // Effective configuration can contain provider credentials. Never put
+        // config/read output in run logs or return it to the model.
+        if message["id"] != 4 {
+            log.write_all(line.as_bytes()).await?;
+            log.write_all(b"\n").await?;
+        }
         if let Some(method) = message["method"].as_str() {
             let params = &message["params"];
             if message.get("id").is_some() {
@@ -270,6 +323,14 @@ pub(crate) async fn converse(
             match id {
                 1 => {
                     send(&mut writer, json!({"method":"initialized"})).await?;
+                    if read_session.is_some() {
+                        send(
+                            &mut writer,
+                            json!({"id":4,"method":"config/read","params":{"includeLayers":false}}),
+                        )
+                        .await?;
+                        continue;
+                    }
                     send(
                         &mut writer,
                         json!({"id":2,"method":"thread/start","params":{
@@ -279,13 +340,70 @@ pub(crate) async fn converse(
                     )
                     .await?;
                 }
+                4 => {
+                    let path = read_session.context("Unexpected config response")?;
+                    let overrides =
+                        crate::read_only::codex_config(&message["result"]["config"], path)?;
+                    send(&mut writer,json!({"id":2,"method":"thread/start","params":{
+                        "cwd":path.parent().expect("session parent").join("agent"),"approvalPolicy":"never","sandbox":"read-only","ephemeral":true,"config":overrides
+                    }})).await?;
+                }
+                5 => {
+                    let servers = message["result"]["data"]
+                        .as_array()
+                        .context("Could not verify the read-only tool list")?;
+                    if !message["result"]["nextCursor"].is_null()
+                        || servers.iter().any(|s| {
+                            s["name"] != "litecom_read"
+                                && (s["runtimeStatus"] != "disabled"
+                                    || !s["tools"].as_object().is_some_and(|t| t.is_empty()))
+                        })
+                    {
+                        bail!(
+                            "Unexpected external tools were available; read-only startup was stopped."
+                        );
+                    }
+                    let safe = servers
+                        .iter()
+                        .find(|s| s["name"] == "litecom_read" && s["runtimeStatus"] == "connected")
+                        .context("Read tools did not connect")?;
+                    let tools = safe["tools"]
+                        .as_object()
+                        .context("Read tools did not start")?;
+                    if tools.len() != 3
+                        || !tools.values().all(|tool| {
+                            matches!(
+                                tool["name"].as_str(),
+                                Some("read_file" | "github_read" | "slack_read")
+                            )
+                        })
+                    {
+                        bail!("The read-only tool catalog could not be verified.");
+                    }
+                    authorized(renewal).await?;
+                    send(&mut writer,json!({"id":3,"method":"turn/start","params":{
+                        "threadId":session.thread,"input":[{"type":"text","text":crate::read_only::prompt(work)}],"outputSchema":crate::runner::reply_schema()
+                    }})).await?;
+                }
                 2 => {
+                    if read_session.is_some()
+                        && (message["result"]["sandbox"]["type"] != "readOnly"
+                            || message["result"]["approvalPolicy"] != "never")
+                    {
+                        bail!(
+                            "Codex did not apply read-only permissions. This request was not run."
+                        );
+                    }
                     let id = message["result"]["thread"]["id"]
                         .as_str()
                         .context("Codex did not create a session.")?;
                     session.thread = Some(id.into());
                     config::write_private(&dir.join("session-id"), id.as_bytes())?;
                     authorized(renewal).await?;
+                    if read_session.is_some() {
+                        send(&mut writer,json!({"id":5,"method":"mcpServerStatus/list","params":{"threadId":id,"limit":100}})).await?;
+                        continue;
+                    }
                     send(&mut writer, json!({"id":3,"method":"turn/start","params":{
                         "threadId":id,"input":[{"type":"text","text":crate::runner::prompt(work)}],
                         "outputSchema":crate::runner::reply_schema()
@@ -319,6 +437,25 @@ mod tests {
             mcp_items: BTreeSet::from(["mcp-1".into()]),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn read_only_sessions_never_grant_tool_or_sandbox_permissions() {
+        let mut session = session();
+        session.read_only = true;
+        for method in [
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+            "mcpServer/elicitation/request",
+            "item/tool/requestUserInput",
+        ] {
+            let params = json!({"threadId":"thread-1","turnId":"turn-1","itemId":"mcp-1","permissions":{"network":{"enabled":true}},"mode":"form","_meta":{"codex_approval_kind":"mcp_tool_call"},"requestedSchema":{"properties":{}}});
+            assert!(session.approval(method, &params).is_none());
+            assert!(session.unanswered(method, &params).is_some());
+        }
+        let reply = session.final_reply(REPLY).unwrap();
+        assert!(reply.text.contains("blocked by read-only access"));
     }
 
     #[test]

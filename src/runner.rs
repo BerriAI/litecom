@@ -269,11 +269,12 @@ impl Drop for ProcessGroup {
     }
 }
 
-async fn native_reply(
+pub(crate) async fn native_reply(
     renewal: &mut WorkLease<'_>,
     settings: &RunnerConfig,
     work: &WorkItem,
     dir: &Path,
+    read_session: Option<&Path>,
 ) -> Result<AgentReply> {
     let stdout_path = dir.join("agent-output.json");
     let stderr_path = dir.join("agent-error.log");
@@ -289,12 +290,19 @@ async fn native_reply(
     // Do not pass a model/output-token limit; use the person's native configuration.
     match settings.agent {
         NativeAgent::Claude => {
+            if let Some(session) = read_session {
+                crate::read_only::claude_startup(&mut cmd, session)?;
+            }
             cmd.args([
                 "--print",
                 "--output-format",
                 "json",
                 "--permission-mode",
-                "bypassPermissions",
+                if read_session.is_some() {
+                    "dontAsk"
+                } else {
+                    "bypassPermissions"
+                },
                 "--json-schema",
             ])
             .arg(serde_json::to_string(&reply_schema())?);
@@ -313,7 +321,12 @@ async fn native_reply(
         .stdin
         .take()
         .context("The agent did not open its input.")?;
-    stdin.write_all(prompt(work).as_bytes()).await?;
+    let instruction = if read_session.is_some() {
+        crate::read_only::prompt(work)
+    } else {
+        prompt(work)
+    };
+    stdin.write_all(instruction.as_bytes()).await?;
     stdin.shutdown().await?;
     drop(stdin);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
@@ -424,7 +437,12 @@ pub(crate) async fn handle_in(
         .as_ref()
         .and_then(|d| d.action.as_ref())
         .context("No approved operation was attached.")?;
-    if serde_json::to_value(approved)? != serde_json::to_value(settings.action(&work.request))? {
+    let expected = if approved.read_only() {
+        settings.action(&work.request).as_read_only()?
+    } else {
+        settings.action(&work.request)
+    };
+    if serde_json::to_value(approved)? != serde_json::to_value(expected)? {
         bail!(
             "The agent or folder changed after approval. Create a new request to approve the current settings."
         );
@@ -468,12 +486,19 @@ async fn stage_native_reply(
     dir: &Path,
     renewal: &mut WorkLease<'_>,
 ) -> Result<()> {
-    let reply = if settings.agent.is_acp() {
+    let reply = if work
+        .draft
+        .as_ref()
+        .and_then(|d| d.action.as_ref())
+        .is_some_and(Action::read_only)
+    {
+        crate::read_only::reply(client, settings, work, dir, renewal).await?
+    } else if settings.agent.is_acp() {
         crate::acp::reply(client, settings, work, dir, renewal).await?
     } else if settings.agent == NativeAgent::Codex {
         crate::codex::reply(settings, work, dir, renewal).await?
     } else {
-        native_reply(renewal, settings, work, dir).await?
+        native_reply(renewal, settings, work, dir, None).await?
     };
     let mut attachments = vec![];
     for path in &reply.files {
@@ -556,7 +581,7 @@ async fn work_loop(
                 if prepare_only {
                     "/api/work/prepare"
                 } else {
-                    "/api/work/claim"
+                    "/api/work/claim?read_only=true"
                 },
                 json!({"agent_id":client.config.agent_id}),
             )

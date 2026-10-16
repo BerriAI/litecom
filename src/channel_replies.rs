@@ -13,6 +13,8 @@ pub(crate) struct ChannelAction {
     pub token: String,
     pub code: String,
     pub body: String,
+    pub read_only: bool,
+    pub actions: bool,
 }
 pub(crate) enum ChannelActor {
     Phone(String),
@@ -70,13 +72,16 @@ impl ReplyOutcome {
     }
 }
 pub(crate) fn decision(word: &str) -> Option<Decision> {
-    if word.eq_ignore_ascii_case("approve") {
+    if word.eq_ignore_ascii_case("approve") || read_only_word(word) {
         Some(Decision::Approve)
     } else if word.eq_ignore_ascii_case("decline") {
         Some(Decision::Decline)
     } else {
         None
     }
+}
+pub(crate) fn read_only_word(word: &str) -> bool {
+    word.eq_ignore_ascii_case("readonly") || word.eq_ignore_ascii_case("read-only")
 }
 fn text_header<'a>(headers: &'a HeaderMap, key: &str) -> Result<&'a str> {
     headers
@@ -150,9 +155,12 @@ pub(crate) async fn agentphone(
     let words = command.split_whitespace().collect::<Vec<_>>();
     let feedback = if let [word, code] = words.as_slice() {
         if let Some(decision) = decision(word) {
-            let result =
-                s.db()?
-                    .channel_decide(&ChannelActor::Phone(incoming.from.clone()), code, decision);
+            let result = s.db()?.channel_decide_access(
+                &ChannelActor::Phone(incoming.from.clone()),
+                code,
+                decision,
+                read_only_word(word),
+            );
             match result {
                 // The committed outbox sends the update to every connected channel.
                 // A replay returns the existing decision; it cannot claim another run.
@@ -175,7 +183,7 @@ pub(crate) async fn agentphone(
     Ok(Json(json!({"received":true})))
 }
 fn phone_help() -> String {
-    "Reply APPROVE followed by the code in your request, or DECLINE followed by that code.".into()
+    "Reply APPROVE, READONLY or DECLINE followed by the code in your request.".into()
 }
 #[derive(Deserialize)]
 struct SlackId {
@@ -218,7 +226,7 @@ pub(crate) async fn slack(
         return Ok(Json(json!({})));
     }
     let decision = match button.action_id.as_str() {
-        "litecom_approve" => Decision::Approve,
+        "litecom_approve" | "litecom_read_only" => Decision::Approve,
         "litecom_decline" => Decision::Decline,
         _ => return Err(Error::Unauthorized),
     };
@@ -227,7 +235,12 @@ pub(crate) async fn slack(
         user: payload.user.id,
         channel: payload.channel.id,
     };
-    let message = match s.db()?.channel_decide(&actor, &button.value, decision) {
+    let message = match s.db()?.channel_decide_access(
+        &actor,
+        &button.value,
+        decision,
+        button.action_id == "litecom_read_only",
+    ) {
         Ok(outcome) => outcome.message().into(),
         Err(error) => failure(error)?,
     };

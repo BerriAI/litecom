@@ -47,15 +47,26 @@ impl Store {
     }
 
     pub(crate) fn enqueue_slack(&self, mention: Mention) -> Result<()> {
+        let actor = hash(format!("slack:{}:{}", mention.team, mention.user));
         let job = Job::new(mention);
-        self.db.execute(
-            "INSERT OR IGNORE INTO slack_jobs(id,data) VALUES(?,?)",
-            params![
-                job.id,
-                self.vault.seal(&job, &format!("slack-job:{}", job.id))?
-            ],
-        )?;
-        Ok(())
+        self.transaction(|| {
+            if self.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM slack_jobs WHERE id=?)",
+                [&job.id],
+                |r| r.get::<_, bool>(0),
+            )? {
+                return Ok(());
+            }
+            self.slack_capacity(&actor)?;
+            self.db.execute(
+                "INSERT OR IGNORE INTO slack_jobs(id,data) VALUES(?,?)",
+                params![
+                    job.id,
+                    self.vault.seal(&job, &format!("slack-job:{}", job.id))?
+                ],
+            )?;
+            Ok(())
+        })
     }
 
     pub(crate) fn claim_slack(&self) -> Result<Option<Job>> {

@@ -98,14 +98,16 @@ impl Client {
         if !status.is_success() {
             return Err(ApiError {
                 status: status.as_u16(),
-                message: value
+                message: if status == reqwest::StatusCode::UNAUTHORIZED {
+                    "This Litecom connection was disconnected. Run `litecom reconnect` to reconnect it; your agent settings are kept.".into()
+                } else { value
                     .as_ref()
                     .ok()
                     .and_then(|v| v["error"]["message"].as_str())
                     .map(str::to_owned)
                     .unwrap_or_else(|| {
                         format!("The server could not finish the request (HTTP {status}).")
-                    }),
+                    }) },
             }
             .into());
         }
@@ -126,6 +128,17 @@ impl Client {
         request: &str,
         key: &str,
     ) -> Result<TaskView> {
+        self.ask_with_access(contact, agent, request, key, false)
+            .await
+    }
+    pub async fn ask_with_access(
+        &self,
+        contact: &str,
+        agent: Option<&str>,
+        request: &str,
+        key: &str,
+        ask_only: bool,
+    ) -> Result<TaskView> {
         let target: Value = self
             .post("/api/resolve", json!({"contact":contact,"agent":agent}))
             .await?;
@@ -140,12 +153,29 @@ impl Client {
         let existing: Option<TaskView> = self.post("/api/tasks/lookup", json!({"key":key})).await?;
         if let Some(existing) = existing {
             if existing.owner_id != owner
+                || existing.ask_only != ask_only
                 || existing.request != request.trim()
                 || (agent.is_some() && existing.agent_id != target_agent)
             {
                 bail!("This request ID was already used for different work.");
             }
             return Ok(existing);
+        }
+        if ask_only {
+            // Older servers reject this unknown field. Never send ask-only as
+            // optional A2A metadata to an unverified legacy server.
+            return self
+                .post(
+                    "/api/tasks",
+                    NewTask {
+                        owner_id: owner.into(),
+                        agent_id: Some(target_agent.into()),
+                        request: request.into(),
+                        idempotency_key: key.into(),
+                        ask_only: true,
+                    },
+                )
+                .await;
         }
         let response=self.http.post(format!("{}/a2a/{owner}/{target_agent}",self.config.relay.trim_end_matches('/')))
             .bearer_auth(&self.config.token).json(&json!({"jsonrpc":"2.0","id":id(),"method":"SendMessage","params":{"message":{"messageId":key,"role":"ROLE_USER","parts":[{"text":request}]},"configuration":{"returnImmediately":true}}})).send().await?;

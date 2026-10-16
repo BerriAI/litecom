@@ -16,14 +16,16 @@ pub struct Slack {
     pub(crate) agent_enabled: bool,
 }
 pub(crate) fn scopes(agent: bool) -> Vec<&'static str> {
-    let mut scopes = vec!["chat:write", "im:write"];
+    let mut scopes = vec![
+        "chat:write",
+        "im:write",
+        "channels:history",
+        "groups:history",
+        "channels:read",
+        "groups:read",
+    ];
     if agent {
-        scopes.extend([
-            "app_mentions:read",
-            "channels:history",
-            "groups:history",
-            "files:write",
-        ]);
+        scopes.extend(["app_mentions:read", "files:write"]);
     }
     scopes
 }
@@ -287,7 +289,7 @@ impl Slack {
         destination: &SlackDestination,
         body: &str,
         previous: Option<&str>,
-        action: Option<&str>,
+        action: Option<(&str, bool, bool)>,
         request_url: &str,
     ) -> Result<String> {
         let previous: Option<Value> = previous.and_then(|s| serde_json::from_str(s).ok());
@@ -316,11 +318,14 @@ impl Slack {
             blocks.push(json!({"type":"section","text":{"type":"plain_text","text":chunk}}));
         }
         let mut buttons = vec![];
-        if let Some(token) = action {
-            buttons.extend([
-                json!({"type":"button","text":{"type":"plain_text","text":"Approve"},"style":"primary","action_id":"litecom_approve","value":token}),
-                json!({"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token})
-            ]);
+        if let Some((token, read_only, actions)) = action {
+            if read_only {
+                buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Approve read-only"},"style":"primary","action_id":"litecom_read_only","value":token}));
+            }
+            if actions || !read_only {
+                buttons.push(json!({"type":"button","text":{"type":"plain_text","text":if read_only {"Approve actions"} else {"Approve"}},"action_id":"litecom_approve","value":token}));
+            }
+            buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token}));
         }
         buttons.push(view_button("View request", request_url));
         blocks.push(json!({"type":"actions","elements":buttons}));

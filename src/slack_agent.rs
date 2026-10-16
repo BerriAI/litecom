@@ -279,8 +279,8 @@ fn tools() -> Value {
         tool(
             "create_request",
             "Ask the selected agent to do the work. Always requires its owner's approval. One request per mention; this ends the handoff. The sender, context and reply destination are attached by Litecom.",
-            json!({"agent_id":{"type":"string"},"summary":{"type":"string","description":"One short sentence stating the work and scope for the owner's approval. No quoted thread, implementation plan, sender introduction, or links."},"request":{"type":"string","description":"Complete work instruction and relevant context. Preserve every requested action; do not add actions."}}),
-            &["agent_id", "summary", "request"]
+            json!({"requires_action":{"type":"boolean","description":"True only when the sender asks for changes or actions. False for reading information and answering."},"agent_id":{"type":"string"},"summary":{"type":"string","description":"One short sentence stating the work and scope for the owner's approval. No quoted thread, implementation plan, sender introduction, or links."},"request":{"type":"string","description":"Complete work instruction and relevant context. Preserve every requested action; do not add actions."}}),
+            &["agent_id", "summary", "request", "requires_action"]
         )
     ])
 }
@@ -442,6 +442,7 @@ fn submit(s: &AppState, job: &mut Job, p: &Principal, args: &Value) -> Result<Va
     let task = s.db()?.create_task_with_source(
         p,
         NewTask {
+            ask_only: !args["requires_action"].as_bool().unwrap_or(false),
             owner_id: agent["owner_id"].as_str().ok_or(Error::NotFound)?.into(),
             agent_id: Some(agent_id.into()),
             request,

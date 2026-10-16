@@ -50,6 +50,7 @@ struct Reply {
     sender: String,
     token: String,
     decision: crate::model::Decision,
+    read_only: bool,
 }
 fn parse_reply(raw: &[u8]) -> Option<Reply> {
     let mail = mail_parser::MessageParser::default().parse(raw)?;
@@ -88,6 +89,7 @@ fn parse_reply(raw: &[u8]) -> Option<Reply> {
         sender,
         token: token.into(),
         decision: decision(first)?,
+        read_only: crate::channel_replies::read_only_word(first),
     })
 }
 
@@ -95,10 +97,11 @@ pub(crate) fn process(state: &AppState, raw: &[u8]) -> Result<bool> {
     let Some(reply) = parse_reply(raw) else {
         return Ok(false);
     };
-    match state.db()?.channel_decide(
+    match state.db()?.channel_decide_access(
         &ChannelActor::Email(reply.sender),
         &reply.token,
         reply.decision,
+        reply.read_only,
     ) {
         Ok(_) => Ok(true),
         Err(Error::Internal(e)) => Err(Error::Internal(e)),

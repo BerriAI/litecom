@@ -14,9 +14,28 @@ pub struct Upload {
     digest: Sha256,
     chunks: u64,
     pending: Vec<u8>,
+    max_bytes: u64,
+    _slot: UploadSlot,
+}
+struct UploadSlot {
+    owner: String,
+    slots: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        if let Ok(mut slots) = self.slots.lock() {
+            if let Some(count) = slots.get_mut(&self.owner) {
+                *count -= 1;
+            }
+            slots.retain(|_, count| *count > 0);
+        }
+    }
 }
 impl Upload {
     pub fn write(&mut self, mut bytes: &[u8]) -> Result<()> {
+        if self.artifact.size.saturating_add(bytes.len() as u64) > self.max_bytes {
+            return Err(Error::Invalid("This file exceeds the host's upload limit. Ask the host to raise LITECOM_MAX_FILE_BYTES if needed.".into()));
+        }
         self.digest.update(bytes);
         self.artifact.size = self
             .artifact
@@ -84,6 +103,7 @@ impl Store {
         self.can_upload(p, task_id, lease)?;
         validate(
             !name.is_empty()
+                && name.len() <= 1024
                 && !name
                     .chars()
                     .any(|c| c.is_control() || c == '/' || c == '\\'),
@@ -91,11 +111,28 @@ impl Store {
         )?;
         validate(
             !media_type.trim().is_empty()
+                && media_type.len() <= 255
                 && media_type
                     .bytes()
                     .all(|c| c.is_ascii() && !c.is_ascii_control()),
             "Provide a valid media type.",
         )?;
+        let slot = {
+            let mut slots = self
+                .uploads
+                .lock()
+                .map_err(|_| Error::Unavailable("Uploads are temporarily unavailable.".into()))?;
+            if slots.values().sum::<usize>() >= 8
+                || slots.get(&p.user_id).copied().unwrap_or(0) >= 2
+            {
+                return Err(Error::RateLimited);
+            }
+            *slots.entry(p.user_id.clone()).or_default() += 1;
+            UploadSlot {
+                owner: p.user_id.clone(),
+                slots: self.uploads.clone(),
+            }
+        };
         Ok(Upload {
             artifact: Artifact {
                 id: id(),
@@ -110,6 +147,8 @@ impl Store {
             digest: Sha256::new(),
             chunks: 0,
             pending: Vec::with_capacity(CHUNK),
+            max_bytes: self.limits.file_bytes,
+            _slot: slot,
         })
     }
     pub fn finish_upload(
@@ -140,6 +179,14 @@ impl Store {
                     return Ok(old);
                 }
             }
+            let task_bytes: u64 = self.db.query_row("SELECT COALESCE(SUM(size),0) FROM artifacts WHERE task_id=?", [&artifact.task_id], |r| r.get(0))?;
+            let stored_bytes: u64 = self.db.query_row("SELECT COALESCE(SUM(size),0) FROM artifacts", [], |r| r.get(0))?;
+            validate(task_bytes.saturating_add(artifact.size) <= self.limits.task_file_bytes,
+                "This request has reached the host's attachment limit (LITECOM_MAX_TASK_FILE_BYTES).")?;
+            validate(stored_bytes.saturating_add(artifact.size) <= self.limits.stored_file_bytes,
+                "The host's file storage limit has been reached (LITECOM_MAX_STORED_FILE_BYTES). Contact the host.")?;
+            let count: u64 = self.db.query_row("SELECT COUNT(*) FROM artifacts WHERE task_id=?", [&artifact.task_id], |r| r.get(0))?;
+            validate(count < 1000, "A request can contain at most 1,000 attachments.")?;
             // Empty data distinguishes the chunk format from legacy encrypted blobs.
             self.db.execute(
                 "INSERT INTO artifacts(id,task_id,size,metadata,data) VALUES(?,?,?,?,?)",

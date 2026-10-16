@@ -93,6 +93,14 @@ pub struct McpConnection {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    /// A distinct wire variant makes old workers fail closed rather than ignore
+    /// an optional access flag and execute an unrestricted harness.
+    ReadOnly {
+        runner: String,
+        executable: String,
+        workspace: String,
+        instruction: String,
+    },
     Command {
         title: String,
         description: String,
@@ -131,9 +139,33 @@ pub enum Action {
 }
 
 impl Action {
+    pub fn read_only(&self) -> bool {
+        matches!(self, Self::ReadOnly { .. })
+    }
+    pub fn as_read_only(&self) -> Result<Self> {
+        match self {
+            Self::Harness {
+                runner,
+                executable,
+                workspace,
+                instruction,
+                ..
+            } if matches!(runner.as_str(), "codex" | "claude") => Ok(Self::ReadOnly {
+                runner: runner.clone(),
+                executable: executable.clone(),
+                workspace: workspace.clone(),
+                instruction: instruction.clone(),
+            }),
+            Self::ReadOnly { .. } => Ok(self.clone()),
+            _ => Err(crate::error::Error::Conflict(
+                "Read-only runs require a local Codex or Claude Code connection.".into(),
+            )),
+        }
+    }
     /// Missing on older proposals, whose approval covered execution only.
     pub fn shares_result(&self) -> bool {
         match self {
+            Self::ReadOnly { .. } => true,
             Self::Command { share_result, .. }
             | Self::Harness { share_result, .. }
             | Self::Cloud { share_result, .. } => *share_result,
@@ -142,6 +174,20 @@ impl Action {
 
     pub fn validate(&self) -> Result<()> {
         let (title, description, account) = match self {
+            Self::ReadOnly {
+                runner,
+                executable,
+                workspace,
+                instruction,
+            } => {
+                return validate(
+                    matches!(runner.as_str(), "codex" | "claude")
+                        && absolute_agent_path(executable)
+                        && absolute_agent_path(workspace)
+                        && !instruction.trim().is_empty(),
+                    "Provide a supported read-only agent and folder.",
+                );
+            }
             Self::Command {
                 title,
                 description,
@@ -363,6 +409,13 @@ pub(crate) struct RequestSource {
     pub share_files: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunAccess {
+    ReadOnly,
+    Actions,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskView {
     pub id: String,
@@ -371,6 +424,11 @@ pub struct TaskView {
     pub agent_id: String,
     pub status: Status,
     pub request: String,
+    /// Older clients requested action-capable runs. New ask-only clients set this.
+    #[serde(default)]
+    pub ask_only: bool,
+    #[serde(default)]
+    pub approved_access: Option<RunAccess>,
     pub created_at: i64,
     pub updated_at: i64,
     pub expires_at: Option<i64>,
@@ -432,6 +490,8 @@ pub struct NewTask {
     pub owner_id: String,
     pub agent_id: Option<String>,
     pub request: String,
+    #[serde(default)]
+    pub ask_only: bool,
     pub idempotency_key: String,
 }
 

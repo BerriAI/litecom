@@ -118,3 +118,10 @@ CREATE TABLE IF NOT EXISTS slack_jobs (
   claim TEXT, claim_until INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS slack_intake_queue ON slack_jobs(done,next_attempt,claim_until);
+
+-- Persistent intake counters contain hashed actor IDs, never message content.
+CREATE TABLE IF NOT EXISTS intake_limits (
+  actor TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS intake_limit_expiry ON intake_limits(expires_at);
+CREATE INDEX IF NOT EXISTS artifact_task ON artifacts(task_id);

@@ -166,14 +166,14 @@ runpy.run_path({str(protocol)!r})['serve'](reply)
                 expect(page.get_by_role('button',name='Turn off Phone',exact=True)).to_be_visible()
             if not args.with_service:
                 worker = subprocess.Popen(prefix+['worker'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-            asked = subprocess.run(prefix+['ask','me','Find the notes and attach them.'],env=env,capture_output=True,text=True,timeout=20)
+            asked = subprocess.run(prefix+['ask','--action','me','Find the notes and attach them.'],env=env,capture_output=True,text=True,timeout=20)
             assert asked.returncode == 0, asked.stderr
             request_url = re.search(re.escape(args.url)+r'/request/[a-f0-9-]+',asked.stdout).group(0)
             page.goto(request_url)
-            expect(page.get_by_role('button',name='Approve',exact=True)).to_be_visible(timeout=15000)
+            expect(page.locator('button[data-action="approve"]')).to_be_visible(timeout=15000)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Run approval overflow'
             page.screenshot(path=str(screenshots/'approve-run-mobile.png'),full_page=True)
-            page.get_by_role('button',name='Approve',exact=True).click()
+            page.locator('button[data-action="approve"]').click()
             if args.busy_setup:
                 deadline = time.monotonic()+15
                 while not (work/'agent-started').exists():
@@ -189,7 +189,7 @@ runpy.run_path({str(protocol)!r})['serve'](reply)
             expect(page.get_by_role('button',name='Revoke access',exact=True)).to_be_visible(timeout=120000 if args.file_mib or args.busy_setup else 20000)
             expect(page.locator('main')).to_contain_text('The requested notes are attached.')
             page.screenshot(path=str(screenshots/'result-mobile.png'),full_page=True)
-            assert page.get_by_role('button',name='Approve',exact=True).count()==0
+            assert page.locator('button[data-action="approve"]').count()==0
             expect(page.get_by_role('button',name='Revoke access')).to_be_visible()
             with page.expect_download() as download:
                 page.get_by_role('link',name='notes.txt',exact=True).click()

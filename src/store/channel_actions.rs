@@ -56,6 +56,14 @@ impl Store {
             return Ok(None);
         }
         let requester = self.profile_by_id(&task.view.requester_id)?;
+        let read_only = task.view.status == Status::AwaitingApproval
+            && task
+                .view
+                .draft
+                .as_ref()
+                .and_then(|d| d.action.as_ref())
+                .is_some_and(|a| a.as_read_only().is_ok());
+        let actions = !task.view.ask_only;
         let (target, body) = if task.view.status == Status::AwaitingApproval {
             let draft = task.view.draft.as_ref().ok_or(Error::NotFound)?;
             let Some(action) = &draft.action else {
@@ -63,6 +71,9 @@ impl Store {
                 return Ok(None);
             };
             let description = match action {
+                Action::ReadOnly { workspace, .. } => format!(
+                    "Read local files, GitHub and Slack, then send the answer. No actions. Folder: {workspace}"
+                ),
                 Action::Harness {
                     title,
                     description,
@@ -98,7 +109,21 @@ impl Store {
                 }
                 Action::Command { .. } => serde_json::to_string_pretty(action)?,
             };
-            let body = if let Some(source) = &task.source {
+            let body = if read_only
+                && matches!(action,Action::Harness {instruction,..} if instruction==&task.view.request)
+            {
+                let access = if task.view.ask_only {
+                    "Read-only: read local files, GitHub and Slack. No actions."
+                } else {
+                    "Choose read-only for an answer, or approve actions to allow changes to files and connected apps."
+                };
+                let delivery = if task.source.is_some() {
+                    "The answer and requested files are shared with everyone in the source Slack channel."
+                } else {
+                    "The answer and requested files are sent to the requester."
+                };
+                format!("{}\n\n{access}\n{delivery}", self.notification_summary(d)?)
+            } else if let Some(source) = &task.source {
                 let delivery = if source.share_files {
                     "reply and files"
                 } else {
@@ -160,6 +185,8 @@ impl Store {
                 token: record.token,
                 code,
                 body,
+                read_only,
+                actions,
             }));
         }
         let token = secret();
@@ -182,14 +209,30 @@ impl Store {
         };
         self.db.execute("INSERT INTO channel_actions(token_hash,code,channel_id,task_id,target_key,data) VALUES(?,?,?,?,?,?)",
             params![hash(&token),code,d.channel_id,d.task_id,target_key,self.vault.seal(&record,&format!("channel-action:{}:{}:{target_key}",d.channel_id,d.task_id))?])?;
-        Ok(Some(ChannelAction { token, code, body }))
+        Ok(Some(ChannelAction {
+            token,
+            code,
+            body,
+            read_only,
+            actions,
+        }))
     }
 
+    #[cfg(test)]
     pub(crate) fn channel_decide(
         &self,
         actor: &ChannelActor,
         key: &str,
         decision: Decision,
+    ) -> Result<ReplyOutcome> {
+        self.channel_decide_access(actor, key, decision, false)
+    }
+    pub(crate) fn channel_decide_access(
+        &self,
+        actor: &ChannelActor,
+        key: &str,
+        decision: Decision,
+        read_only: bool,
     ) -> Result<ReplyOutcome> {
         let (query, key) = if matches!(actor, ChannelActor::Phone(_)) {
             ("a.code=?", key.to_ascii_uppercase())
@@ -217,6 +260,7 @@ impl Store {
             agent_id: None,
             credential_id: format!("channel:{channel}"),
         };
+        self.check_workspace(&p.user_id)?;
         let previous:Option<String>=match &record.target {
             Target::Request {version,digest}=> self.db.query_row("SELECT decision FROM approvals WHERE task_id=? AND version=? AND digest=? AND user_id=?",params![task,version,digest,p.user_id],|r|r.get(0)).optional()?,
             Target::Permission {id,..}=> self.db.query_row("SELECT decision FROM tool_permissions WHERE task_id=? AND id=?",params![task,id],|r|r.get(0)).optional()?.flatten(),
@@ -227,9 +271,13 @@ impl Store {
         }
         match record.target {
             Target::Request { version, digest } => {
-                self.decide(&p, &task, version, &digest, decision.clone())?;
+                self.decide_access(&p, &task, version, &digest, decision.clone(), read_only)?;
             }
             Target::Permission { id, digest } => {
+                require(
+                    !read_only,
+                    "A tool permission cannot change the run's access. Send a new read-only request.",
+                )?;
                 self.decide_permission(&p, &task, &id, &digest, decision.clone())?;
             }
         }
