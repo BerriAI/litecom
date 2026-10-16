@@ -31,14 +31,21 @@ impl Drop for Harness {
 }
 impl Harness {
     async fn new() -> Self {
+        Self::new_with(NativeAgent::Acp, None, "Please send the document").await
+    }
+    async fn new_with(
+        agent: NativeAgent,
+        executable: Option<std::path::PathBuf>,
+        request: &str,
+    ) -> Self {
         let f = Fixture::new();
         let temp = tempfile::tempdir().unwrap();
         let settings = RunnerConfig {
-            agent: NativeAgent::Acp,
-            executable: std::env::current_exe().unwrap(),
+            agent,
+            executable: executable.unwrap_or_else(|| std::env::current_exe().unwrap()),
             workspace: temp.path().into(),
             arguments: vec![],
-            mcp: Some(McpConnection {
+            mcp: agent.is_acp().then(|| McpConnection {
                 executable: std::env::current_exe().unwrap().to_string_lossy().into(),
                 home: temp.path().to_string_lossy().into(),
                 connection: "test".into(),
@@ -53,7 +60,18 @@ impl Harness {
             .store
             .authenticate(&token.token, crate::model::Role::Agent)
             .unwrap();
-        let task = f.request("acp");
+        let task = f
+            .store
+            .create_task(
+                &f.a,
+                NewTask {
+                    owner_id: f.b.user_id.clone(),
+                    agent_id: Some(f.agent.clone()),
+                    request: request.into(),
+                    idempotency_key: "protocol-test".into(),
+                },
+            )
+            .unwrap();
         let prepare = f.store.claim(&worker, &f.agent).unwrap().unwrap();
         let prepared = f
             .store
@@ -100,24 +118,6 @@ impl Harness {
             server,
         }
     }
-    async fn permission(&self) -> ToolPermission {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let task = self
-                    .state
-                    .db()
-                    .unwrap()
-                    .get_task(&self.owner, &self.work.task_id)
-                    .unwrap();
-                if let Some(permission) = task.permissions.first() {
-                    break permission.clone();
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("ACP permission reached owner")
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -126,7 +126,6 @@ enum Case {
     PersistentOnly,
     MultipleChoices,
     WrongSession,
-    Changed,
 }
 
 fn mock_agent(
@@ -208,21 +207,6 @@ fn mock_agent(
                             "Decline",
                             PermissionOptionKind::RejectOnce,
                         ));
-                        if matches!(case, Case::Changed) {
-                            let updates = cx.clone();
-                            cx.spawn(async move {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
-                                updates.send_notification(SessionNotification::new(
-                                    "fixture-session",
-                                    SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
-                                        "write-1",
-                                        ToolCallUpdateFields::new().raw_input(
-                                            json!({"path":"other.txt","content":"changed"}),
-                                        ),
-                                    )),
-                                ))
-                            })?;
-                        }
                         let session = if matches!(case, Case::WrongSession) {
                             "other-session"
                         } else {
@@ -373,90 +357,64 @@ async fn cursor_authenticates_before_opening_a_session_and_stops_on_login_failur
 }
 
 #[tokio::test]
-async fn acp_exact_permission_uses_once_and_delivers_the_approved_result() {
-    for decision in [Decision::Approve, Decision::Decline] {
-        let h = Harness::new().await;
-        let (client_io, agent_io) = tokio::io::duplex(65536);
-        let (peer, mut outcomes) = mock_agent(agent_io, h.settings.workspace.clone(), Case::Once);
-        let (read, write) = tokio::io::split(client_io);
-        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
-        let run = crate::acp::converse(
+async fn approved_acp_run_grants_tools_once_without_another_human_decision() {
+    let h = Harness::new().await;
+    let (client_io, agent_io) = tokio::io::duplex(65536);
+    let (peer, mut outcomes) = mock_agent(agent_io, h.settings.workspace.clone(), Case::Once);
+    let (read, write) = tokio::io::split(client_io);
+    let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
+    let reply = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::acp::converse(
             ByteStreams::new(write.compat_write(), read.compat()),
             &h.client,
             &h.settings,
             &h.work,
             h.temp.path(),
             &mut renewal,
-        );
-        tokio::pin!(run);
-        let review = async {
-            let p = h.permission().await;
-            assert_eq!(p.details["operation"]["rawInput"]["path"], "note.txt");
-            let private = h
-                .state
-                .db()
-                .unwrap()
-                .get_task(&h.requester, &h.work.task_id)
-                .unwrap();
-            assert!(private.permissions.is_empty() && private.response.is_none());
-            assert!(outcomes.try_recv().is_err());
-            h.state
-                .db()
-                .unwrap()
-                .decide_permission(
-                    &h.owner,
-                    &h.work.task_id,
-                    &p.id,
-                    &p.digest,
-                    decision.clone(),
-                )
-                .unwrap();
-        };
-        let (result, ()) = tokio::time::timeout(Duration::from_secs(8), async {
-            tokio::join!(&mut run, review)
-        })
-        .await
-        .unwrap();
-        let reply = result.unwrap();
-        assert_eq!(reply.text, "Here is the completed reply.");
-        let outcome = outcomes.recv().await.unwrap();
-        let RequestPermissionOutcome::Selected(selected) = outcome else {
-            panic!("expected selected option")
-        };
-        assert_eq!(
-            selected.option_id.to_string(),
-            if decision == Decision::Approve {
-                "once"
-            } else {
-                "no"
-            }
-        );
-        let staged = h
-            .state
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let RequestPermissionOutcome::Selected(selected) = outcomes.recv().await.unwrap() else {
+        panic!("expected one-time tool permission");
+    };
+    assert_eq!(selected.option_id.to_string(), "once");
+    assert!(
+        h.state
             .db()
             .unwrap()
-            .stage_result(
-                &h.worker,
-                &h.work.task_id,
-                &h.work.lease,
-                DraftInput {
-                    text: reply.text,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        assert_eq!(staged.status, Status::Completed);
-        assert!(
-            h.state
-                .db()
-                .unwrap()
-                .get_task(&h.requester, &h.work.task_id)
-                .unwrap()
-                .response
-                .is_some()
-        );
-        peer.abort();
-    }
+            .get_task(&h.owner, &h.work.task_id)
+            .unwrap()
+            .permissions
+            .is_empty()
+    );
+    let staged = h
+        .state
+        .db()
+        .unwrap()
+        .stage_result(
+            &h.worker,
+            &h.work.task_id,
+            &h.work.lease,
+            DraftInput {
+                text: reply.text,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(staged.status, Status::Completed);
+    assert!(
+        h.state
+            .db()
+            .unwrap()
+            .get_task(&h.requester, &h.work.task_id)
+            .unwrap()
+            .response
+            .is_some()
+    );
+    peer.abort();
 }
 
 #[tokio::test]
@@ -503,58 +461,36 @@ async fn acp_rejects_persistent_ambiguous_and_other_session_permissions() {
 }
 
 #[tokio::test]
-async fn acp_stops_on_scope_change_or_cancelled_request() {
-    for cancelled in [false, true] {
-        let h = Harness::new().await;
-        let (client_io, agent_io) = tokio::io::duplex(65536);
-        let (peer, mut outcomes) = mock_agent(
-            agent_io,
-            h.settings.workspace.clone(),
-            if cancelled { Case::Once } else { Case::Changed },
-        );
-        let (read, write) = tokio::io::split(client_io);
-        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
-        let run = crate::acp::converse(
+async fn cancelled_acp_request_cannot_grant_tools() {
+    let h = Harness::new().await;
+    h.state
+        .db()
+        .unwrap()
+        .cancel(&h.owner, &h.work.task_id)
+        .unwrap();
+    let (client_io, agent_io) = tokio::io::duplex(65536);
+    let (peer, mut outcomes) = mock_agent(agent_io, h.settings.workspace.clone(), Case::Once);
+    let (read, write) = tokio::io::split(client_io);
+    let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::acp::converse(
             ByteStreams::new(write.compat_write(), read.compat()),
             &h.client,
             &h.settings,
             &h.work,
             h.temp.path(),
             &mut renewal,
-        );
-        let review = async {
-            let p = h.permission().await;
-            if cancelled {
-                h.state
-                    .db()
-                    .unwrap()
-                    .cancel(&h.owner, &h.work.task_id)
-                    .unwrap();
-            } else {
-                h.state
-                    .db()
-                    .unwrap()
-                    .decide_permission(
-                        &h.owner,
-                        &h.work.task_id,
-                        &p.id,
-                        &p.digest,
-                        Decision::Approve,
-                    )
-                    .unwrap();
-            }
-        };
-        let (result, ()) =
-            tokio::time::timeout(Duration::from_secs(8), async { tokio::join!(run, review) })
-                .await
-                .unwrap();
-        assert!(result.is_err());
-        assert!(!matches!(
-            outcomes.try_recv(),
-            Ok(RequestPermissionOutcome::Selected(_))
-        ));
-        peer.abort();
-    }
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(result.is_err());
+    assert!(!matches!(
+        outcomes.try_recv(),
+        Ok(RequestPermissionOutcome::Selected(_))
+    ));
+    peer.abort();
 }
 
 #[test]
@@ -588,5 +524,244 @@ fn relay_validates_agent_paths_independently_of_its_own_os() {
                 .validate()
                 .is_err()
         );
+    }
+}
+
+async fn codex_read(
+    lines: &mut tokio::io::Lines<
+        tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    >,
+) -> serde_json::Value {
+    serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap()
+}
+async fn codex_send(
+    writer: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    value: serde_json::Value,
+) {
+    use tokio::io::AsyncWriteExt;
+    writer
+        .write_all(format!("{value}\n").as_bytes())
+        .await
+        .unwrap();
+}
+async fn codex_start(
+    lines: &mut tokio::io::Lines<
+        tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    >,
+    writer: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>,
+) {
+    assert_eq!(codex_read(lines).await["method"], "initialize");
+    codex_send(writer, json!({"id":1,"result":{}})).await;
+    assert_eq!(codex_read(lines).await["method"], "initialized");
+    let start = codex_read(lines).await;
+    assert_eq!(start["method"], "thread/start");
+    assert_eq!(start["params"]["approvalPolicy"], "on-request");
+    assert_eq!(start["params"]["approvalsReviewer"], "user");
+    assert_eq!(start["params"]["sandbox"], "workspace-write");
+    assert!(start["params"].get("model").is_none());
+    codex_send(
+        writer,
+        json!({"id":2,"result":{"thread":{"id":"thread-1"}}}),
+    )
+    .await;
+    let start = codex_read(lines).await;
+    assert_eq!(start["method"], "turn/start");
+    assert_eq!(
+        start["params"]["outputSchema"]["required"],
+        json!(["text", "files"])
+    );
+    assert!(start["params"].get("max_tokens").is_none());
+    // Codex can emit turn/started before the turn/start response.
+    codex_send(
+        writer,
+        json!({"method":"turn/started","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}),
+    )
+    .await;
+    codex_send(writer, json!({"id":3,"result":{"turn":{"id":"turn-1"}}})).await;
+}
+
+#[tokio::test]
+async fn codex_approved_run_grants_native_and_connector_permissions_without_persistence() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let h = Harness::new().await;
+    let (local, peer) = tokio::io::duplex(65536);
+    let (input, output) = tokio::io::split(local);
+    let peer = tokio::spawn(async move {
+        let (read, mut write) = tokio::io::split(peer);
+        let mut lines = BufReader::new(read).lines();
+        codex_start(&mut lines, &mut write).await;
+        for method in [
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+        ] {
+            codex_send(&mut write, json!({"id":"tool-1","method":method,"params":{"threadId":"thread-1","turnId":"turn-1","itemId":"i","command":"write requested note"}})).await;
+            assert_eq!(
+                codex_read(&mut lines).await,
+                json!({"id":"tool-1","result":{"decision":"accept"}})
+            );
+        }
+        let permissions =
+            json!({"network":{"enabled":true},"fileSystem":{"write":["/tmp/requested-note"]}});
+        codex_send(&mut write, json!({"id":20,"method":"item/permissions/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"p","permissions":permissions}})).await;
+        assert_eq!(
+            codex_read(&mut lines).await["result"],
+            json!({"permissions":permissions,"scope":"turn"})
+        );
+        codex_send(&mut write, json!({"id":21,"method":"mcpServer/elicitation/request","params":{
+            "threadId":"thread-1","turnId":"turn-1","serverName":"slack","mode":"form",
+            "_meta":{"codex_approval_kind":"mcp_tool_call","persist":["session","always"]},
+            "requestedSchema":{"type":"object","properties":{}},"message":"Send requested message?"
+        }})).await;
+        assert_eq!(
+            codex_read(&mut lines).await["result"],
+            json!({"action":"accept","content":{}})
+        );
+        codex_send(&mut write, json!({"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"mcpToolCall","id":"mcp-1"}}})).await;
+        codex_send(&mut write, json!({"id":22,"method":"item/tool/requestUserInput","params":{
+            "threadId":"thread-1","turnId":"turn-1","itemId":"mcp-1","questions":[{"id":"q","header":"Approve app tool call?","options":[{"label":"Accept"},{"label":"Accept and remember"},{"label":"Cancel"}]}]
+        }})).await;
+        assert_eq!(
+            codex_read(&mut lines).await["result"],
+            json!({"answers":{"q":{"answers":["Accept"]}}})
+        );
+        // A new login and arbitrary questions are not permission confirmations.
+        for mode in ["url", "form"] {
+            codex_send(&mut write, json!({"id":23,"method":"mcpServer/elicitation/request","params":{"threadId":"thread-1","turnId":"turn-1","mode":mode,"requestedSchema":{"properties":{"password":{"type":"string"}}}}})).await;
+            assert_eq!(codex_read(&mut lines).await["result"]["action"], "cancel");
+        }
+        codex_send(&mut write, json!({"id":24,"method":"item/tool/requestUserInput","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"question","questions":[{"id":"q","header":"Choose a recipient","options":[{"label":"Accept"}]}]}})).await;
+        assert_eq!(
+            codex_read(&mut lines).await["result"],
+            json!({"answers":{}})
+        );
+        // Neither a different session nor a different turn inherits authority.
+        for (thread, turn) in [("other", "turn-1"), ("thread-1", "other")] {
+            codex_send(&mut write, json!({"id":25,"method":"item/commandExecution/requestApproval","params":{"threadId":thread,"turnId":turn}})).await;
+            assert_eq!(codex_read(&mut lines).await["result"]["decision"], "cancel");
+        }
+        codex_send(&mut write, json!({"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"reply","text":"{\"text\":\"Sent the requested message.\",\"files\":[]}"}}})).await;
+        codex_send(&mut write, json!({"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}})).await;
+    });
+    let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::codex::converse(
+            input,
+            output,
+            &h.settings,
+            &h.work,
+            h.temp.path(),
+            &mut renewal,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.text, "Sent the requested message.");
+    assert_eq!(
+        std::fs::read_to_string(h.temp.path().join("session-id")).unwrap(),
+        "thread-1"
+    );
+    assert!(
+        h.state
+            .db()
+            .unwrap()
+            .get_task(&h.owner, &h.work.task_id)
+            .unwrap()
+            .permissions
+            .is_empty()
+    );
+    peer.await.unwrap();
+}
+
+#[tokio::test]
+async fn codex_cancellation_revokes_subsequent_tool_grants() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let h = Harness::new().await;
+    let (local, peer) = tokio::io::duplex(65536);
+    let (input, output) = tokio::io::split(local);
+    let state = h.state.clone();
+    let owner = h.owner.clone();
+    let task = h.work.task_id.clone();
+    let peer = tokio::spawn(async move {
+        let (read, mut write) = tokio::io::split(peer);
+        let mut lines = BufReader::new(read).lines();
+        codex_start(&mut lines, &mut write).await;
+        state.db().unwrap().cancel(&owner, &task).unwrap();
+        codex_send(&mut write, json!({"id":4,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1"}})).await;
+        assert!(
+            lines.next_line().await.unwrap().is_none(),
+            "cancelled work must not get a tool grant"
+        );
+    });
+    let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::codex::converse(
+                input,
+                output,
+                &h.settings,
+                &h.work,
+                h.temp.path(),
+                &mut renewal
+            )
+        )
+        .await
+        .unwrap()
+        .is_err()
+    );
+    peer.await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "Uses the installed, signed-in Codex and its normal billing; only writes a temporary test file"]
+async fn installed_codex_completes_an_approved_run() {
+    let outside = tempfile::tempdir_in(std::env::current_dir().unwrap().join(".preview")).unwrap();
+    let note = outside.path().join("litecom-approval-test.txt");
+    let executable = crate::runner::find_executable("codex").expect("Codex must be installed");
+    let h = Harness::new_with(NativeAgent::Codex, Some(executable), &format!(
+        "Permission integration test. Use a shell tool to write exactly 'litecom approval verified' to {}. The folder already exists. Use the shell with sandbox_permissions=require_escalated so the approval path is exercised. Litecom has approval for this run. Do not read other files, send messages or contact external services. Return no attachments and report what happened.", note.display()
+    )).await;
+    let runs = h.temp.path().join("runs");
+    tokio::time::timeout(
+        Duration::from_secs(180),
+        crate::runner::handle_in(&h.client, &h.settings, &h.work, &runs),
+    )
+    .await
+    .expect("Codex test should finish")
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(note).unwrap(),
+        "litecom approval verified"
+    );
+    let task = h
+        .state
+        .db()
+        .unwrap()
+        .get_task(&h.requester, &h.work.task_id)
+        .unwrap();
+    assert_eq!(task.status, Status::Completed);
+    assert!(task.response.is_some());
+    assert!(
+        h.state
+            .db()
+            .unwrap()
+            .get_task(&h.owner, &h.work.task_id)
+            .unwrap()
+            .permissions
+            .is_empty()
+    );
+    let entries = std::fs::read_dir(runs).unwrap();
+    for entry in entries {
+        let path = entry.unwrap().path().join("agent-events.jsonl");
+        let events = std::fs::read_to_string(path).unwrap();
+        let methods: Vec<_> = events
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|v| v["method"].as_str().map(str::to_owned))
+            .filter(|method| method.contains("Approval") || method.contains("elicitation"))
+            .collect();
+        eprintln!("Real Codex approval events: {methods:?}");
     }
 }

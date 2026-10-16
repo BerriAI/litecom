@@ -9,6 +9,7 @@ import re
 import select
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 from playwright.sync_api import sync_playwright, expect
@@ -68,15 +69,17 @@ with tempfile.TemporaryDirectory(prefix='litecom-onboarding-') as directory:
     programs = root/'bin'
     programs.mkdir()
     fake = programs/'codex'
-    fixture = '''#!/bin/sh
-cat >/dev/null
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output-last-message ]; then shift; cp reply.fixture "$1"; fi
-  shift
-done
+    protocol = Path(__file__).resolve().parent / 'fixtures/codex_app_server.py'
+    fixture = f'''#!{sys.executable}
+import json, os, runpy, time
+from pathlib import Path
+def reply():
+    if {args.busy_setup!r}:
+        Path('agent-started').write_text(str(os.getpid()))
+        time.sleep(45)
+    return json.loads(Path('reply.fixture').read_text())
+runpy.run_path({str(protocol)!r})['serve'](reply)
 '''
-    if args.busy_setup:
-        fixture = fixture.replace('cat >/dev/null', 'cat >/dev/null\necho $$ > agent-started\nsleep 45')
     fake.write_text(fixture)
     fake.chmod(0o700)
     attachment = work/'notes.txt'

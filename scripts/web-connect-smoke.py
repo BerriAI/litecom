@@ -22,13 +22,14 @@ with tempfile.TemporaryDirectory(prefix='litecom-web-connect-') as folder:
     (root/'codex').mkdir()
     (work/'notes.txt').write_text('Exact bytes from the requested agent.\n')
     fixture=programs/'codex'
-    fixture.write_text('#!/usr/bin/python3\n'+f'''import os,sys,json
+    protocol = Path(__file__).resolve().parent / 'fixtures/codex_app_server.py'
+    fixture.write_text('#!/usr/bin/python3\n'+f'''import os,sys,json,runpy
 from pathlib import Path
 if sys.argv[1:2]==['mcp']: os.execv({native_codex!r},[{native_codex!r},*sys.argv[1:]])
-sys.stdin.read()
-Path('ran').write_text('yes')
-out=sys.argv[sys.argv.index('--output-last-message')+1]
-Path(out).write_text(json.dumps({{'text':'Here are your notes.','files':[str(Path('notes.txt').resolve())]}}))
+def reply():
+    Path('ran').write_text('yes')
+    return {{'text':'Here are your notes.','files':[str(Path('notes.txt').resolve())]}}
+runpy.run_path({str(protocol)!r})['serve'](reply)
 '''); fixture.chmod(0o700)
     env=dict(os.environ,LITECOM_HOME=str(root/'config'),CODEX_HOME=str(root/'codex'),XDG_CONFIG_HOME=str(root/'xdg'),PATH=str(programs)+os.pathsep+os.environ['PATH'])
     # Always exercise the multi-agent picker, independent of the test machine.

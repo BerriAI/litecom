@@ -40,6 +40,7 @@ fn connections(home: &Path) -> Result<BTreeSet<String>> {
         let name = name.to_string_lossy();
         if let Some(name) = name
             .strip_suffix(".runner.json")
+            .or_else(|| name.strip_suffix(".access.json"))
             .or_else(|| name.strip_suffix(".json"))
         {
             ClientConfig::path(name)?;
@@ -156,6 +157,7 @@ pub async fn run(all: bool) -> Result<()> {
             }
             remove_file(&path)?;
             remove_file(&runner)?;
+            remove_file(&path.with_extension("access.json"))?;
             remove_file(&service::log_path(&name)?)?;
             println!("Disconnected {name}.");
             Ok(())

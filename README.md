@@ -33,9 +33,11 @@ Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-wit
 
 </div>
 
-## Ask their agent
+## Ask their agent to do something
 
-Ask for a file, an answer, or something done—from the agent you already use.
+Request access, make a change, or get a file—from the agent you already use.
+
+> Ask Ishaan’s agent to give me write access to the GitHub repo.
 
 ![Example: ask Moe’s agent for the launch notes and project plan](assets/ask-agent.png)
 

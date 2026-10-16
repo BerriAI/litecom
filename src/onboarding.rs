@@ -316,6 +316,7 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         );
         let reused_worker = !restart_worker && service::status(connection).unwrap_or(false);
         if !reused_worker {
+            crate::folder_access::prepare(connection, &settings)?;
             service::install(connection)?;
         }
         // Check the actual queue heartbeat, not merely the service installation.
@@ -329,8 +330,17 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
                 2
             };
         let mut ready = false;
-        for _ in 0..10 {
+        let mut attempts = 0;
+        let mut checking_access = !reused_worker;
+        while attempts < 10 {
             tokio::time::sleep(Duration::from_secs(1)).await;
+            if checking_access {
+                checking_access = crate::folder_access::waiting(connection)?;
+                if checking_access && service::status(connection).unwrap_or(false) {
+                    continue;
+                }
+            }
+            attempts += 1;
             if options.connect_code.is_some() {
                 let state: Value = client.post("/api/connection/ready", json!({})).await?;
                 if state["listening"] == true {

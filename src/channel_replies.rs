@@ -184,6 +184,7 @@ struct SlackId {
 #[derive(Deserialize)]
 struct SlackButton {
     action_id: String,
+    #[serde(default)]
     value: String,
 }
 #[derive(Deserialize)]
@@ -213,6 +214,9 @@ pub(crate) async fn slack(
         "Unsupported Slack action.",
     )?;
     let button = &payload.actions[0];
+    if button.action_id == "litecom_view" || button.action_id.starts_with("litecom_view_") {
+        return Ok(Json(json!({})));
+    }
     let decision = match button.action_id.as_str() {
         "litecom_approve" => Decision::Approve,
         "litecom_decline" => Decision::Decline,

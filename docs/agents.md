@@ -6,7 +6,7 @@ Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp an
 
 | Agent | Connection and requirements |
 | --- | --- |
-| Codex | Native CLI or [Codex ACP](acp.md#codex) for additional tool approvals in Litecom. Native setup adds MCP tools. |
+| Codex | Native CLI through Codex app-server, or [Codex ACP](acp.md#codex). Native setup adds MCP tools. |
 | Claude Code | Native CLI or `claude-agent-acp`. Native setup adds MCP tools. |
 | OpenCode | `opencode acp`. Setup adds MCP tools to ordinary and receiving sessions. |
 | Cursor | Signed-in Cursor CLI: `cursor-agent acp` or `agent acp`. Setup saves and enables MCP tools; receiving sessions reuse the existing login. Interactive question/plan extensions are not implemented. |
@@ -27,4 +27,6 @@ To use an installed agent not detected by the picker, use its [ACP command](acp.
 
 Litecom starts a background CLI or ACP session. It uses the configuration available to that process; tools provided only inside a desktop application do not automatically carry over. Browser or desktop requests need those tools configured in the receiving agent.
 
-Native Codex uses a workspace-write sandbox, and native Claude Code uses saved permissions. Both deny new permission prompts so a request does not get stuck at the receiving computer. To receive supported tool permission prompts in Litecom, connect the Codex ACP or Claude Agent ACP adapter. This does not install browser tools or grant OS camera, screen, or accessibility permissions.
+Your request approval authorizes the agent’s tool calls for that run. Litecom answers Codex and ACP permission checks automatically; Claude Code runs with permission checks bypassed for that process. It does not change your global agent settings.
+
+On macOS, setup requests folder, screen-recording, and accessibility access from the background worker. Allow the system prompts and enable any access shown as missing in System Settings. Computer-control tools must already be available to your agent. Other applications may still require their own permissions or sign-in; setup cannot grant access on their behalf.

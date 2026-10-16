@@ -8,7 +8,7 @@ Choose **Phone**, **Slack**, or **Email** during setup. Add another destination 
 
 Use `DECLINE` with the text-message code, the Slack **Decline** button, or `Decline` in your email reply to refuse. Email replies must come from the address you connected. Reply to the original email so its request reference is preserved.
 
-One approval authorizes the requested work and sending its result. The agent starts after approval and delivers its final reply and files automatically. You do not return to Litecom to approve sharing. If the agent requests an additional tool permission, you can approve that operation once through the same channels.
+One approval authorizes the requested work and sending its result. The agent starts after approval and delivers its final reply and files automatically. You do not return to Litecom to approve sharing. Tool permissions are granted automatically for the approved run. Operating-system permissions and account sign-in must be set up separately.
 
 The first decision wins. Repeated clicks or replies cannot launch a second run. A changed or cancelled request cannot be approved through an old message. Slack updates the original message; SMS and email send status updates because delivered messages cannot be edited. A link remains available for details and downloads.
 

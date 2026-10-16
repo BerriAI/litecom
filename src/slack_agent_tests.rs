@@ -22,13 +22,21 @@ struct Mock {
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     thread: Arc<Mutex<Vec<Value>>>,
     fail_post: Arc<std::sync::atomic::AtomicBool>,
+    fail_file: Arc<std::sync::atomic::AtomicBool>,
+    base: Arc<Mutex<String>>,
+    uploads: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 async fn mock(
     State(m): State<Mock>,
     OriginalUri(uri): OriginalUri,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, Json<Value>) {
+    if uri.path() == "/upload/v1" {
+        assert!(headers.get("authorization").is_none());
+        m.uploads.lock().unwrap().push(body.to_vec());
+        return (StatusCode::OK, Json(json!({"ok":true})));
+    }
     let value: Value = if body.is_empty() {
         json!(
             url::form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
@@ -64,6 +72,14 @@ async fn mock(
             }
             json!({"ok":true,"ts":value["ts"].as_str().unwrap_or("1001.000001")})
         }
+        "/files.getUploadURLExternal" => {
+            if m.fail_file.load(Ordering::SeqCst) {
+                json!({"ok":false,"error":"missing_scope"})
+            } else {
+                json!({"ok":true,"file_id":"F1","upload_url":format!("{}/upload/v1", m.base.lock().unwrap())})
+            }
+        }
+        "/files.completeUploadExternal" => json!({"ok":true,"files":[{"id":"F1"}]}),
         other => panic!("unexpected Slack API {other}"),
     };
     (StatusCode::OK, Json(response))
@@ -122,6 +138,7 @@ impl Test {
         let mock = Mock::default();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
+        *mock.base.lock().unwrap() = base.clone();
         let app = Router::new()
             .route("/{*path}", any(self::mock))
             .with_state(mock.clone());
@@ -229,6 +246,7 @@ async fn generated_manifest_keeps_approvals_and_adds_mentions_only_when_enabled(
             .unwrap();
         assert!(scopes.contains(&json!("chat:write")) && scopes.contains(&json!("im:write")));
         assert_eq!(scopes.contains(&json!("app_mentions:read")), enabled);
+        assert_eq!(scopes.contains(&json!("files:write")), enabled);
         assert_eq!(
             manifest["settings"]["interactivity"]["request_url"],
             "https://litecom.example/webhooks/slack"
@@ -410,7 +428,7 @@ async fn slack_context_becomes_one_request_and_only_owner_approval_releases_resu
             &task_id,
             &work.lease,
             DraftInput {
-                text: "The fixes are in PR #55 and #66.".into(),
+                text: "The fixes are in [PR #55](https://github.com/BerriAI/lens/pull/55) and **PR #66**. Quoted: <@U2>.".into(),
                 ..Default::default()
             },
         )
@@ -426,6 +444,19 @@ async fn slack_context_becomes_one_request_and_only_owner_approval_releases_resu
     assert_eq!(posted.1["channel"], "C1");
     assert_eq!(posted.1["thread_ts"], "999.000001");
     assert!(posted.1["text"].as_str().unwrap().contains("PR #55"));
+    assert_eq!(posted.1["blocks"][0]["type"], "markdown");
+    assert!(
+        posted.1["blocks"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("[PR #55](https://github.com/BerriAI/lens/pull/55)")
+    );
+    assert!(!posted.1["text"].as_str().unwrap().contains("<@U2>"));
+    assert_eq!(
+        posted.1["blocks"][1]["elements"][0]["text"]["text"],
+        "View request"
+    );
+    assert!(!posted.1["text"].as_str().unwrap().contains("/request/"));
     let initial = calls
         .iter()
         .find(|(path, _)| path == "/chat.postMessage")
@@ -654,7 +685,7 @@ async fn long_slack_replies_are_split_without_losing_unicode_or_reprocessing() {
     t.tick().await;
     t.tick().await;
     let job = t.tick().await;
-    assert_eq!(job.remote.len(), 3);
+    assert_eq!(job.remote.len(), 7);
     let calls = t.mock.calls.lock().unwrap();
     let chunks = calls
         .iter()
@@ -664,7 +695,7 @@ async fn long_slack_replies_are_split_without_losing_unicode_or_reprocessing() {
     assert!(
         chunks
             .iter()
-            .all(|text| text.encode_utf16().count() <= 40_000)
+            .all(|text| text.encode_utf16().count() <= 12_000)
     );
     assert_eq!(chunks.join(""), text);
     assert!(t.state.db().unwrap().claim_slack().unwrap().is_none());
@@ -770,4 +801,166 @@ async fn configured_model_resolves_a_contextual_slack_request() {
             .iter()
             .any(|(p, _)| p == "/conversations.replies" || p == "/conversations.history")
     );
+}
+
+#[tokio::test]
+async fn approved_files_arrive_in_the_source_thread_and_resume_each_saved_phase() {
+    for fail in [false, true] {
+        let t = Test::new().await;
+        t.mock.fail_file.store(fail, Ordering::SeqCst);
+        t.push(vec![tool("create_request", json!({"agent_id":t.agent,"request":"Find the logo.","summary":"Send the Litecom logo."}))]);
+        t.state
+            .db()
+            .unwrap()
+            .enqueue_slack(mention("EvFiles"))
+            .unwrap();
+        t.tick().await;
+        t.tick().await;
+        let job = t.tick().await;
+        let task = job.task.as_ref().unwrap();
+        let request = t.state.db().unwrap().get_task(&t.owner, task).unwrap();
+        let settings = crate::runner::RunnerConfig {
+            agent: crate::runner::NativeAgent::Codex,
+            executable: std::env::current_exe().unwrap(),
+            workspace: std::env::temp_dir(),
+            arguments: vec![],
+            mcp: None,
+        };
+        let draft = t
+            .state
+            .db()
+            .unwrap()
+            .prepare(
+                &t.owner,
+                task,
+                None,
+                DraftInput {
+                    action: Some(settings.action(&request.request)),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .draft
+            .unwrap();
+        let connection = t
+            .state
+            .db()
+            .unwrap()
+            .slack_links("T1")
+            .unwrap()
+            .into_iter()
+            .find(|l| l.destination.user == "U1")
+            .unwrap()
+            .destination;
+        let mut before = job.clone();
+        assert!(
+            !crate::slack_files::advance(&t.state, &mut before, &connection)
+                .await
+                .unwrap()
+        );
+        assert!(t.mock.uploads.lock().unwrap().is_empty());
+        // Old approvals authorized links only; omitted fields retain that scope.
+        let mut old = serde_json::to_value(&job).unwrap();
+        old.as_object_mut().unwrap().remove("share_files");
+        let mut legacy: Job = serde_json::from_value(old).unwrap();
+        assert!(!legacy.share_files);
+        t.state
+            .db()
+            .unwrap()
+            .decide(
+                &t.owner,
+                task,
+                draft.version,
+                &draft.digest,
+                Decision::Approve,
+            )
+            .unwrap();
+        let work = t
+            .state
+            .db()
+            .unwrap()
+            .claim(&t.worker, &t.agent)
+            .unwrap()
+            .unwrap();
+        let bytes = b"actual approved image bytes\0\xFF";
+        let file = t
+            .state
+            .db()
+            .unwrap()
+            .upload(
+                &t.worker,
+                task,
+                Some(&work.lease),
+                "logo.png",
+                "image/png",
+                bytes,
+            )
+            .unwrap();
+        t.state
+            .db()
+            .unwrap()
+            .stage_result(
+                &t.worker,
+                task,
+                &work.lease,
+                DraftInput {
+                    text: "Here is the logo.".into(),
+                    attachment_ids: vec![file.id],
+                    action: None,
+                },
+            )
+            .unwrap();
+        assert!(
+            !crate::slack_files::advance(&t.state, &mut legacy, &connection)
+                .await
+                .unwrap()
+        );
+        assert!(t.mock.uploads.lock().unwrap().is_empty());
+        // Each tick reloads the encrypted job, as after a relay restart.
+        for _ in 0..if fail { 3 } else { 5 } {
+            t.tick().await;
+        }
+        let calls = t.mock.calls.lock().unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|(p, _)| p == "/files.getUploadURLExternal")
+                .count(),
+            1
+        );
+        let final_message = &calls
+            .iter()
+            .rev()
+            .find(|(p, _)| p == "/chat.postMessage")
+            .unwrap()
+            .1;
+        let buttons = final_message["blocks"][1]["elements"].as_array().unwrap();
+        let ids: std::collections::HashSet<_> = buttons
+            .iter()
+            .map(|b| b["action_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids.len(), buttons.len());
+        if fail {
+            assert!(t.mock.uploads.lock().unwrap().is_empty());
+            assert!(
+                buttons
+                    .iter()
+                    .any(|b| b["text"]["text"] == "Download files")
+            );
+        } else {
+            assert_eq!(*t.mock.uploads.lock().unwrap(), vec![bytes.to_vec()]);
+            let shares: Vec<_> = calls
+                .iter()
+                .filter(|(p, _)| p == "/files.completeUploadExternal")
+                .collect();
+            assert_eq!(shares.len(), 1);
+            assert_eq!(shares[0].1["channel_id"], "C1");
+            assert_eq!(shares[0].1["thread_ts"], "999.000001");
+            assert!(
+                !buttons
+                    .iter()
+                    .any(|b| b["text"]["text"] == "Download files")
+            );
+        }
+    }
 }

@@ -26,15 +26,14 @@ with tempfile.TemporaryDirectory(prefix='litecom-preview-qa-') as directory:
     programs = root/'bin'
     programs.mkdir()
     fake = programs/'codex'
-    fake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+    protocol = Path(__file__).resolve().parent / 'fixtures/codex_app_server.py'
+    fake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys, runpy
 from pathlib import Path
-assert sys.argv[1] == 'exec', 'Preview must not edit native MCP configuration'
-sys.stdin.read()
-with Path(os.environ['LITECOM_QA_CALLS']).open('a') as f:
-    f.write(json.dumps({'cwd': str(Path.cwd()), 'argv': sys.argv})+'\\n')
-output = Path(sys.argv[sys.argv.index('--output-last-message')+1])
-output.write_text(json.dumps({'text':'Here is the sample file you requested.', 'files':[str(Path.cwd()/'welcome.txt')]}))
-''')
+def reply():
+    with Path(os.environ['LITECOM_QA_CALLS']).open('a') as f:
+        f.write(json.dumps({'cwd': str(Path.cwd()), 'argv': sys.argv})+'\\n')
+    return {'text':'Here is the sample file you requested.', 'files':[str(Path.cwd()/'welcome.txt')]}
+''' + f"runpy.run_path({str(protocol)!r})['serve'](reply)\n")
     fake.chmod(0o700)
     calls = root/'calls.jsonl'
     env = dict(os.environ, PATH=str(programs)+os.pathsep+os.environ['PATH'], LITECOM_QA_CALLS=str(calls))

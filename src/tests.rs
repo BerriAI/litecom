@@ -943,6 +943,14 @@ fn cancelled_execution_cannot_stage_output_or_chain_an_action() {
 }
 
 #[cfg(unix)]
+fn codex_result_events(reply: serde_json::Value) -> String {
+    [
+        serde_json::json!({"method":"item/completed","params":{"threadId":"fixture-session","turnId":"turn-1","item":{"type":"agentMessage","text":reply.to_string()}}}),
+        serde_json::json!({"method":"turn/completed","params":{"threadId":"fixture-session","turn":{"id":"turn-1","status":"completed"}}}),
+    ].into_iter().map(|v| format!("{v}\n")).collect()
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn background_runner_delivers_after_one_approval() {
     use crate::{
@@ -970,21 +978,32 @@ async fn background_runner_delivers_after_one_approval() {
             serde_json::to_vec(&json!({"is_error":false,"structured_output":reply})).unwrap(),
         )
         .unwrap();
+        std::fs::write(
+            workspace.join("codex-events.fixture"),
+            codex_result_events(reply.clone()),
+        )
+        .unwrap();
         let executable = temp.path().join("fake-agent");
         // A deterministic process fixture exercises the real subprocess and HTTP
         // boundaries. It does not contact or stand in as evidence for a live model.
         std::fs::write(
             &executable,
             r#"#!/bin/sh
-cat > prompt.fixture
 printf '%s\0' "$@" > arguments.fixture
 printf started > invoked.fixture
-if [ "$1" = exec ]; then
-  while [ "$#" -gt 0 ]; do
-    if [ "$1" = --output-last-message ]; then shift; cp reply.fixture "$1"; fi
-    shift
-  done
+if [ "$1" = app-server ]; then
+  read -r initialize
+  printf '%s\n' '{"id":1,"result":{}}'
+  read -r initialized
+  read -r thread_start
+  printf '%s\n' "$thread_start" > config.fixture
+  printf '%s\n' '{"id":2,"result":{"thread":{"id":"fixture-session"}}}'
+  read -r turn_start
+  printf '%s\n' "$turn_start" > prompt.fixture
+  printf '%s\n' '{"id":3,"result":{"turn":{"id":"turn-1"}}}'
+  cat codex-events.fixture
 else
+  cat > prompt.fixture
   cat claude.fixture
 fi
 "#,
@@ -1074,30 +1093,23 @@ fi
         let arguments: Vec<_> = arguments.split_terminator('\0').collect();
         match agent_kind {
             NativeAgent::Codex => {
-                assert!(
-                    arguments
-                        .windows(2)
-                        .any(|a| a == ["-c", "approval_policy=\"never\""])
-                );
-                assert!(
-                    arguments
-                        .windows(2)
-                        .any(|a| a == ["--sandbox", "workspace-write"])
-                );
-                assert!(!arguments.iter().any(|a| a.starts_with("ask_for_approval=")));
+                assert_eq!(arguments, ["app-server", "--listen", "stdio://"]);
+                let cfg: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(workspace.join("config.fixture")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(cfg["params"]["approvalPolicy"], "on-request");
             }
             NativeAgent::Claude => {
                 assert!(
                     arguments
                         .windows(2)
-                        .any(|a| a == ["--permission-mode", "dontAsk"])
+                        .any(|a| a == ["--permission-mode", "bypassPermissions"])
                 );
             }
             _ => unreachable!(),
         }
-        assert!(!arguments.iter().any(|a| a.contains("bypass")
-            || a.contains("dangerously")
-            || a.contains("max-tokens")));
+        assert!(!arguments.iter().any(|a| a.contains("max-tokens")));
         let private = state.db().unwrap().get_task(&f.a, &request.id).unwrap();
         assert_eq!(private.status, Status::Completed);
         assert!(private.response.is_some() && private.draft.is_none());
@@ -1736,11 +1748,19 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
             "Ready for review",
             None,
             Some("test-capability"),
+            "https://litecom.example/request/test",
         )
         .await
         .unwrap();
     let updated = slack
-        .notify(&http, &destination, "Approved", Some(&remote), None)
+        .notify(
+            &http,
+            &destination,
+            "Approved",
+            Some(&remote),
+            None,
+            "https://litecom.example/request/test",
+        )
         .await
         .unwrap();
     assert_eq!(remote, updated);
@@ -1755,7 +1775,11 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
         calls[3].1["blocks"][1]["elements"][0]["value"],
         "test-capability"
     );
-    assert_eq!(calls[4].1["blocks"].as_array().unwrap().len(), 1);
+    assert_eq!(calls[4].1["blocks"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        calls[4].1["blocks"][1]["elements"][0]["text"]["text"],
+        "View request"
+    );
     assert_eq!(calls[3].2, "Bearer new-token");
     assert_eq!(calls[4].0, "chat.update");
     assert_eq!(calls[4].1["ts"], "123.456");

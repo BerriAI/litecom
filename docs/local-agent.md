@@ -24,7 +24,7 @@ New connections start in your home folder (`~`), regardless of where you run set
 litecom --connection NAME setup --workspace /absolute/folder
 ```
 
-Replace `/absolute/folder` with the folder you want the agent to use. On macOS/Linux, `--workspace ~` selects your home folder; in PowerShell, use `--workspace "$HOME"`. The selected folder appears in setup output and each request’s **Agent and access** details. Your agent’s tool permissions still apply.
+Replace `/absolute/folder` with the folder you want the agent to use. On macOS/Linux, `--workspace ~` selects your home folder; in PowerShell, use `--workspace "$HOME"`. The selected folder appears in setup output and each request’s **Agent and access** details. Approving a request authorizes its tool calls for that run. Operating-system access and account permissions still apply.
 
 ## Background operation
 
@@ -111,7 +111,7 @@ If a connection cannot be removed, the command explains what needs attention. Re
 | Background startup failed | Run `litecom --connection NAME worker` in a terminal while checking the reported service error. |
 | Agent or folder changed after approval | Create a new request and approve the new settings. |
 | Agent stopped or execution is uncertain | Check the external effects and private diagnostic path shown to the owner before retrying. Litecom will not rerun the action. |
-| A tool was denied | Adjust the native agent's permissions yourself if appropriate, then submit a new request. |
+| A tool was denied | Check the reply for a missing login, macOS permission, or administrator restriction. Grant the needed access, then submit a new request. |
 | File is outside the selected folder | Move the intended file into that folder or select the right working folder, then submit a new request. |
 
 Use `--home PATH` to store private configuration somewhere else. After a fix, run `litecom --connection NAME doctor` and send a small request to your own agent.

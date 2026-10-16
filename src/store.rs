@@ -38,6 +38,8 @@ struct Task {
     lease_until: Option<i64>,
     lease_credential: Option<String>,
     decision: Option<Decision>,
+    #[serde(default)]
+    source: Option<RequestSource>,
 }
 
 pub struct Store {
@@ -573,7 +575,7 @@ impl Store {
             view.permissions.clear();
             if let Some(receipt) = &mut view.receipt {
                 receipt.summary = match receipt.outcome {
-                    Outcome::Succeeded => "The approved action finished.",
+                    Outcome::Succeeded => "The agent finished. See its reply for the outcome.",
                     Outcome::Failed => "The approved action failed.",
                     Outcome::Cancelled => "The action was cancelled.",
                     Outcome::Uncertain => {
@@ -587,6 +589,14 @@ impl Store {
         Ok(view)
     }
     pub fn create_task(&self, p: &Principal, input: NewTask) -> Result<TaskView> {
+        self.create_task_with_source(p, input, None)
+    }
+    pub(crate) fn create_task_with_source(
+        &self,
+        p: &Principal,
+        input: NewTask,
+        source: Option<RequestSource>,
+    ) -> Result<TaskView> {
         validate(!input.request.trim().is_empty(), "Describe what you need.")?;
         validate(
             !input.idempotency_key.is_empty(),
@@ -603,7 +613,7 @@ impl Store {
             }
             let agent=self.agents(p,&input.owner_id)?.into_iter().find(|a|input.agent_id.as_ref().map(|id|id==&a.id).unwrap_or(a.is_default)).ok_or(Error::NotFound)?;
             let time=self.time();
-            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),created_at:time,updated_at:time,expires_at:None,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None};
+            let mut task=Task {view:TaskView{id:id(),requester_id:p.user_id.clone(),owner_id:input.owner_id,agent_id:agent.id,status:Status::Queued,request:input.request.trim().into(),created_at:time,updated_at:time,expires_at:None,received_at:None,downloads:vec![],revoked_at:None,draft:None,response:None,receipt:None,error:None,execution:None,permissions:vec![]},request_hash,version:0,lease_hash:None,lease_until:None,lease_credential:None,decision:None,source};
             self.db.execute("INSERT INTO tasks(id,requester_id,owner_id,agent_id,idempotency_key,status,created_at,updated_at,expires_at,data) VALUES(?,?,?,?,?,?,?,?,?,?)",params![task.view.id,task.view.requester_id,task.view.owner_id,task.view.agent_id,input.idempotency_key,task.view.status.as_str(),time,time,task.view.expires_at.unwrap_or(i64::MAX),self.vault.seal(&task,&format!("task:{}",task.view.id))?])?;
             self.save(&mut task,"queued")?;
             self.projection(p,task)
@@ -670,6 +680,21 @@ impl Store {
         self.claim_internal(p, agent_id)
     }
     fn claim_internal(&self, p: &Principal, agent_id: &str) -> Result<Option<WorkItem>> {
+        self.claim_phase(p, agent_id, false)
+    }
+    pub fn claim_preparation(&self, p: &Principal, agent_id: &str) -> Result<Option<WorkItem>> {
+        require(
+            self.owned_agent(p, agent_id)?.kind == AgentKind::Local,
+            "This cloud agent is run by the relay.",
+        )?;
+        self.claim_phase(p, agent_id, true)
+    }
+    fn claim_phase(
+        &self,
+        p: &Principal,
+        agent_id: &str,
+        prepare_only: bool,
+    ) -> Result<Option<WorkItem>> {
         require(
             p.role == Role::Agent,
             "Use an agent connection to run work.",
@@ -679,7 +704,7 @@ impl Store {
         self.transaction(|| {
             self.db.execute("UPDATE agents SET last_seen_at=? WHERE id=?",params![self.time(),agent_id])?;
             self.db.execute("UPDATE local_pairings SET last_seen_at=? WHERE credential_id=?",params![self.time(),p.credential_id])?;
-            let selected=self.db.query_row("SELECT id FROM tasks WHERE agent_id=? AND status IN ('queued','approved') ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id LIMIT 1",[agent_id],|r|r.get::<_,String>(0)).optional()?;
+            let selected=self.db.query_row("SELECT id FROM tasks WHERE agent_id=? AND (status='queued' OR (status='approved' AND ?=0)) ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END,created_at,id LIMIT 1",params![agent_id,prepare_only],|r|r.get::<_,String>(0)).optional()?;
             let Some(task_id)=selected else{return Ok(None)};
             let mut task=self.task(&task_id)?;
             let phase=if task.view.status==Status::Approved {"execute"} else {"prepare"};

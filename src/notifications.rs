@@ -105,10 +105,13 @@ pub async fn run(state: AppState) {
         });
         match next {
             Ok(Some(d)) => {
-                let (title, action) = match state
-                    .db()
-                    .and_then(|db| Ok((db.delivery_title(&d)?, db.channel_action(&d)?)))
-                {
+                let (title, action, summary) = match state.db().and_then(|db| {
+                    Ok((
+                        db.delivery_title(&d)?,
+                        db.channel_action(&d)?,
+                        db.notification_summary(&d)?,
+                    ))
+                }) {
                     Ok(value) => value,
                     Err(error) => {
                         tracing::warn!(%error,"could not read notification state");
@@ -129,13 +132,8 @@ pub async fn run(state: AppState) {
                                     <= 40_000
                         });
                         let message = action
-                            .map(|a| {
-                                format!(
-                                    "{}\n\nDetails: {}/request/{}",
-                                    a.body, state.origin, d.task_id
-                                )
-                            })
-                            .unwrap_or_else(|| body.clone());
+                            .map(|a| a.body.clone())
+                            .unwrap_or_else(|| format!("{summary}\n\n{title}"));
                         send_slack(&state, &d, &message, action.map(|a| a.token.as_str())).await
                     }
                     "email" => {
@@ -213,6 +211,7 @@ async fn send_slack(
             body,
             d.previous.as_deref(),
             action,
+            &format!("{}/request/{}", state.origin, d.task_id),
         )
         .await
 }

@@ -80,7 +80,7 @@ fn channels_share_one_decision_and_replays_do_not_repeat_execution() {
         p.token,
         f.store.channel_action(&phone).unwrap().unwrap().token
     );
-    assert!(p.body.contains("Theo asks:") && p.body.contains(&task.request));
+    assert!(p.body.contains("From: Theo") && p.body.contains(&task.request));
     assert!(
         f.store
             .channel_decide(
@@ -695,4 +695,80 @@ fn email_requires_reply_capability_and_connected_sender() {
     assert!(crate::email_replies::process(&state, message.as_bytes()).unwrap());
     assert!(crate::email_replies::process(&state, message.as_bytes()).unwrap());
     assert_eq!(count(&state.db().unwrap(), &task.id), 1);
+}
+
+#[test]
+fn slack_cards_keep_ask_from_and_where_after_the_decision_without_dumping_context() {
+    for decision in [Decision::Approve, Decision::Decline] {
+        let f = Fixture::new();
+        let mut delivery = destination(&f, "slack");
+        let request = f
+            .store
+            .create_task_with_source(
+                &f.a,
+                NewTask {
+                    owner_id: f.b.user_id.clone(),
+                    agent_id: Some(f.agent.clone()),
+                    request: "Find the Lens PRs. Quoted Slack context: private context dump".into(),
+                    idempotency_key: "concise-card".into(),
+                },
+                Some(crate::model::RequestSource {
+                    ask: "Find the Lens performance PRs.".into(),
+                    url: "https://example.slack.com/archives/C1/p1000000001".into(),
+                    share_files: true,
+                }),
+            )
+            .unwrap();
+        delivery.task_id = request.id.clone();
+        let settings = crate::runner::RunnerConfig {
+            agent: crate::runner::NativeAgent::Codex,
+            executable: std::env::current_exe().unwrap(),
+            workspace: std::env::temp_dir(),
+            arguments: vec![],
+            mcp: None,
+        };
+        f.store
+            .prepare(
+                &f.b,
+                &request.id,
+                None,
+                DraftInput {
+                    action: Some(settings.action(&request.request)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let card = f.store.channel_action(&delivery).unwrap().unwrap();
+        let summary = f.store.notification_summary(&delivery).unwrap();
+        assert!(card.body.contains("Ask: Find the Lens performance PRs."));
+        assert!(card.body.contains("From: Theo"));
+        assert!(
+            card.body.contains(
+                "Where: [Slack thread](https://example.slack.com/archives/C1/p1000000001)"
+            )
+        );
+        assert!(card.body.contains("reply and files with everyone"));
+        assert!(!card.body.contains("private context dump"));
+        f.store
+            .channel_decide(&slack_actor(), &card.token, decision.clone())
+            .unwrap();
+        assert!(f.store.channel_action(&delivery).unwrap().is_none());
+        assert_eq!(summary, f.store.notification_summary(&delivery).unwrap());
+        if decision == Decision::Approve {
+            let work = f.store.claim(&f.bw, &f.agent).unwrap().unwrap();
+            f.store
+                .stage_result(
+                    &f.bw,
+                    &request.id,
+                    &work.lease,
+                    DraftInput {
+                        text: "The PRs are merged.".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert_eq!(summary, f.store.notification_summary(&delivery).unwrap());
+            assert!(f.store.channel_action(&delivery).unwrap().is_none());
+        }
+    }
 }

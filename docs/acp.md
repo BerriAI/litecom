@@ -8,14 +8,14 @@ Install and sign in to your preferred agent first. Litecom detects OpenCode, Cur
 
 ### Codex
 
-To receive Codex's additional permission requests in Litecom, install its maintained ACP adapter and select it:
+To connect Codex through ACP, install its maintained adapter and select it:
 
 ```sh
 npm install -g @agentclientprotocol/codex-acp@2.2.2
 litecom setup --agent codex-acp
 ```
 
-The adapter includes a compatible Codex dependency and uses your existing login and configuration. Its selected mode determines which operations need permission; Litecom forwards the requests it emits. Direct `--agent codex` uses the local CLI and denies additional permissions instead of forwarding them.
+The adapter includes a compatible Codex dependency and uses your existing login and configuration. Litecom automatically answers its tool confirmations after you approve the request. Direct `--agent codex` uses Codex app-server with the same single-approval flow.
 
 ### Pi
 
@@ -28,7 +28,7 @@ litecom setup --agent pi
 
 Choose your approval channel and connect your Litecom account. New connections use your home folder. Setup adds Litecom's tools through `pi mcp add`. Litecom starts the adapter; the adapter starts your existing Pi in RPC mode. Pi keeps its model configuration, skills, extensions, and tools. No separate Litecom model or API key is needed.
 
-Pi's ordinary tools keep their native access. Extension confirmation prompts are forwarded for one-time approval. Multiple-choice extension prompts are declined because Litecom's approval controls cannot select between their meanings. Free-text extension prompts are unsupported by this adapter. `pi-acp` 0.0.34 does not apply ACP session MCP settings, so Litecom uses Pi's native MCP configuration.
+Pi's ordinary tools keep their native access. Extension confirmations with a single allow-once option are answered automatically. Multiple-choice extension prompts are declined because they require an answer beyond permission. Free-text extension prompts are unsupported by this adapter. `pi-acp` 0.0.34 does not apply ACP session MCP settings, so Litecom uses Pi's native MCP configuration.
 
 ### Other ACP agents
 
@@ -47,10 +47,10 @@ The maintained adapter projects are [Codex ACP](https://github.com/agentclientpr
 ## Handle a request
 
 1. **Approve** authorizes the request and its result delivery, then starts the selected agent in your working folder.
-2. If the agent asks for tool permission, review the proposed operation and select **Approve once** or **Decline operation**. Each additional permission is a separate decision.
+2. Litecom grants tool permissions automatically for that run. You do not approve each tool separately.
 3. The final reply and files are sent automatically. No second sharing approval is needed.
 
-Litecom never chooses an ACP “always allow” option. A request without a one-time choice, with insufficient operation details, or for another session is declined. An operation changed while awaiting approval stops the run. Canceling a request stops the local agent process; effects already completed are not undone.
+Litecom never chooses an ACP “always allow” option. A request without a unique one-time choice or for another session is declined. Tool grants stop when the request is cancelled or its execution lease expires. Canceling a request stops the local agent process; effects already completed are not undone.
 
 The selected agent's existing permissions and hooks still apply. Some tools can run without asking ACP for permission. ACP itself is not a sandbox, and Litecom does not claim to intercept those tools. The initial run approval describes that access. Only the agent's final reply and selected files are staged for sharing; its internal reasoning is excluded.
 

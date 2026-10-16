@@ -130,7 +130,7 @@ pub(crate) struct Mention {
     pub text: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Job {
     pub id: String,
     pub mention: Mention,
@@ -141,6 +141,11 @@ pub(crate) struct Job {
     pub task: Option<String>,
     pub recipient: Option<String>,
     pub result_started: bool,
+    // Legacy requests only approved text delivery to Slack. Never widen them.
+    #[serde(default)]
+    pub share_files: bool,
+    #[serde(default)]
+    pub files: std::collections::BTreeMap<String, crate::slack_files::Delivery>,
     pub reply: Option<String>,
     pub sent: Option<String>,
     pub remote: Vec<String>,
@@ -162,6 +167,8 @@ impl Job {
             task: None,
             recipient: None,
             result_started: false,
+            share_files: true,
+            files: Default::default(),
             reply: None,
             sent: None,
             remote: vec![],
@@ -272,13 +279,13 @@ fn tools() -> Value {
         tool(
             "create_request",
             "Ask the selected agent to do the work. Always requires its owner's approval. One request per mention; this ends the handoff. The sender, context and reply destination are attached by Litecom.",
-            json!({"agent_id":{"type":"string"},"request":{"type":"string"}}),
-            &["agent_id", "request"]
+            json!({"agent_id":{"type":"string"},"summary":{"type":"string","description":"One short sentence stating the work and scope for the owner's approval. No quoted thread, implementation plan, sender introduction, or links."},"request":{"type":"string","description":"Complete work instruction and relevant context. Preserve every requested action; do not add actions."}}),
+            &["agent_id", "summary", "request"]
         )
     ])
 }
 
-fn principal(s: &AppState, job: &Job) -> Result<Principal> {
+pub(crate) fn principal(s: &AppState, job: &Job) -> Result<Principal> {
     let p = s
         .db()?
         .slack_principal(&job.mention.team, &job.mention.user)?
@@ -411,14 +418,28 @@ fn submit(s: &AppState, job: &mut Job, p: &Principal, args: &Value) -> Result<Va
         .iter()
         .find(|a| a["id"] == agent_id)
         .unwrap();
+    let source = crate::model::RequestSource {
+        ask: args["summary"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(request)
+            .into(),
+        url: job.source.clone(),
+        share_files: job.share_files,
+    };
+    let sharing = if job.share_files {
+        "Approving shares the final reply and requested files with everyone in that Slack channel. Copies in Slack follow its retention and access settings."
+    } else {
+        "Approving also shares the final reply with everyone in that Slack channel. File downloads stay restricted to the requester and owner."
+    };
     let request = format!(
-        "{request}\n\nReply in Slack: {}\nApproving also shares the final reply with everyone in that Slack channel. File downloads stay restricted to the requester and owner.\n\nOriginal message from Slack user {}:\n{}\n\nQuoted Slack context:\n{}",
+        "{request}\n\nReply in Slack: {}\n{sharing}\n\nOriginal message from Slack user {}:\n{}\n\nQuoted Slack context:\n{}",
         job.source,
         job.mention.user,
         job.mention.text,
         serde_json::to_string_pretty(&job.context)?
     );
-    let task = s.db()?.create_task(
+    let task = s.db()?.create_task_with_source(
         p,
         NewTask {
             owner_id: agent["owner_id"].as_str().ok_or(Error::NotFound)?.into(),
@@ -426,6 +447,7 @@ fn submit(s: &AppState, job: &mut Job, p: &Principal, args: &Value) -> Result<Va
             request,
             idempotency_key: format!("slack:{}", job.id),
         },
+        Some(source),
     )?;
     job.task = Some(task.id.clone());
     job.recipient = person["name"].as_str().map(str::to_owned);
@@ -472,47 +494,40 @@ fn task_reply(s: &AppState, job: &Job) -> Result<(String, bool, bool)> {
     let task = s
         .db()?
         .get_task(&p, job.task.as_deref().ok_or(Error::NotFound)?)?;
-    let url = format!("{}/request/{}", s.origin, task.id);
     let recipient = job.recipient.as_deref().unwrap_or("The owner");
     let has_result = task.status == Status::Completed && task.response.is_some();
     let text = match task.status {
         Status::Completed => match task.response {
             Some(response) => {
                 let mut text = response.text;
-                if !response.attachments.is_empty() {
-                    text.push_str("\n\nFiles (sign in to download):\n");
-                    for artifact in response.attachments {
-                        text.push_str(&format!("{}\n", artifact.name));
-                    }
+                if crate::slack_files::has_fallback(job) {
+                    text.push_str("\n\nSlack could not attach every file. Use **Download files** for the remaining files.");
+                } else if !job.share_files && !response.attachments.is_empty() {
+                    text.push_str("\n\nUse **Download files** to open the approved files.");
                 }
-                format!("{text}\n\n{url}")
+                text
             }
-            None => format!("This result is no longer available.\n{url}"),
+            None => "This result is no longer available.".into(),
         },
-        Status::Declined => format!("{recipient} declined this request.\n{url}"),
-        Status::Cancelled | Status::Expired => {
-            format!("This request was cancelled or expired.\n{url}")
-        }
-        Status::Failed => {
-            format!("The request needs attention. Check its status before retrying.\n{url}")
-        }
-        Status::Approved => format!("{recipient} approved. Waiting for their agent.\n{url}"),
-        Status::Executing => format!("{recipient} approved. Their agent is working.\n{url}"),
-        Status::CancelRequested => {
-            format!("Cancellation requested. Waiting for the agent to stop.\n{url}")
-        }
-        _ => format!("Sent to {recipient}'s agent. Waiting for approval.\n{url}"),
+        Status::Declined => format!("{recipient} declined this request."),
+        Status::Cancelled | Status::Expired => "This request was cancelled or expired.".into(),
+        Status::Failed => "The request needs attention. Open the request for details.".into(),
+        Status::Approved => format!("{recipient} approved. Waiting for their agent."),
+        Status::Executing => format!("{recipient} approved. Their agent is working."),
+        Status::CancelRequested => "Cancellation requested. Waiting for the agent to stop.".into(),
+        _ => format!("Sent to {recipient}'s agent. Waiting for approval."),
     };
     Ok((text, task.status.terminal(), has_result))
 }
 
-// Slack documents a 40,000-character message limit. Split output, never truncate it.
+// Slack Markdown blocks accept 12,000 UTF-16 units per message.
+// Split output, never truncate it.
 fn chunks(body: &str) -> Vec<String> {
     let mut chunks = vec![];
     let mut current = String::new();
     let mut size = 0;
     for ch in body.chars() {
-        if size + ch.len_utf16() > 40_000 {
+        if size + ch.len_utf16() > 12_000 {
             chunks.push(std::mem::take(&mut current));
             size = 0;
         }
@@ -531,11 +546,24 @@ async fn publish(
     connection: &crate::slack::SlackDestination,
     body: &str,
 ) -> Result<()> {
-    let hash = crate::crypto::hash(body);
+    let mut buttons = job
+        .task
+        .as_ref()
+        .map(|id| {
+            vec![crate::slack::view_button(
+                "View request",
+                &format!("{}/request/{id}", s.origin),
+            )]
+        })
+        .unwrap_or_default();
+    if job.result_started {
+        buttons.extend(crate::slack_files::download_buttons(s, job)?);
+    }
+    let hash = crate::crypto::hash(format!("{body}{}", serde_json::to_string(&buttons)?));
     if job.sent.as_ref() == Some(&hash) {
         return Ok(());
     }
-    for (index, chunk) in chunks(body).iter().enumerate() {
+    for (index, chunk) in chunks(&crate::slack::markdown(body)).iter().enumerate() {
         let phase = if job.result_started {
             "result"
         } else {
@@ -558,6 +586,7 @@ async fn publish(
                 chunk,
                 job.remote.get(index).map(String::as_str),
                 &id,
+                &buttons,
             )
             .await?;
         if index == job.remote.len() {
@@ -581,10 +610,13 @@ pub(crate) async fn step(s: &AppState, job: &mut Job) -> Result<(bool, i64)> {
             ),
             Err(error) => return Err(error),
         };
+        if has_result && crate::slack_files::advance(s, job, &connection).await? {
+            return Ok((false, 0));
+        }
         if has_result && !job.result_started {
             if !job.remote.is_empty() {
                 let status = format!(
-                    "{}'s agent finished. The reply follows in this thread.",
+                    "{}'s agent finished.",
                     job.recipient.as_deref().unwrap_or("The owner")
                 );
                 publish(s, job, &connection, &status).await?;

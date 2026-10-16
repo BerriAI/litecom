@@ -1,8 +1,8 @@
-//! ACP v1 client. Native tools stay in the agent; new permissions go to its owner.
+//! ACP v1 client. The approved run authorizes one-time native tool permissions.
 use crate::{
     client::{Client, WorkLease},
     config,
-    model::{Decision, Status, ToolPermission, ToolPermissionInput, WorkItem},
+    model::{Status, WorkItem},
     runner::{AgentReply, ProcessGroup, RunnerConfig},
 };
 use agent_client_protocol::{
@@ -66,62 +66,24 @@ async fn permission(
             serde_json::to_value(&request.tool_call)?,
         )
     };
-    let has_detail = scope
-        .get("rawInput")
-        .is_some_and(|v| !v.is_null() && v != &json!({}))
-        || ["content", "locations"]
-            .iter()
-            .any(|key| scope[*key].as_array().is_some_and(|a| !a.is_empty()));
-    if !has_detail {
+    // Initial request approval covers the work's tools. Check that execution is
+    // still authorized, then grant only this invocation, never an always rule.
+    let mut lease = WorkLease::new(&client, &work.task_id, &work.lease);
+    if lease.renew().await? != Status::Executing {
         return Ok(RequestPermissionOutcome::Cancelled);
     }
-    let title = scope["title"]
-        .as_str()
-        .filter(|title| !title.trim().is_empty())
-        .unwrap_or("Approve agent operation");
-    let input = ToolPermissionInput {
-        id: crate::crypto::id(),
-        title: title.into(),
-        details: json!({"protocol":"ACP v1", "operation":scope, "permission":choices[0], "request":request}),
-    };
-    let path = format!("/api/tasks/{}/permissions", work.task_id);
-    let mut pending: ToolPermission = client
-        .post(&path, json!({"lease":work.lease,"permission":input}))
-        .await?;
-    loop {
-        if let Some(decision) = pending.decision {
-            // An agent must ask again if it changes the scope while waiting.
-            let unchanged = shared
-                .lock()
-                .expect("ACP session lock")
-                .tools
-                .get(&request.tool_call.tool_call_id.to_string())
-                == Some(&scope);
-            if !unchanged {
-                bail!("The ACP operation changed while awaiting approval. It was not authorized.");
-            }
-            let choice = if decision == Decision::Approve {
-                Some(choices[0])
-            } else {
-                request
-                    .options
-                    .iter()
-                    .find(|o| o.kind == PermissionOptionKind::RejectOnce)
-            };
-            return Ok(choice.map_or(RequestPermissionOutcome::Cancelled, |o| {
-                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                    o.option_id.clone(),
-                ))
-            }));
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        pending = client
-            .post(
-                &format!("{path}/{}/status", pending.id),
-                json!({"lease":work.lease}),
-            )
-            .await?;
+    let unchanged = shared
+        .lock()
+        .expect("ACP session lock")
+        .tools
+        .get(&request.tool_call.tool_call_id.to_string())
+        == Some(&scope);
+    if !unchanged {
+        return Ok(RequestPermissionOutcome::Cancelled);
     }
+    Ok(RequestPermissionOutcome::Selected(
+        SelectedPermissionOutcome::new(choices[0].option_id.clone()),
+    ))
 }
 
 pub(crate) async fn reply(

@@ -36,3 +36,4 @@ exceptions = [{ crate = "option-ext@0.2.0", allow = ["MPL-2.0"] }]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/BerriAI/agentchat"]

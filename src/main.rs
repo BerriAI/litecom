@@ -269,6 +269,7 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Worker { once } => {
             let client = Client::new(ClientConfig::load_named(&cli.connection)?)?;
             let settings = RunnerConfig::load(&cli.connection)?;
+            litecom::folder_access::check(&cli.connection, &settings).await?;
             tokio::select! {
                 result = litecom::runner::run(client, settings, once) => result?,
                 _ = shutdown() => eprintln!("Litecom stopped. Running actions may have partial effects; they will not be repeated automatically."),

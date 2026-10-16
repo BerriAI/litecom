@@ -279,6 +279,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/files/{id}", get(download))
         .route("/api/files/{id}/received", post(download_received))
         .route("/api/work/claim", post(claim))
+        .route("/api/work/prepare", post(claim_preparation))
         .route("/api/events", get(events))
         .route(
             "/fonts/geist.woff2",
@@ -1222,6 +1223,14 @@ async fn claim(State(s): State<AppState>, h: HeaderMap) -> Result<Json<Option<Wo
     let p = s.principal(&h, true)?;
     let agent = p.agent_id.as_deref().ok_or(Error::Unauthorized)?;
     Ok(Json(s.db()?.claim(&p, agent)?))
+}
+async fn claim_preparation(
+    State(s): State<AppState>,
+    h: HeaderMap,
+) -> Result<Json<Option<WorkItem>>> {
+    let p = s.principal(&h, true)?;
+    let agent = p.agent_id.as_deref().ok_or(Error::Unauthorized)?;
+    Ok(Json(s.db()?.claim_preparation(&p, agent)?))
 }
 #[derive(Deserialize)]
 struct EventQuery {

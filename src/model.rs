@@ -357,6 +357,13 @@ pub struct DownloadReceipt {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct RequestSource {
+    pub ask: String,
+    pub url: String,
+    pub share_files: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskView {
     pub id: String,
     pub requester_id: String,

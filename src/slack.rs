@@ -18,7 +18,12 @@ pub struct Slack {
 pub(crate) fn scopes(agent: bool) -> Vec<&'static str> {
     let mut scopes = vec!["chat:write", "im:write"];
     if agent {
-        scopes.extend(["app_mentions:read", "channels:history", "groups:history"]);
+        scopes.extend([
+            "app_mentions:read",
+            "channels:history",
+            "groups:history",
+            "files:write",
+        ]);
     }
     scopes
 }
@@ -166,7 +171,26 @@ async fn response(request: reqwest::RequestBuilder) -> Result<Value> {
     }
     Ok(value)
 }
+fn sdk_error(error: agentchat_core::Error) -> Error {
+    Error::Unavailable(error.to_string())
+}
+fn rich_payload(body: &str, blocks: Vec<Value>) -> Result<Value> {
+    agentchat_slack::rendering::rich_payload(&agentchat_core::RichReply {
+        text: body.into(),
+        blocks: blocks
+            .into_iter()
+            .map(|b| b.as_object().cloned().expect("Slack block"))
+            .collect(),
+        attachments: vec![],
+    })
+    .map_err(sdk_error)
+}
+
 impl Slack {
+    fn api(&self, token: &str) -> Result<agentchat_slack::web_api::SlackWebApi> {
+        agentchat_slack::web_api::SlackWebApi::with_api_base(token.into(), &self.api_base)
+            .map_err(sdk_error)
+    }
     pub fn new(client_id: String, client_secret: String) -> Self {
         Self {
             client_id,
@@ -218,12 +242,11 @@ impl Slack {
         let token = field(&value, "access_token")?;
         let user = field(&value["authed_user"], "id")?;
         let team = field(&value["team"], "id")?;
-        let opened = response(
-            http.post(format!("{}/conversations.open", self.api_base))
-                .bearer_auth(&token)
-                .json(&json!({"users":user})),
-        )
-        .await?;
+        let opened = self
+            .api(&token)?
+            .post("conversations.open", &json!({"users":user}))
+            .await
+            .map_err(sdk_error)?;
         Ok(SlackDestination {
             token,
             refresh_token: value["refresh_token"].as_str().map(str::to_owned),
@@ -257,13 +280,15 @@ impl Slack {
         updated.expires_at = value["expires_in"].as_i64().map(|s| now() + s);
         Ok(updated)
     }
+    #[allow(clippy::too_many_arguments)]
     pub async fn notify(
         &self,
-        http: &reqwest::Client,
+        _http: &reqwest::Client,
         destination: &SlackDestination,
         body: &str,
         previous: Option<&str>,
         action: Option<&str>,
+        request_url: &str,
     ) -> Result<String> {
         let previous: Option<Value> = previous.and_then(|s| serde_json::from_str(s).ok());
         let ts = previous
@@ -290,22 +315,32 @@ impl Slack {
         if !chunk.is_empty() {
             blocks.push(json!({"type":"section","text":{"type":"plain_text","text":chunk}}));
         }
+        let mut buttons = vec![];
         if let Some(token) = action {
-            blocks.push(json!({"type":"actions","elements":[
-                {"type":"button","text":{"type":"plain_text","text":"Approve"},"style":"primary","action_id":"litecom_approve","value":token},
-                {"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token}
-            ]}));
+            buttons.extend([
+                json!({"type":"button","text":{"type":"plain_text","text":"Approve"},"style":"primary","action_id":"litecom_approve","value":token}),
+                json!({"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token})
+            ]);
         }
-        let mut payload = json!({"channel":destination.channel,"text":body,"blocks":blocks,"parse":"none","link_names":false,"unfurl_links":false,"unfurl_media":false});
+        buttons.push(view_button("View request", request_url));
+        blocks.push(json!({"type":"actions","elements":buttons}));
+        let safe = markdown(body);
+        if safe.encode_utf16().count() <= 12_000 {
+            blocks = vec![
+                json!({"type":"markdown","text":safe}),
+                blocks.pop().expect("actions"),
+            ];
+        }
+        let mut payload = rich_payload(body, blocks)?;
+        payload["channel"] = json!(destination.channel);
         if let Some(ts) = ts {
             payload["ts"] = json!(ts);
         }
-        let result = response(
-            http.post(format!("{}/{method}", self.api_base))
-                .bearer_auth(&destination.token)
-                .json(&payload),
-        )
-        .await?;
+        let result = self
+            .api(&destination.token)?
+            .post(method, &payload)
+            .await
+            .map_err(sdk_error)?;
         Ok(serde_json::to_string(
             &json!({"channel":destination.channel,"ts":field(&result,"ts")?}),
         )?)
@@ -313,31 +348,93 @@ impl Slack {
 
     pub(crate) async fn read(
         &self,
-        http: &reqwest::Client,
+        _http: &reqwest::Client,
         destination: &SlackDestination,
         method: &str,
         query: &[(&str, String)],
     ) -> Result<Value> {
-        response(
-            http.get(format!("{}/{method}", self.api_base))
-                .bearer_auth(&destination.token)
-                .query(query),
+        let query: serde_json::Map<String, Value> = query
+            .iter()
+            .map(|(k, v)| (k.to_string(), json!(v)))
+            .collect();
+        self.api(&destination.token)?
+            .get(method, &Value::Object(query))
+            .await
+            .map_err(sdk_error)
+    }
+
+    pub(crate) async fn upload_ticket(
+        &self,
+        _http: &reqwest::Client,
+        destination: &SlackDestination,
+        artifact: &crate::model::Artifact,
+    ) -> Result<(String, String)> {
+        let value = self
+            .api(&destination.token)?
+            .post(
+                "files.getUploadURLExternal",
+                &json!({"filename":artifact.name,"length":artifact.size}),
+            )
+            .await
+            .map_err(sdk_error)?;
+        let upload = field(&value, "upload_url")?;
+        agentchat_slack::file_transfers::file_location(
+            &upload,
+            agentchat_slack::file_transfers::FilePurpose::Upload,
+            url::Url::parse(&self.api_base).ok().as_ref(),
         )
-        .await
+        .map_err(sdk_error)?;
+        Ok((field(&value, "file_id")?, upload))
+    }
+
+    pub(crate) async fn share_file(
+        &self,
+        _http: &reqwest::Client,
+        destination: &SlackDestination,
+        file: &str,
+        channel: &str,
+        thread: &str,
+    ) -> Result<()> {
+        agentchat_slack::policy::ReplyDestination::validate(channel, Some(thread))
+            .map_err(sdk_error)?;
+        let result = self
+            .api(&destination.token)?
+            .post(
+                "files.completeUploadExternal",
+                &json!({"files":[{"id":file}],"channel_id":channel,"thread_ts":thread}),
+            )
+            .await
+            .map_err(sdk_error)?;
+        require(
+            result["files"]
+                .as_array()
+                .is_some_and(|fs| fs.iter().any(|f| f["id"] == file)),
+            "Slack did not confirm file delivery.",
+        )?;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn reply(
         &self,
-        http: &reqwest::Client,
+        _http: &reqwest::Client,
         destination: &SlackDestination,
         channel: &str,
         thread: &str,
         body: &str,
         previous: Option<&str>,
         message_id: &str,
+        buttons: &[Value],
     ) -> Result<String> {
-        let mut payload = json!({"channel":channel,"text":body,"mrkdwn":false,"parse":"none","link_names":false,"unfurl_links":false,"unfurl_media":false});
+        let mut blocks = vec![json!({"type":"markdown","text":body})];
+        // Slack allows 25 elements in one actions block.
+        for buttons in buttons.chunks(25) {
+            blocks.push(json!({"type":"actions","elements":buttons}));
+        }
+        agentchat_slack::policy::ReplyDestination::validate(channel, Some(thread))
+            .map_err(sdk_error)?;
+        let mut payload = rich_payload(body, blocks)?;
+        payload["channel"] = json!(channel);
         let method = if let Some(ts) = previous {
             payload["ts"] = json!(ts);
             "chat.update"
@@ -346,12 +443,23 @@ impl Slack {
             payload["client_msg_id"] = json!(message_id);
             "chat.postMessage"
         };
-        let value = response(
-            http.post(format!("{}/{method}", self.api_base))
-                .bearer_auth(&destination.token)
-                .json(&payload),
-        )
-        .await?;
+        let value = self
+            .api(&destination.token)?
+            .post(method, &payload)
+            .await
+            .map_err(sdk_error)?;
         field(&value, "ts")
     }
+}
+
+pub(crate) fn view_button(label: &str, url: &str) -> Value {
+    json!({"type":"button","text":{"type":"plain_text","text":label},"action_id":format!("litecom_view_{}", &hash(label)[..12]),"url":url})
+}
+
+// Prevent output from turning quoted Slack IDs into pings. Slack's Markdown
+// renderer still handles ordinary Markdown links, lists, emphasis and code.
+pub(crate) fn markdown(body: &str) -> String {
+    body.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

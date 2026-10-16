@@ -582,14 +582,14 @@ function showLocalCommand() {
   if (!target || !localPairing) return;
   document
     .querySelectorAll("[data-action=connect-local]")
-    .forEach((button) => (button.hidden = true));
+    .forEach((button) => (button.hidden = localPairing.method !== "prompt"));
   const name = "local-" + localPairing.user_code.toLowerCase();
   const windows = /Windows/i.test(navigator.userAgent);
   const command = windows
     ? `& ([scriptblock]::Create((irm ${psQuote(location.origin + "/install.ps1")}))) -Relay ${psQuote(location.origin)} -Code ${psQuote(localPairing.device_code)} -Connection ${psQuote(name)}`
     : `curl -fsSL ${shellQuote(location.origin + "/install.sh")} | sh -s -- --connection ${shellQuote(name)} setup --relay ${shellQuote(location.origin)} --connect-code ${shellQuote(localPairing.device_code)}`;
   if (localPairing.method === "prompt") {
-    target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Set up with your agent</h2><button class="primary" data-action="copy-setup-prompt">Copy prompt</button></div><p class="muted">Paste the prompt into your coding agent. It connects to this workspace and sets up MCP.</p><p class="muted subtitle">Private prompt · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for your agent to connect.</p><details><summary>View setup prompt</summary><textarea id="setup-prompt" readonly rows="7" spellcheck="false" aria-label="Agent setup prompt">${esc(setupPrompt(command, windows, name))}</textarea></details><details><summary>Use a terminal instead</summary><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><button data-action="copy-connect">Copy command</button></details></section>`;
+    target.innerHTML = `<textarea id="setup-prompt" hidden readonly aria-label="Agent setup prompt">${esc(setupPrompt(command, windows, name))}</textarea><span id="connect-status" hidden></span>`;
     return;
   }
   target.innerHTML = `<section class="connection-panel"><div class="row"><h2>Connect ${esc(localPairing.agent_name || "this computer")}</h2><button class="primary" data-action="copy-connect">Copy command</button></div><p class="muted">Paste into any terminal. Your agent starts in your home folder.</p><label class="command-label">${windows ? "PowerShell command" : "Terminal command"}<input id="connect-command" readonly spellcheck="false" value="${esc(command)}"></label><p class="muted subtitle">Private command · Expires in 10 minutes</p><p id="connect-status" class="connection-status" role="status">Waiting for you to run the command.</p><details><summary>Set up with your agent</summary><p class="muted">Copy this prompt into your coding agent.</p><textarea id="setup-prompt" readonly rows="5" spellcheck="false" aria-label="Agent setup prompt">${esc(setupPrompt(command, windows, name))}</textarea><button data-action="copy-setup-prompt">Copy setup prompt</button></details><details><summary>What this sets up</summary><p>Installs Litecom, connects your chosen agent and adds MCP. The agent runs in the background. Requests need your approval.</p></details></section>`;
@@ -649,7 +649,7 @@ async function pollLocalConnection() {
       sessionStorage.removeItem("local-pairing");
       localPairing = null;
       const panel = document.getElementById("local-command");
-      if (panel)
+      if (panel && current.method !== "prompt")
         panel.innerHTML = `<section class="connection-result"><p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? connectedAgentNextStep(connected) : ""}</section>`;
       if (result.status === "connected") {
         const row = [...document.querySelectorAll("[data-agent-status]")].find(
@@ -940,9 +940,13 @@ document.addEventListener("click", async (e) => {
       const prompt = document.getElementById("setup-prompt");
       try {
         await navigator.clipboard.writeText(prompt.value);
-        return notice("Setup prompt copied. Paste it into your coding agent.");
+        document.querySelectorAll("[data-action=copy-setup-prompt]").forEach((b) => (b.textContent = "Copied"));
+        return;
       } catch {
-        prompt.closest("details").open = true;
+        prompt.hidden = false;
+        prompt.rows = 7;
+        const details = prompt.closest("details");
+        if (details) details.open = true;
         prompt.focus();
         prompt.select();
         return notice("Select and copy the setup prompt below.");

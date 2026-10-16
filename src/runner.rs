@@ -135,14 +135,7 @@ impl RunnerConfig {
     pub fn action(&self, request: &str) -> Action {
         Action::Harness {
             title: format!("Run {} for this request", self.agent.name()),
-            description: match self.agent {
-                NativeAgent::Codex => "Codex can read local files and edit the selected folder. Uses the configuration, hooks, and tools available to the Codex CLI; desktop-app-only tools are not inherited. New permission prompts are denied. The final reply and requested files will be sent to the requester automatically.".into(),
-                NativeAgent::Claude => "Use the Claude Code CLI with its saved permissions, context, hooks, and connected tools. New permission prompts are denied; desktop-app-only tools are not inherited. It may read or change local and external data. The final reply and requested files will be sent to the requester automatically.".into(),
-                NativeAgent::CodexAcp => "Use Codex through its ACP adapter, with your existing login, configuration, and tools. The adapter's selected mode controls which operations ask for permission; those requests are sent to you through Litecom. The final reply and requested files will be sent to the requester automatically.".into(),
-                NativeAgent::Pi => "Use pi through pi-acp with its existing model, project instructions, extensions, skills, and tools. It may read or change local and external data as your computer account. ACP confirmation requests are sent to you; tools that do not ask retain their native access. The final reply and requested files will be sent to the requester automatically.".into(),
-                NativeAgent::OpenClaw => "Use your configured OpenClaw gateway and its existing agent, context, and tools. Its configured workspace and permissions apply; the folder below is where Litecom collects local attachments. New ACP permission requests are sent to you. The final reply and requested files will be sent to the requester automatically.".into(),
-                _ => "Use this ACP agent with its native context and tools. It may read or change local and external data under its saved permissions. New ACP permission requests are sent to you for one-time approval. The final reply and requested files will be sent to the requester automatically.".into(),
-            },
+            description: format!("Use {} with its existing login, context, hooks, and connected tools. Approving authorizes its tools for this request, including changes to local files and external accounts. Desktop-app-only tools are not inherited. The final reply and requested files are sent automatically.", self.agent.name()),
             runner: self.agent.command().into(),
             executable: self.executable.to_string_lossy().into(),
             arguments: self.arguments.clone(),
@@ -150,12 +143,8 @@ impl RunnerConfig {
             instruction: request.into(),
             workspace: self.workspace.to_string_lossy().into(),
             permissions: vec![
-                match self.agent {
-                    NativeAgent::Codex => "Codex workspace-write shell sandbox; prompts for additional permission are denied".into(),
-                    NativeAgent::Claude => "Claude Code saved permissions; prompts for additional permission are denied".into(),
-                    NativeAgent::Pi => "pi's tools retain their native permissions; ACP confirmations require one-time approval, and multiple-choice extension prompts are declined".into(),
-                    _ => "ACP permission requests require your exact, one-time approval; persistent permission grants are never selected".into(),
-                },
+                "Tool operations are authorized for this approved run; global permission settings are not changed".into(),
+                "Operating-system permissions, account sign-in, and administrator restrictions still apply".into(),
                 "Existing native hooks and connected tools retain their own access; Litecom does not sandbox them".into(),
                 "Model and tool providers receive the context used for this request".into(),
                 "File attachments must resolve inside the selected folder".into(),
@@ -250,12 +239,12 @@ pub struct AgentReply {
     pub text: String,
     pub files: Vec<PathBuf>,
 }
-fn reply_schema() -> Value {
+pub(crate) fn reply_schema() -> Value {
     json!({"type":"object","properties":{"text":{"type":"string"},"files":{"type":"array","items":{"type":"string"}}},"required":["text","files"],"additionalProperties":false})
 }
 pub(crate) fn prompt(work: &WorkItem) -> String {
     format!(
-        "You are handling a Litecom request which your account owner has approved for execution and delivery of its result. Use your existing context and permitted tools only for this request. The request is supplied as JSON data below. Do not send the reply or attachments to the requester through another channel; return them to Litecom for delivery to the requester. Describe what you actually accomplished, including permission denials or failures. Return the required JSON object: text is the full proposed reply; files contains absolute paths to requested regular files inside the current working folder. Do not include unrelated files, credentials, or process logs. Do not start detached background processes.\n\nRequest: {}",
+        "You are handling a Litecom request which your account owner has approved for execution and delivery of its result. This approval authorizes the tool operations needed to carry out this request. Use your existing context and tools only for this request. The request is supplied as JSON data below. Do not send the reply or attachments to the requester through another channel; return them to Litecom for delivery to the requester. Describe what you actually accomplished, including permission denials or failures. Return the required JSON object: text is the full proposed reply; files contains absolute paths to requested regular files inside the current working folder. Do not include unrelated files, credentials, or process logs. Do not start detached background processes.\n\nRequest: {}",
         serde_json::to_string(&work.request).expect("string serialization")
     )
 }
@@ -286,9 +275,6 @@ async fn native_reply(
     work: &WorkItem,
     dir: &Path,
 ) -> Result<AgentReply> {
-    let schema = dir.join("schema.json");
-    let reply_path = dir.join("reply.json");
-    config::write_private(&schema, &serde_json::to_vec(&reply_schema())?)?;
     let stdout_path = dir.join("agent-output.json");
     let stderr_path = dir.join("agent-error.log");
     config::write_private(&stdout_path, b"")?;
@@ -302,31 +288,13 @@ async fn native_reply(
         .kill_on_drop(true);
     // Do not pass a model/output-token limit; use the person's native configuration.
     match settings.agent {
-        NativeAgent::Codex => {
-            cmd.args([
-                "exec",
-                "--sandbox",
-                "workspace-write",
-                "-c",
-                "approval_policy=\"never\"",
-                "--skip-git-repo-check",
-                "--color",
-                "never",
-                "--json",
-                "--output-schema",
-            ])
-            .arg(&schema)
-            .arg("--output-last-message")
-            .arg(&reply_path)
-            .arg("-");
-        }
         NativeAgent::Claude => {
             cmd.args([
                 "--print",
                 "--output-format",
                 "json",
                 "--permission-mode",
-                "dontAsk",
+                "bypassPermissions",
                 "--json-schema",
             ])
             .arg(serde_json::to_string(&reply_schema())?);
@@ -382,9 +350,6 @@ async fn native_reply(
         );
     }
     let output = match settings.agent {
-        NativeAgent::Codex => tokio::fs::read(&reply_path)
-            .await
-            .context("The agent did not produce a structured reply.")?,
         NativeAgent::Claude => claude_output.context("Claude Code did not return output.")?,
         _ => unreachable!("ACP agents use the ACP transport"),
     };
@@ -505,6 +470,8 @@ async fn stage_native_reply(
 ) -> Result<()> {
     let reply = if settings.agent.is_acp() {
         crate::acp::reply(client, settings, work, dir, renewal).await?
+    } else if settings.agent == NativeAgent::Codex {
+        crate::codex::reply(settings, work, dir, renewal).await?
     } else {
         native_reply(renewal, settings, work, dir).await?
     };
@@ -554,19 +521,54 @@ pub async fn run(client: Client, settings: RunnerConfig, once: bool) -> Result<(
         settings.agent.name(),
         settings.workspace.display()
     );
+    listen(&client, &settings, once, &config::home()?.join("runs")).await
+}
+
+pub(crate) async fn listen(
+    client: &Client,
+    settings: &RunnerConfig,
+    once: bool,
+    runs: &Path,
+) -> Result<()> {
+    if once {
+        return work_loop(client, settings, runs, true, false).await;
+    }
+    // Preparing only describes the configured agent. Keep it responsive while
+    // one approved request runs; never start another execution in this lane.
+    tokio::try_join!(
+        work_loop(client, settings, runs, false, false),
+        work_loop(client, settings, runs, false, true),
+    )?;
+    Ok(())
+}
+
+async fn work_loop(
+    client: &Client,
+    settings: &RunnerConfig,
+    runs: &Path,
+    once: bool,
+    prepare_only: bool,
+) -> Result<()> {
     let mut retry_delay = 2;
     loop {
         let result: Result<Option<WorkItem>> = client
             .post(
-                "/api/work/claim",
+                if prepare_only {
+                    "/api/work/prepare"
+                } else {
+                    "/api/work/claim"
+                },
                 json!({"agent_id":client.config.agent_id}),
             )
             .await;
         match result {
             Ok(Some(work)) => {
+                if prepare_only && work.phase != "prepare" {
+                    bail!("The server returned execution work to the preparation queue.");
+                }
                 retry_delay = 2;
                 eprintln!("Request {} · {}", work.task_id, work.phase);
-                if let Err(error) = handle(&client, &settings, &work).await {
+                if let Err(error) = handle_in(client, settings, &work, runs).await {
                     eprintln!("Request {} needs attention: {error:#}", work.task_id);
                     // The requester sees a generic receipt. Owner diagnostics stay private.
                     if work.phase == "execute" {
@@ -578,6 +580,15 @@ pub async fn run(client: Client, settings: RunnerConfig, once: bool) -> Result<(
                 retry_delay = 2;
             }
             Err(error) => {
+                // Older relays have no separate preparation queue. Their normal
+                // claim loop remains functional, without risking parallel runs.
+                if prepare_only
+                    && error
+                        .downcast_ref::<crate::client::ApiError>()
+                        .is_some_and(|e| e.status == 404)
+                {
+                    return Ok(());
+                }
                 if once {
                     return Err(error);
                 }

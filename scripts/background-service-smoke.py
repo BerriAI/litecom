@@ -48,14 +48,14 @@ def main():
         home = root / "configuration"
         expected = b"One approved request from an installed background worker.\n"
         fixture = programs / "fixture.py"
+        protocol = Path(__file__).resolve().parent / "fixtures/codex_app_server.py"
         fixture.write_text(
-            "import json, sys\nfrom pathlib import Path\n"
-            "sys.stdin.read()\n"
-            "with Path('runs').open('a') as count: count.write('run\\n')\n"
-            f"Path('result.bin').write_bytes({expected!r})\n"
-            "reply = sys.argv[sys.argv.index('--output-last-message') + 1]\n"
-            "Path(reply).write_text(json.dumps({'text':'Done.',"
-            "'files':[str(Path('result.bin').resolve())]}))\n",
+            "import runpy\nfrom pathlib import Path\n"
+            "def reply():\n"
+            "    with Path('runs').open('a') as count: count.write('run\\n')\n"
+            f"    Path('result.bin').write_bytes({expected!r})\n"
+            "    return {'text':'Done.', 'files':[str(Path('result.bin').resolve())]}\n"
+            f"runpy.run_path({str(protocol)!r})['serve'](reply)\n",
             encoding="utf-8",
         )
         if os.name == "nt":

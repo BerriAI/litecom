@@ -32,7 +32,7 @@ Start with a running Litecom server and [connected Slack app](hosting-channels.m
 
 For a new Slack app, open `https://YOUR_RELAY_HOST/setup/slack?agent=1` to start with the configuration prefilled. Save its credentials using [Slack setup](hosting-channels.md#slack), then reconnect from Litecom. Existing installations should update their app instead of creating another.
 
-The optional configuration adds `app_mentions:read`, `channels:history`, and `groups:history`; it keeps the approval app's `chat:write` and `im:write`. Slack sends mentions to `/webhooks/slack/events` and approval buttons to `/webhooks/slack`. If your app has other custom settings, keep them when reviewing the manifest changes.
+The optional configuration adds `app_mentions:read`, `channels:history`, `groups:history`, and `files:write`; it keeps the approval app's `chat:write` and `im:write`. Slack sends mentions to `/webhooks/slack/events` and approval buttons to `/webhooks/slack`. If your app has other custom settings, keep them when reviewing the manifest changes.
 
 ## Use it
 
@@ -46,7 +46,9 @@ You can also ask your own agent or name a particular connected agent, such as Mo
 
 “Can you get this from Moe?” works when the conversation supplies enough context. The hosted agent can read that thread and preceding messages in the same channel. It asks for clarification when the reference is unclear. It cannot read other channels or fetch arbitrary links.
 
-Moe's approval includes the proposed work, original message, gathered context, and Slack destination. Approving permits execution and posting the final reply in that thread, visible to the channel's members. File links require the requester or owner to sign in to download. Results are posted directly; they do not go back through the hosted model.
+The approval DM shows **Ask**, **From**, and **Where**, with **Approve**, **Decline**, and **View request** buttons. The full request and conversation context are available under **View request**. The card keeps this context as its status changes.
+
+One approval authorizes the agent’s tools and sharing its reply and files in the source thread. Results use Slack formatting; files arrive as Slack attachments. Channel members can access those copies under their workspace’s policies. If Slack cannot accept a file, **Download files** opens the authenticated Litecom download. Older requests approved before native file sharing retain their original download permissions. Results do not go back through the hosted model.
 
 ## Check it
 
@@ -56,7 +58,7 @@ If it does not respond, check that the app is in the channel, Event Subscription
 
 ## What the host runs
 
-The Rust relay runs the tool loop; there is no separate service or coding harness to install. Its tools list linked people, read messages in the source channel, and submit an ordinary Litecom request. It has no command execution, approval, file access, or account-management tools. Sender identity and the reply destination come from signed Slack events, not model output.
+The Rust relay uses [AgentChat](https://github.com/BerriAI/agentchat) for Slack API calls and message payloads. It runs the tool loop; there is no separate service or coding harness to install. Its tools list linked people, read messages in the source channel, and submit an ordinary Litecom request. It has no command execution, approval, file access, or account-management tools. Sender identity and the reply destination come from signed Slack events, not model output.
 
 Slack context and the linked workspace directory are sent to the host's chosen model provider. Configure spending controls there. Litecom adds no model output-token cap.
 

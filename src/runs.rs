@@ -269,6 +269,12 @@ pub async fn logs(id: Option<&str>, follow: bool, raw: bool) -> Result<()> {
 fn print_line(line: &str, raw: bool) {
     let text = if !raw {
         serde_json::from_str::<Value>(line).ok().and_then(|event| {
+            if let Some(method) = event["method"].as_str() {
+                return Some(app_server_line(method, &event["params"]));
+            }
+            if event.get("id").is_some() && event.get("result").is_some() {
+                return Some(String::new());
+            }
             let kind = event["type"].as_str()?;
             if kind == "thread.started" {
                 Some(format!("Codex session: {}", event["thread_id"].as_str()?))
@@ -289,7 +295,47 @@ fn print_line(line: &str, raw: bool) {
     } else {
         None
     };
-    println!("{}", clean(text.as_deref().unwrap_or(line).trim_end()));
+    let text = clean(text.as_deref().unwrap_or(line).trim_end());
+    if !text.is_empty() {
+        println!("{text}");
+    }
+}
+
+fn app_server_line(method: &str, params: &Value) -> String {
+    let item = &params["item"];
+    match method {
+        "thread/started" => format!(
+            "Codex session: {}",
+            params["thread"]["id"].as_str().unwrap_or("unknown")
+        ),
+        "item/started" if item["type"] == "commandExecution" => {
+            format!("Running: {}", item["command"].as_str().unwrap_or("command"))
+        }
+        "item/started" if item["type"] == "mcpToolCall" => format!(
+            "Tool: {} / {}",
+            item["server"].as_str().unwrap_or("MCP"),
+            item["tool"].as_str().unwrap_or("tool")
+        ),
+        "item/completed" if item["type"] == "agentMessage" => {
+            item["text"].as_str().unwrap_or_default().into()
+        }
+        "item/completed" if item["type"] == "commandExecution" => format!(
+            "Command {}{}",
+            item["status"].as_str().unwrap_or("finished"),
+            item["exitCode"]
+                .as_i64()
+                .map(|code| format!(" (exit {code})"))
+                .unwrap_or_default()
+        ),
+        "turn/completed" => format!(
+            "Codex {}",
+            params["turn"]["status"].as_str().unwrap_or("finished")
+        ),
+        "error" => format!("Codex error: {}", params["error"]),
+        // Token deltas, counters and protocol acknowledgements are available
+        // with --raw. The normal view shows completed messages and tool activity.
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]

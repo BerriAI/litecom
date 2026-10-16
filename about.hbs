@@ -17,7 +17,7 @@
   <h1>Third-party notices</h1>
   <p>Litecom uses the Cargo dependencies below. This file includes dependencies
   for all configured release platforms; an individual binary may use a subset.</p>
-  <p>Each component's source link downloads the exact, unmodified crate release.
+  <p>Each component's source link opens its unmodified crate release or pinned Git revision.
   The listed licenses apply to those components. Litecom's own source is licensed
   under MIT. External coding agents and separately installed adapters have
   their own distributions and licenses.</p>
@@ -36,6 +36,8 @@
       <li>{{crate.name}} {{crate.version}} —
         {{#if (eq crate.name "litecom")}}
         <a href="https://github.com/BerriAI/litecom/tree/v{{crate.version}}">source</a>
+        {{else if (or (eq crate.name "agentchat-core") (eq crate.name "agentchat-slack"))}}
+        <a href="https://github.com/BerriAI/agentchat/tree/94c50fadd1cbc30c2a9a282b30915af19a0dc065">source</a>
         {{else}}
         <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">source</a>
         {{/if}}

@@ -1218,16 +1218,23 @@ async fn run_through_outage(failure: &'static str) {
     let dir = tempfile::tempdir().unwrap();
     let executable = dir.path().join("agent");
     std::fs::write(dir.path().join("attachment.txt"), "exact attached bytes").unwrap();
-    std::fs::write(&executable, r#"#!/bin/sh
-cat >/dev/null
+    std::fs::write(dir.path().join("codex-events.fixture"), codex_result_events(serde_json::json!({"text":"Still here after the restart.","files":[dir.path().join("attachment.txt")]}))).unwrap();
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+read -r initialize
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+printf '%s\n' '{"id":2,"result":{"thread":{"id":"fixture-session"}}}'
+read -r turn_start
 printf 'run\n' >> invoked
-printf '{"type":"thread.started","thread_id":"fixture-session"}\n'
+printf '%s\n' '{"id":3,"result":{"turn":{"id":"turn-1"}}}'
 sleep 1
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output-last-message ]; then shift; printf '{"text":"Still here after the restart.","files":["%s/attachment.txt"]}' "$PWD" > "$1"; fi
-  shift
-done
-"#).unwrap();
+cat codex-events.fixture
+"#,
+    )
+    .unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let settings = RunnerConfig {
         agent: NativeAgent::Codex,
@@ -1469,4 +1476,167 @@ async fn mcp_wait_returns_the_approved_result_without_another_user_prompt() {
     mcp.cancel().await.unwrap();
     server.cancel().await.unwrap();
     relay.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn running_agent_does_not_delay_next_approval_or_start_a_second_action() {
+    use crate::{
+        client::Client,
+        config::ClientConfig,
+        runner::{NativeAgent, RunnerConfig},
+    };
+    use std::{os::unix::fs::PermissionsExt, time::Duration};
+    let f = Fixture::new();
+    let dir = tempfile::tempdir().unwrap();
+    let executable = dir.path().join("agent");
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+cat >/dev/null
+printf 'run\n' >> invoked
+while [ ! -f release ]; do sleep 0.1; done
+printf '%s\n' '{"is_error":false,"structured_output":{"text":"Done.","files":[]}}'
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let settings = RunnerConfig {
+        agent: NativeAgent::Claude,
+        executable,
+        workspace: dir.path().into(),
+        arguments: vec![],
+        mcp: None,
+    };
+    let first = f.request("first-running");
+    let prepared = f
+        .store
+        .prepare(
+            &f.b,
+            &first.id,
+            None,
+            DraftInput {
+                action: Some(settings.action(&first.request)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    f.approve(&prepared);
+    let device = f.store.begin_local_connection(&f.b, &f.agent).unwrap();
+    let token = f.store.poll_device(&device.device_code).unwrap().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let client = Client::new(ClientConfig {
+        relay: origin.clone(),
+        token: token.token,
+        user_id: f.b.user_id.clone(),
+        agent_id: f.agent.clone(),
+        workspace: None,
+        runner: None,
+        approval_channel: None,
+    })
+    .unwrap();
+    let state = crate::api::AppState::new(
+        f.store,
+        origin,
+        crate::providers::Providers::development().unwrap(),
+    );
+    let router = crate::api::router(state.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let runs = dir.path().join("runs");
+    let worker =
+        tokio::spawn(async move { crate::runner::listen(&client, &settings, false, &runs).await });
+    let result = tokio::time::timeout(Duration::from_secs(12), async {
+        while !dir.path().join("invoked").exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let second = state
+            .db()
+            .unwrap()
+            .create_task(
+                &f.a,
+                NewTask {
+                    owner_id: f.b.user_id.clone(),
+                    agent_id: Some(f.agent.clone()),
+                    request: "Another request while the first works.".into(),
+                    idempotency_key: "second-waiting".into(),
+                },
+            )
+            .unwrap();
+        let ready = loop {
+            let task = state.db().unwrap().get_task(&f.b, &second.id).unwrap();
+            if task.status == Status::AwaitingApproval {
+                break task;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert_eq!(
+            state
+                .db()
+                .unwrap()
+                .get_task(&f.b, &first.id)
+                .unwrap()
+                .status,
+            Status::Executing
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("invoked")).unwrap(),
+            "run\n"
+        );
+        let draft = ready.draft.unwrap();
+        state
+            .db()
+            .unwrap()
+            .decide(
+                &f.b,
+                &second.id,
+                draft.version,
+                &draft.digest,
+                Decision::Approve,
+            )
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert_eq!(
+            state
+                .db()
+                .unwrap()
+                .get_task(&f.b, &second.id)
+                .unwrap()
+                .status,
+            Status::Approved
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("invoked")).unwrap(),
+            "run\n"
+        );
+        std::fs::write(dir.path().join("release"), b"").unwrap();
+        while state
+            .db()
+            .unwrap()
+            .get_task(&f.b, &second.id)
+            .unwrap()
+            .status
+            != Status::Completed
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            state
+                .db()
+                .unwrap()
+                .get_task(&f.b, &first.id)
+                .unwrap()
+                .status,
+            Status::Completed
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("invoked")).unwrap(),
+            "run\nrun\n"
+        );
+    })
+    .await;
+    worker.abort();
+    let _ = worker.await;
+    server.abort();
+    result.expect("second approval should be prepared while first execution is blocked");
 }

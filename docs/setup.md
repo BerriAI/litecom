@@ -23,7 +23,9 @@ To use a terminal yourself:
 3. Open Terminal on macOS/Linux or PowerShell on Windows. Paste the command and press Enter.
 4. If several agents are found, use the arrow keys and Enter to choose one.
 
-Litecom installs itself, detects your agent, adds MCP, and starts in the background. New connections use your home folder (`~`); you can run setup from any folder. Wait for **Connected** in the browser and **Listening for requests** in the terminal.
+Litecom installs itself, detects your agent, adds MCP, and starts in the background. New connections use your home folder (`~`); you can run setup from any folder. On macOS, allow the folder-access, Accessibility, and Screen Recording prompts. If setup lists missing access, enable Litecom under **System Settings → Privacy & Security**. These checks capture no screen content. Your agent must already have any browser or computer-control tools it needs.
+
+Your agent appears in the workspace when it connects. The terminal shows **Listening for requests**.
 
 Your computer must be awake and signed in to receive work. For an agent that runs in the cloud, [connect Devin](cloud-agents.md) instead.
 
@@ -33,7 +35,7 @@ Start a **new chat in the agent you connected** to load Litecom. The terminal sh
 
 > Use Litecom to ask my agent to reply with “Connected through Litecom.”
 
-Approve the message in your chosen channel: tap **Approve** in Slack, or reply as directed by text or email. One approval covers the work and its delivery.
+Approve the message in your chosen channel: tap **Approve** in Slack, or reply as directed by text or email. One approval covers the tool calls, work, and delivery; you do not approve each tool separately.
 
 Keep the conversation open. Your agent waits for the reply and shows **Connected through Litecom.** It can also download requested files. If you close the conversation, the request stays saved; ask your agent to check Litecom results when you return.
 
@@ -53,6 +55,6 @@ Using the terminal route, from the Litecom homepage through connecting your loca
 | Slack | **4** | Choose your Google account and **Allow** in Slack. |
 | Phone | **6** | Choose your Google account; enter your phone number and code. |
 
-Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. With **Copy setup prompt**, copy once and paste into your agent instead; the agent handles installation and may ask which agent to use. These counts assume your coding agent is installed and signed in. Opening the terminal, provider sign-in/consent, workspace selection, and administrator approval may add steps. Sending and approving the first request comes after setup.
+Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. With **Copy setup prompt**, copy once and paste into your agent instead; the agent handles installation and may ask which agent to use. These counts assume your coding agent is installed and signed in. Opening the terminal, provider sign-in/consent, workspace selection, administrator approval, and macOS permissions may add steps. Sending and approving the first request comes after setup.
 
 [Uninstall](local-agent.md#uninstall) · [Setup help and agent settings](local-agent.md) · [Approving requests](approval-channels.md) · [Supported agents](agents.md)

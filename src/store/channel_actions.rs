@@ -18,6 +18,21 @@ enum Target {
 }
 
 impl Store {
+    pub(crate) fn notification_summary(&self, d: &Delivery) -> Result<String> {
+        let task = self.task(&d.task_id)?;
+        let requester = self.profile_by_id(&task.view.requester_id)?;
+        Ok(if let Some(source) = &task.source {
+            format!(
+                "Ask: {}\n\nFrom: {}\n\nWhere: [Slack thread]({})",
+                source.ask, requester.name, source.url
+            )
+        } else {
+            format!(
+                "Ask: {}\n\nFrom: {}\n\nWhere: Litecom",
+                task.view.request, requester.name
+            )
+        })
+    }
     pub(crate) fn channel_action(&self, d: &Delivery) -> Result<Option<ChannelAction>> {
         let task = self.task(&d.task_id)?;
         let (owner, kind, destination, verified): (String, String, Vec<u8>, bool) =
@@ -83,15 +98,35 @@ impl Store {
                 }
                 Action::Command { .. } => serde_json::to_string_pretty(action)?,
             };
+            let body = if let Some(source) = &task.source {
+                let delivery = if source.share_files {
+                    "reply and files"
+                } else {
+                    "reply"
+                };
+                let mut body = format!(
+                    "{}\n\nApprove to run your agent and share its {delivery} with everyone in that thread.",
+                    self.notification_summary(d)?
+                );
+                // A changed proposal still needs its exact additional instruction.
+                match action {
+                    Action::Harness { instruction, .. } | Action::Cloud { instruction, .. }
+                        if instruction == &task.view.request => {}
+                    _ => body.push_str(&format!("\n\n{description}")),
+                }
+                body
+            } else {
+                format!(
+                    "Ask: {}\n\nFrom: {}\n\nWhere: Litecom\n\n{description}",
+                    task.view.request, requester.name
+                )
+            };
             (
                 Target::Request {
                     version: draft.version,
                     digest: draft.digest.clone(),
                 },
-                format!(
-                    "{} asks:\n\"{}\"\n\n{description}",
-                    requester.name, task.view.request
-                ),
+                body,
             )
         } else if task.view.status == Status::Executing {
             let Some(p) = self.pending_permissions(&d.task_id)?.into_iter().next() else {
