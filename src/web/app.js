@@ -35,6 +35,7 @@ const icon = (name) => {
       '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/>',
     arrow: '<path d="m9 6 6 6-6 6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   };
   return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.agents}</svg>`;
 };
@@ -42,6 +43,8 @@ const avatar = (name) =>
   `<span class="avatar" aria-hidden="true">${esc(String(name).trim().slice(0, 1).toUpperCase())}</span>`;
 const pageHeading = (title, action = "", description = "") =>
   `<div class="page-heading"><div><h1>${title}</h1>${description ? `<p class="muted">${description}</p>` : ""}</div>${action}</div>`;
+const rowMenu = (label, actions) =>
+  `<details class="row-menu" name="row-actions"><summary aria-label="${esc(label)}" title="${esc(label)}">${icon("more")}</summary><div class="menu-panel">${actions}</div></details>`;
 function shell(connected) {
   document.body.classList.toggle("workspace-shell", connected);
   nav.innerHTML = connected
@@ -536,7 +539,7 @@ async function workspacePage() {
     api("/api/people"),
     api("/api/agents"),
   ]);
-  app.innerHTML = `${pageHeading("Your workspace", `<div class="row-actions"><button data-action="copy-setup-prompt">Copy setup prompt</button><button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button></div>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><div class="row"><h2 class="section-label">People</h2><button data-action="copy-invite">Invite someone</button></div><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div><div class="row-actions"><a class="button" href="/?ask=${encodeURIComponent(person.id)}">Ask ${esc(person.name)}’s agent</a><details class="row-menu"><summary aria-label="Manage ${esc(person.name)}">Manage</summary><button class="danger" data-action="block-contact" data-id="${esc(person.id)}">Block</button></details></div></article>`).join("") || '<div class="empty"><p>No one else is here yet. Invite someone to your workspace.</p></div>'}</div></section>`;
+  app.innerHTML = `${pageHeading("Your workspace", `<div class="row-actions"><button class="quiet" data-action="copy-setup-prompt">Copy setup prompt</button><button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button></div>`, "Find a person. Ask their agent.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row identity-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><div class="section-heading"><h2 class="section-label">People</h2><button class="quiet" data-action="copy-invite">Invite someone</button></div><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div><div class="row-actions"><a class="button" href="/?ask=${encodeURIComponent(person.id)}" aria-label="Ask ${esc(person.name)}’s agent">Ask agent</a>${rowMenu(`Manage ${person.name}`, `<button class="danger" data-action="block-contact" data-id="${esc(person.id)}">Block person</button>`)}</div></article>`).join("") || '<div class="empty"><p>No one else is here yet. Invite someone to your workspace.</p></div>'}</div></section>`;
   showLocalCommand();
   await pollLocalConnection();
 }
@@ -548,7 +551,7 @@ async function agentsPage() {
   } catch {
     sessionStorage.removeItem("local-pairing");
   }
-  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2 data-agent-name="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${esc(agentStatus(a))}</p></div><details class="row-menu"><summary aria-label="Manage ${esc(a.name)}">Manage</summary>${a.kind === "local" ? `<button data-action="connect-local" data-id="${esc(a.id)}" aria-label="Connect ${esc(a.name)}">Connect</button>` : ""}${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button></details></section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
+  app.innerHTML = `${pageHeading("Your agents", `<button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button>`)}<div id="local-command"></div><div class="list">${agents.map((a) => `<section class="list-row">${icon("agents")}<div class="row-content"><h2 data-agent-name="${esc(a.id)}">${esc(agentLabel(a))}${a.is_default ? '<span class="inline-meta">Default</span>' : ""}</h2><p class="muted" data-agent-status="${esc(a.id)}">${esc(agentStatus(a))}</p></div>${rowMenu(`Manage ${a.name}`, `${a.kind === "local" ? `<button data-action="connect-local" data-id="${esc(a.id)}" aria-label="Connect ${esc(a.name)}">Connect</button>` : ""}${!a.is_default ? `<button data-action="default-agent" data-id="${esc(a.id)}">Make default</button>` : ""}<button class="danger" data-action="revoke-agent" data-id="${esc(a.id)}">Disconnect</button>`)}</section>`).join("")}</div><details class="disclosure"><summary>Add another local agent</summary><form id="agent"><label>Name<input name="name" placeholder="My laptop" required></label><input name="kind" type="hidden" value="local"><p class="muted subtitle">Create a name, then connect the agent from its computer.</p><button>Create agent</button></form></details><details class="disclosure" id="devin-connect"><summary>Connect Devin</summary><p class="muted">Use a token from <a href="https://app.devin.ai/settings/api-keys" target="_blank" rel="noopener noreferrer">Devin Settings ↗</a>.</p><form id="devin"><label>Devin token<input name="token" type="password" autocomplete="off" placeholder="cog_…" required></label><details><summary>Name and organization</summary><label>Agent name<input name="name" value="Devin" required></label><label>Organization ID (if not detected)<input name="org_id" placeholder="org-…"></label><p class="muted subtitle">Use the same name to reconnect.</p></details><p class="muted subtitle">Your token is encrypted on this server. Approved runs use your Devin plan.</p><button class="primary">Connect Devin</button></form></details>`;
   showLocalCommand();
   await pollLocalConnection();
 }
@@ -689,7 +692,7 @@ async function settingsPage() {
         email: "add-email",
         slack: "add-slack",
       }[kind];
-      return `<div class="list-row">${icon(kind)}<div class="row-content"><h3>${labels[kind]}</h3><p class="muted">${channel ? "Connected" : "Not connected"}</p>${channel?.delivery_status === "failed" ? `<p class="error">${deliveryLabels.failed}</p>` : ""}</div>${channel ? `<details class="row-menu"><summary aria-label="Manage ${labels[kind]}">Manage</summary>${kind !== "phone" ? `<button data-action="${addAction}">Reconnect ${labels[kind]}</button>` : ""}<button class="danger" data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>${channel.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="muted subtitle">${deliveryLabels[channel.delivery_status]}</p>` : ""}</details>` : `<button data-action="${addAction}">Connect ${labels[kind]}</button>`}</div>`;
+      return `<div class="list-row">${icon(kind)}<div class="row-content"><h3>${labels[kind]}</h3><p class="muted">${channel ? "Connected" : "Not connected"}</p>${channel?.delivery_status === "failed" ? `<p class="error">${deliveryLabels.failed}</p>` : ""}</div>${channel ? rowMenu(`Manage ${labels[kind]}`, `${kind !== "phone" ? `<button data-action="${addAction}">Reconnect ${labels[kind]}</button>` : ""}<button class="danger" data-action="disable-channel" data-id="${esc(channel.id)}">Turn off ${labels[kind]}</button>${channel.delivery_status && deliveryLabels[channel.delivery_status] ? `<p class="muted subtitle">${deliveryLabels[channel.delivery_status]}</p>` : ""}`) : `<button data-action="${addAction}">Connect ${labels[kind]}</button>`}</div>`;
     })
     .join("");
   const uninstallCommand = /Windows/i.test(navigator.userAgent)
@@ -881,6 +884,9 @@ document.addEventListener("change", async (e) => {
   }
 });
 document.addEventListener("click", async (e) => {
+  document.querySelectorAll(".row-menu[open]").forEach((menu) => {
+    if (!menu.contains(e.target)) menu.open = false;
+  });
   const fileLink = e.target.closest("[data-download]");
   if (fileLink) {
     e.preventDefault();
@@ -1036,6 +1042,15 @@ document.addEventListener("click", async (e) => {
   } finally {
     busy = false;
     button.disabled = false;
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const menu = document.activeElement?.closest(".row-menu[open]");
+  if (menu) {
+    menu.open = false;
+    menu.querySelector("summary").focus();
+    e.preventDefault();
   }
 });
 setInterval(async () => {
