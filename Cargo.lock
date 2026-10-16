@@ -97,7 +97,7 @@ dependencies = [
 [[package]]
 name = "agentchat-core"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/BerriAI/agentchat?rev=94c50fadd1cbc30c2a9a282b30915af19a0dc065#94c50fadd1cbc30c2a9a282b30915af19a0dc065"
+source = "git+https://github.com/BerriAI/agentchat?rev=2d4f1eeffc73669db6be83c919241ea872d383a5#2d4f1eeffc73669db6be83c919241ea872d383a5"
 dependencies = [
  "async-trait",
  "serde",
@@ -109,7 +109,7 @@ dependencies = [
 [[package]]
 name = "agentchat-slack"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/BerriAI/agentchat?rev=94c50fadd1cbc30c2a9a282b30915af19a0dc065#94c50fadd1cbc30c2a9a282b30915af19a0dc065"
+source = "git+https://github.com/BerriAI/agentchat?rev=2d4f1eeffc73669db6be83c919241ea872d383a5#2d4f1eeffc73669db6be83c919241ea872d383a5"
 dependencies = [
  "agentchat-core",
  "async-trait",

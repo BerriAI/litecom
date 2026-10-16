@@ -12,8 +12,8 @@ readme = "README.md"
 a2a-protocol-types = "0.14.1"
 aes-gcm = "0.10"
 agent-client-protocol = "3.3.0"
-agentchat-core = { git = "https://github.com/BerriAI/agentchat", rev = "94c50fadd1cbc30c2a9a282b30915af19a0dc065" }
-agentchat-slack = { git = "https://github.com/BerriAI/agentchat", rev = "94c50fadd1cbc30c2a9a282b30915af19a0dc065" }
+agentchat-core = { git = "https://github.com/BerriAI/agentchat", rev = "2d4f1eeffc73669db6be83c919241ea872d383a5" }
+agentchat-slack = { git = "https://github.com/BerriAI/agentchat", rev = "2d4f1eeffc73669db6be83c919241ea872d383a5" }
 anyhow = "1"
 async-imap = { version = "0.12.0", default-features = false, features = ["runtime-tokio"] }
 axum = { version = "0.8", features = ["form", "json", "macros", "multipart"] }
