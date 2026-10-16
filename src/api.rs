@@ -447,8 +447,8 @@ fn login_return(value: &str) -> String {
     let path = url.path();
     if !matches!(
         path,
-        "/" | "/workspace" | "/contacts" | "/agents" | "/settings"
-    ) && !["/connect/", "/request/", "/invite/"]
+        "/" | "/workspace" | "/channels" | "/contacts" | "/agents" | "/settings"
+    ) && !["/connect/", "/request/", "/invite/", "/channel/"]
         .iter()
         .any(|prefix| path.starts_with(prefix))
     {

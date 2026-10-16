@@ -21,6 +21,8 @@ const icon = (name) => {
       '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     inbox:
       '<path d="M4 4h16l2 12v4H2v-4L4 4Z"/><path d="M2 15h6l2 3h4l2-3h6"/>',
+    channels:
+      '<path d="M9 3 7 21M17 3l-2 18M4 8h17M3 16h17"/>',
     contacts:
       '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m3 10v-3a6 6 0 0 0-2-4"/>',
     agents:
@@ -51,6 +53,7 @@ function shell(connected) {
     ? [
         ["workspace", "/workspace", "Workspace"],
         ["inbox", "/", "Inbox"],
+        ["channels", "/channels", "Channels"],
         ["agents", "/agents", "Agents"],
         ["settings", "/settings", "Settings"],
       ]
@@ -409,6 +412,7 @@ async function render() {
     {
       request: "Request",
       channel: "Channel",
+      channels: "Channels",
       connect: "Connect agent",
       invite: "Ask an agent",
       workspace: "Workspace",
@@ -420,12 +424,13 @@ async function render() {
   document.querySelectorAll("#nav a").forEach((link) => {
     if (
       new URL(link.href).pathname ===
-      (location.pathname.startsWith("/request/") ? "/" : location.pathname)
+      (parts[0] === "request" ? "/" : parts[0] === "channel" ? "/channels" : location.pathname)
     )
       link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
   if (parts[0] === "channel" && parts[1]) return channelPage(parts[1]);
+  if (parts[0] === "channels") return channelsPage();
   if (parts[0] === "request" && parts[1]) return taskPage(parts[1]);
   if (parts[0] === "connect" && parts[1]) return connectPage(parts[1]);
   if (parts[0] === "invite" && parts[1]) return invitePage(parts[1]);
@@ -593,15 +598,23 @@ async function workspacePage() {
   } catch {
     sessionStorage.removeItem("local-pairing");
   }
-  const [people, agents, channels] = await Promise.all([
+  const [people, agents] = await Promise.all([
     api("/api/people"),
     api("/api/agents"),
-    api("/api/rooms?closed=" + (new URLSearchParams(location.search).get("closed") === "1")),
   ]);
   app.innerHTML = `${pageHeading("Your workspace", `<div class="row-actions"><button class="quiet" data-action="copy-setup-prompt">Copy setup prompt</button><button class="primary" data-action="connect-local">${icon("plus")}Connect local agent</button></div>`, "Ask an agent. Coordinate in a channel.")}<div id="local-command"></div><section class="section"><h2 class="section-label">You</h2><div class="list-row identity-row">${avatar(profile.name)}<div class="row-content"><h2>${esc(profile.name)}</h2>${account.google_email ? `<p class="muted">${esc(account.google_email)}</p>` : ""}</div></div><div id="your-agents">${yourAgents(agents)}</div></section><section class="section"><div class="section-heading"><h2 class="section-label">People</h2><button class="quiet" data-action="copy-invite">Invite someone</button></div><div class="list">${people.map((person) => `<article class="list-row">${avatar(person.name)}<div class="row-content"><h2>${esc(person.name)}</h2><p class="muted">${agentSummary(person.agents)}</p></div><div class="row-actions"><a class="button" href="/?ask=${encodeURIComponent(person.id)}" aria-label="Ask ${esc(person.name)}’s agent">Ask agent</a><button class="quiet" data-action="open-channel" data-id="${esc(person.id)}" aria-label="Open a channel with ${esc(person.name)}">Open channel</button>${rowMenu(`Manage ${person.name}`, `<button class="danger" data-action="block-contact" data-id="${esc(person.id)}">Block person</button>`)}</div></article>`).join("") || '<div class="empty"><p>No one else is here yet. Invite someone to your workspace.</p></div>'}</div></section>`;
-  app.insertAdjacentHTML("beforeend", `<section class="section"><div class="section-heading"><h2 class="section-label">Channels</h2><a class="muted" href="/workspace${new URLSearchParams(location.search).get("closed") === "1" ? "" : "?closed=1"}">${new URLSearchParams(location.search).get("closed") === "1" ? "Open only" : "Include closed"}</a></div><div class="list">${channels.map((channel) => `<article class="list-row"><div class="row-content"><h3><a class="title-link" href="/channel/${esc(channel.id)}">${esc(channel.topic)}</a>${channel.closed ? '<span class="inline-meta">Closed</span>' : ""}</h3><p class="muted">${channel.members.map((m) => esc(m.name)).join(" · ")}</p></div><a class="button" href="/channel/${esc(channel.id)}">Open</a></article>`).join("") || '<p class="muted">Open a channel with someone to coordinate your existing agent chats.</p>'}</div></section>`);
+
   showLocalCommand();
   await pollLocalConnection();
+}
+
+async function channelsPage() {
+  const closed = new URLSearchParams(location.search).get("closed") === "1";
+  const [channels, people] = await Promise.all([
+    api(`/api/rooms?closed=${closed}`),
+    api("/api/people"),
+  ]);
+  app.innerHTML = `${pageHeading("Channels", `<a class="button quiet" href="/channels${closed ? "" : "?closed=1"}">${closed ? "Open only" : "Include closed"}</a>`, "Coordinate work across your existing agent chats.")}${people.length ? `<details class="composer"><summary>${icon("plus")}Open a channel</summary><form id="channel-create"><label>With<select name="member" required>${people.map((person) => `<option value="${esc(person.id)}">${esc(person.name)}</option>`).join("")}</select></label><label>Topic (optional)<input name="topic" placeholder="What are you working on?"></label><button class="primary">Open channel</button></form></details>` : ""}<div class="list">${channels.map((channel) => `<article class="list-row">${icon("channels")}<div class="row-content"><h3><a class="title-link" href="/channel/${encodeURIComponent(channel.id)}">${esc(channel.topic)}</a>${channel.closed ? '<span class="inline-meta">Closed</span>' : ""}</h3><p class="muted">${channel.members.map((m) => esc(m.name)).join(" · ")}</p></div><a class="button" href="/channel/${encodeURIComponent(channel.id)}">Open</a></article>`).join("") || `<div class="empty"><h2>${closed ? "No channels yet" : "No open channels"}</h2><p>${people.length ? "Open a channel above to coordinate with someone’s agent." : '<a href="/workspace">Invite someone to your workspace</a> to open a channel.'}</p></div>`}</div>`;
 }
 
 let currentChannel = null;
@@ -638,7 +651,7 @@ function paintChannel(page, append = true) {
 async function channelPage(id) {
   const page = await api(`/api/rooms/${encodeURIComponent(id)}`);
   currentChannel = { id, cursor: 0, closed: page.channel.closed };
-  app.innerHTML = `<a class="muted" href="/workspace">← Workspace</a>${pageHeading(esc(page.channel.topic), `<div class="row-actions"><button class="primary" data-action="copy-join" data-id="${esc(id)}">Copy join prompt</button>${page.channel.owner_id === profile.id ? `<button class="quiet" data-action="close-channel" data-id="${esc(id)}">Close channel</button>` : ""}</div>`)}<div id="channel-people" class="channel-people"></div><p id="channel-state" class="muted subtitle"></p><details class="channel-details"><summary>Channel ID</summary><code>${esc(id)}</code></details><div id="channel-messages" aria-label="Channel messages"></div><form id="channel-compose"><label for="channel-message">Message<textarea id="channel-message" name="message" rows="3" maxlength="8000" required placeholder="Share an update…"></textarea></label><button class="primary" type="submit">Send</button></form>`;
+  app.innerHTML = `<a class="muted" href="/channels">← Channels</a>${pageHeading(esc(page.channel.topic), `<div class="row-actions"><button class="primary" data-action="copy-join" data-id="${esc(id)}">Copy join prompt</button>${page.channel.owner_id === profile.id ? `<button class="quiet" data-action="close-channel" data-id="${esc(id)}">Close channel</button>` : ""}</div>`)}<div id="channel-people" class="channel-people"></div><p id="channel-state" class="muted subtitle"></p><details class="channel-details"><summary>Channel ID</summary><code>${esc(id)}</code></details><div id="channel-messages" aria-label="Channel messages"></div><form id="channel-compose"><label for="channel-message">Message<textarea id="channel-message" name="message" rows="3" maxlength="8000" required placeholder="Share an update…"></textarea></label><button class="primary" type="submit">Send</button></form>`;
   paintChannel(page, false);
   if (page.has_more) await refreshChannel();
 }
@@ -851,6 +864,13 @@ document.addEventListener("submit", async (e) => {
   try {
     if (form.id === "channel-compose") {
       await sendChannelMessage(form, data.get("message"));
+    } else if (form.id === "channel-create") {
+      const channel = await api("/api/rooms", {
+        members: [data.get("member")],
+        topic: data.get("topic").trim(),
+        request_id: form.dataset.requestId ||= crypto.randomUUID(),
+      });
+      location.href = `/channel/${encodeURIComponent(channel.id)}`;
     } else if (form.id === "phone-link-start") {
       const c = await api("/api/channels/phone/start", {
         phone: data.get("phone").replace(/[ ()-]/g, ""),
@@ -997,6 +1017,7 @@ document.addEventListener("submit", async (e) => {
 });
 document.addEventListener("input", (e) => {
   if (e.target.form?.id === "draft") e.target.form.dataset.dirty = "true";
+  if (e.target.form?.id === "channel-create") delete e.target.form.dataset.requestId;
 });
 document.addEventListener("change", async (e) => {
   if (e.target.name === "channel") syncApprovalFields();

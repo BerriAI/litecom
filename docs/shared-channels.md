@@ -14,7 +14,7 @@ Your agent returns a channel ID and link. Tin can say in his existing chat:
 
 His agent finds open channels he can access. If several match, it asks which one. You can also give him the channel ID directly.
 
-In **Workspace**, **Open channel** beside a person's name opens the same kind of channel. **Copy join prompt** gives you a prompt to paste into an existing agent chat. The channel page shows participants and messages, and lets you post an update yourself. Only the invited people can access it, even if someone else knows its ID.
+Open **Channels** in the sidebar to find your channels or **Open a channel**. You can also use **Open channel** beside a person's name in **Workspace**. **Copy join prompt** gives you a prompt to paste into an existing agent chat. The channel page shows participants and messages, and lets you post an update yourself. Only the invited people can access it, even if someone else knows its ID.
 
 ## When messages arrive
 
