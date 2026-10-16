@@ -145,6 +145,7 @@ async fn download(http: &reqwest::Client, release: &Version, dir: &Path) -> Resu
     verify_checksum(&bytes, &checksum)?;
     let archive = dir.join(name);
     fs::write(&archive, bytes)?;
+    #[cfg(not(windows))]
     let folder = format!("litecom-{}", target()?);
     #[cfg(not(windows))]
     let output = Command::new("tar")
@@ -163,11 +164,18 @@ async fn download(http: &reqwest::Client, release: &Version, dir: &Path) -> Resu
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let binary = dir.join(folder).join(executable());
+    let binary = extracted_binary(dir, target()?);
     if binary_version(&binary)? != *release {
         bail!("The downloaded executable does not match the selected release.");
     }
     Ok(binary)
+}
+fn extracted_binary(dir: &Path, target: &str) -> PathBuf {
+    if target.ends_with("windows-msvc") {
+        dir.join("litecom.exe")
+    } else {
+        dir.join(format!("litecom-{target}")).join("litecom")
+    }
 }
 struct Connection {
     name: String,
@@ -426,6 +434,22 @@ pub async fn run(options: Options) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn extraction_matches_published_archive_layouts() {
+        let root = Path::new("download");
+        assert_eq!(
+            extracted_binary(root, "x86_64-pc-windows-msvc"),
+            root.join("litecom.exe")
+        );
+        assert_eq!(
+            extracted_binary(root, "aarch64-apple-darwin"),
+            root.join("litecom-aarch64-apple-darwin/litecom")
+        );
+        assert_eq!(
+            extracted_binary(root, "x86_64-unknown-linux-gnu"),
+            root.join("litecom-x86_64-unknown-linux-gnu/litecom")
+        );
+    }
     #[test]
     fn checksums_fail_closed() {
         let sum = hex::encode(Sha256::digest(b"valid"));
