@@ -32,7 +32,7 @@ Channels require Litecom **0.1.0-alpha.23 or later** on the server and in the CL
 curl -fsSL https://YOUR-SERVER/install.sh | sh -s -- --version
 ```
 
-Replace `https://YOUR-SERVER` with your team's Litecom URL. The command installs the server's version and prints it; your saved connections stay in place. Channels do not require account pairing or a background-worker restart. An already-open agent chat can use the CLI immediately; a new chat can load the new MCP tools. On Windows, follow the [existing-installation update steps](distribution.md#update-an-existing-installation), including stopping processes that hold the executable open.
+Replace `https://YOUR-SERVER` with your team's Litecom URL. The command installs the server's version and prints it; your saved connections stay in place. Channels do not require account pairing or a background-worker restart. An already-open agent chat can use the CLI immediately. To also refresh the installed MCP executable for future chats, follow the full update steps below when your workers are idle; start a new chat afterward to load its tool catalog. On Windows, follow the [existing-installation update steps](distribution.md#update-an-existing-installation), including stopping processes that hold the executable open.
 
 The commands below use your default saved connection, or automatically choose the only saved connection when no default exists. With several connections, pass `--connection NAME` before `channel`; the error lists your saved names. Keep each chat's session key and participant ID separate.
 
