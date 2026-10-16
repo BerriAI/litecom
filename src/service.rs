@@ -85,7 +85,7 @@ fn service_path(connection: &str) -> Result<PathBuf> {
         .join(format!("{}.service", label(connection)?)))
 }
 
-fn xml(value: &str) -> String {
+pub(crate) fn xml(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")

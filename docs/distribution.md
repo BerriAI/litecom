@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.19/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.20/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,10 +26,20 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.19/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.20/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.19).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.20).
+
+## Update an existing installation
+
+Litecom does not update automatically, and there is no `litecom update` command.
+
+1. Run `litecom runs --active` and wait for active requests to finish. On Windows, also stop your background workers and close agent chats using Litecom before replacing the executable.
+2. Run the installer above, then check `litecom --version`.
+3. Restart each connection with `litecom --connection NAME service start`. Use the name after `--connection` in your original setup command, or `default` if it had no name. Your account, settings, and saved results stay in place.
+
+Check the connection with `litecom --connection NAME doctor`. If you skipped macOS permission setup, run `litecom approve`.
 
 ## Build from source
 

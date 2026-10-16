@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.0-alpha.19
+## 0.1.0-alpha.20
+
+- Run `litecom approve` to finish macOS permission setup for existing connections without restarting active agents.
+- Accept connection codes beginning with a hyphen during setup.
+- Explain when an interactive agent prompt could not be answered, without sharing its private details.
 
 - Keep Slack approval cards short: Ask, From, Where, and action buttons. Preserve that context as the request progresses.
 - Render replies with Slack Markdown and deliver approved files in the source thread. Keep authenticated downloads available when Slack cannot accept a file.

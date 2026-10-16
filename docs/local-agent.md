@@ -2,7 +2,7 @@
 
 For your first connection, follow [Get started](setup.md). Use this page to change a connection, manage background startup, or fix a problem.
 
-[Terminal setup](#set-up-from-the-terminal) · [Background operation](#background-operation) · [Monitor runs](#monitor-local-runs) · [Uninstall](#uninstall) · [Troubleshooting](#if-something-needs-attention)
+[Terminal setup](#set-up-from-the-terminal) · [Permissions](#finish-permission-setup) · [Background operation](#background-operation) · [Monitor runs](#monitor-local-runs) · [Uninstall](#uninstall) · [Troubleshooting](#if-something-needs-attention)
 
 Keep the browser-generated command private. If setup fails after pairing, rerun it on the same computer to resume. If it expires before pairing, click **Connect local agent** for a new command.
 
@@ -25,6 +25,20 @@ litecom --connection NAME setup --workspace /absolute/folder
 ```
 
 Replace `/absolute/folder` with the folder you want the agent to use. On macOS/Linux, `--workspace ~` selects your home folder; in PowerShell, use `--workspace "$HOME"`. The selected folder appears in setup output and each request’s **Agent and access** details. Approving a request authorizes its tool calls for that run. Operating-system access and account permissions still apply.
+
+## Finish permission setup
+
+Already connected but skipped the permission prompts? Run:
+
+```sh
+litecom approve
+```
+
+On macOS, this checks your saved connections and requests access to folders, Accessibility, and Screen Recording. Follow the prompts and any System Settings instructions. It keeps your connections and active requests running. App-specific access, such as Computer Use access to Messages, and account sign-in must be completed in your agent.
+
+This command sets up computer access. Each incoming request still needs your approval.
+
+If your version does not recognize `approve`, [update Litecom](distribution.md#update-an-existing-installation) first.
 
 ## Background operation
 
@@ -111,10 +125,24 @@ If a connection cannot be removed, the command explains what needs attention. Re
 | Background startup failed | Run `litecom --connection NAME worker` in a terminal while checking the reported service error. |
 | Agent or folder changed after approval | Create a new request and approve the new settings. |
 | Agent stopped or execution is uncertain | Check the external effects and private diagnostic path shown to the owner before retrying. Litecom will not rerun the action. |
-| A tool was denied | Check the reply for a missing login, macOS permission, or administrator restriction. Grant the needed access, then submit a new request. |
+| A tool was denied | Identify the blocked permission in the owner's local run log before changing access. See [Investigate denied app access](#investigate-denied-app-access). |
 | File is outside the selected folder | Move the intended file into that folder or select the right working folder, then submit a new request. |
 
 Use `--home PATH` to store private configuration somewhere else. After a fix, run `litecom --connection NAME doctor` and send a small request to your own agent.
 
 Run logs stay in the private local configuration folder, including successful runs. They can contain agent output and tool details. `litecom runs --json` shows each run’s directory; delete a finished run’s directory when you no longer need its logs. There is no automatic cleanup of local run logs or relay payloads.
 
+### Investigate denied app access
+
+A reply saying access was "not approved" can mean Litecom could not answer an interactive prompt. It does not always mean someone declined.
+
+On the computer that ran the request, the account owner can check the installed version and the failed run:
+
+```sh
+litecom --version
+litecom logs REQUEST_ID --raw
+```
+
+Replace `REQUEST_ID` with the ID at the end of the request's Litecom URL. Keep logs private; they can contain personal data and tool output.
+
+Follow the error to sign in, grant a system permission, or contact your administrator. If Litecom could not answer a prompt, review that step in your own agent. Check whether the original action already happened before submitting a new request.

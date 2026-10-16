@@ -1,6 +1,7 @@
 name: Rust
 on:
   push:
+    branches: ['**']
     paths-ignore:
       - '**/*.md'
       - 'docs/**'

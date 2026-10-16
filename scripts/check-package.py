@@ -54,7 +54,13 @@ with tempfile.TemporaryDirectory(prefix='litecom-package-') as directory:
     assert version.startswith('litecom '), version
     help_text = subprocess.check_output([binary, '--help'], cwd=isolated, env=env, text=True)
     assert 'guided setup' in help_text
-    assert 'relay' in help_text and 'mcp' in help_text
+    assert 'relay' in help_text and 'mcp' in help_text and 'approve' in help_text
+    assert 'check-access' not in help_text
+    permission_check = subprocess.run([binary, 'approve'], cwd=isolated, env=env,
+                                      text=True, capture_output=True)
+    assert permission_check.returncode != 0
+    assert 'No local agent is connected' in permission_check.stderr
+    assert not (root / 'config').exists(), 'Permission recovery created a connection'
 
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))

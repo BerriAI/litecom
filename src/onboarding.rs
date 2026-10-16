@@ -17,7 +17,12 @@ pub struct Setup {
     #[arg(long, env = "LITECOM_RELAY")]
     pub relay: Option<String>,
     /// One-use code from Connect local agent in your signed-in workspace.
-    #[arg(long, requires = "relay", conflicts_with = "requester_only")]
+    #[arg(
+        long,
+        requires = "relay",
+        conflicts_with = "requester_only",
+        allow_hyphen_values = true
+    )]
     pub connect_code: Option<String>,
     #[arg(long, default_value = "This computer")]
     pub name: String,

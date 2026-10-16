@@ -44,6 +44,10 @@ enum Command {
     },
     /// Connect this computer or harness to your account.
     Setup(Setup),
+    /// Finish system permission setup for agents already connected on this computer.
+    Approve,
+    #[command(hide = true)]
+    CheckAccess { result: PathBuf },
     /// Listen for requests and run approved work with your chosen agent.
     Worker {
         /// Handle at most one queued item, then exit.
@@ -252,6 +256,13 @@ async fn run(cli: Cli) -> Result<()> {
             litecom::runs::logs(id.as_deref(), follow, raw).await?
         }
         Command::Uninstall { all } => litecom::uninstall::run(all).await?,
+        Command::Approve => litecom::folder_access::approve().await?,
+        Command::CheckAccess { result } => {
+            let outcome = litecom::folder_access::check_existing().await;
+            let error = outcome.as_ref().err().map(|error| format!("{error:#}"));
+            config::write_private(&result, &serde_json::to_vec(&error)?)?;
+            outcome?;
+        }
         Command::Setup(options) => litecom::onboarding::setup(options, &cli.connection).await?,
         Command::Service { action } => match action {
             ServiceCommand::Start => litecom::service::install(&cli.connection)?,

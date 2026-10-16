@@ -1,6 +1,32 @@
 use super::*;
 use crate::google::Identity;
 
+#[test]
+fn setup_accepts_connection_codes_starting_with_hyphens() {
+    use clap::Parser;
+    #[derive(Parser)]
+    struct Args {
+        #[command(flatten)]
+        setup: crate::onboarding::Setup,
+    }
+    for code in ["-W_example-code", "--example-code", "ordinary_code"] {
+        let parsed = Args::try_parse_from([
+            "litecom",
+            "--relay",
+            "https://example.com",
+            "--connect-code",
+            code,
+            "--agent",
+            "codex",
+            "--no-background",
+        ])
+        .unwrap();
+        assert_eq!(parsed.setup.connect_code.as_deref(), Some(code));
+        assert_eq!(parsed.setup.agent.as_deref(), Some("codex"));
+        assert!(parsed.setup.no_background);
+    }
+}
+
 fn google_user(store: &Store, subject: &str) -> (Principal, Session) {
     let profile = store
         .google_profile(&Identity {

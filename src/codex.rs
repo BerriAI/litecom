@@ -68,6 +68,7 @@ struct Session {
     turn: Option<String>,
     mcp_items: BTreeSet<String>,
     output: Option<String>,
+    unanswered_interaction: bool,
 }
 impl Session {
     fn belongs(&self, params: &Value) -> bool {
@@ -77,13 +78,17 @@ impl Session {
             && params["turnId"].as_str() == self.turn.as_deref()
     }
 
-    fn approval(&self, method: &str, params: &Value) -> Option<Value> {
+    fn owns_request(&self, method: &str, params: &Value) -> bool {
         let current_mcp = method == "mcpServer/elicitation/request"
             && self.thread.is_some()
             && self.turn.is_some()
             && params["threadId"].as_str() == self.thread.as_deref()
             && params["turnId"].is_null();
-        if !self.belongs(params) && !current_mcp {
+        self.belongs(params) || current_mcp
+    }
+
+    fn approval(&self, method: &str, params: &Value) -> Option<Value> {
+        if !self.owns_request(method, params) {
             return None;
         }
         match method {
@@ -140,6 +145,31 @@ impl Session {
             _ => None,
         }
     }
+
+    fn unanswered(&mut self, method: &str, params: &Value) -> Option<Value> {
+        let result = match method {
+            "mcpServer/elicitation/request" => json!({"action":"cancel","content":null}),
+            "item/tool/requestUserInput" => json!({"answers":{}}),
+            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                json!({"decision":"cancel"})
+            }
+            "item/permissions/requestApproval" => json!({"permissions":{},"scope":"turn"}),
+            _ => return None,
+        };
+        // A client cancellation is not a human denial. Report it without
+        // copying private prompt details into the requester-visible reply.
+        self.unanswered_interaction |= self.owns_request(method, params);
+        Some(result)
+    }
+
+    fn final_reply(&self, output: &str) -> Result<AgentReply> {
+        let mut reply: AgentReply = serde_json::from_str(output)
+            .context("Codex's reply did not match the expected format.")?;
+        if self.unanswered_interaction {
+            reply.text.push_str("\n\nLitecom could not answer an interactive prompt; this does not mean the owner declined. The owner needs to review that step in their agent before retrying.");
+        }
+        Ok(reply)
+    }
 }
 
 pub(crate) async fn converse(
@@ -183,19 +213,7 @@ pub(crate) async fn converse(
                     authorized(renewal).await?;
                     json!({"id":message["id"],"result":result})
                 } else {
-                    let result = match method {
-                        "mcpServer/elicitation/request" => {
-                            Some(json!({"action":"cancel","content":null}))
-                        }
-                        "item/tool/requestUserInput" => Some(json!({"answers":{}})),
-                        "item/commandExecution/requestApproval"
-                        | "item/fileChange/requestApproval" => Some(json!({"decision":"cancel"})),
-                        "item/permissions/requestApproval" => {
-                            Some(json!({"permissions":{},"scope":"turn"}))
-                        }
-                        _ => None,
-                    };
-                    match result {
+                    match session.unanswered(method, params) {
                         Some(result) => json!({"id":message["id"],"result":result}),
                         None => {
                             json!({"id":message["id"],"error":{"code":-32601,"message":"Litecom cannot answer this interactive request during an unattended run."}})
@@ -235,10 +253,14 @@ pub(crate) async fn converse(
                     }
                     let output = session
                         .output
+                        .as_deref()
                         .context("Codex did not return a final reply.")?;
-                    config::write_private(&dir.join("reply.json"), output.as_bytes())?;
-                    return serde_json::from_str(&output)
-                        .context("Codex's reply did not match the expected format.");
+                    let reply = session.final_reply(output)?;
+                    config::write_private(
+                        &dir.join("reply.json"),
+                        &serde_json::to_vec(&json!({"text":reply.text,"files":reply.files}))?,
+                    )?;
+                    return Ok(reply);
                 }
             }
         } else if let Some(id) = message["id"].as_u64() {
@@ -281,5 +303,116 @@ pub(crate) async fn converse(
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REPLY: &str = r#"{"text":"No text was sent.","files":[]}"#;
+
+    fn session() -> Session {
+        Session {
+            thread: Some("thread-1".into()),
+            turn: Some("turn-1".into()),
+            mcp_items: BTreeSet::from(["mcp-1".into()]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn app_access_sign_in_and_questions_remain_unanswered_and_are_explained() {
+        // Synthetic prompts exercise the transport without accessing an app.
+        for (method, extra, expected) in [
+            (
+                "mcpServer/elicitation/request",
+                json!({"mode":"form","message":"private-fixture: grant app access?","requestedSchema":{"properties":{"allow":{"type":"boolean"}}}}),
+                json!({"action":"cancel","content":null}),
+            ),
+            (
+                "mcpServer/elicitation/request",
+                json!({"mode":"url","url":"https://example.invalid/private-fixture","elicitationId":"login"}),
+                json!({"action":"cancel","content":null}),
+            ),
+            (
+                "mcpServer/elicitation/request",
+                json!({"turnId":null,"mode":"form","requestedSchema":{"properties":{"password":{"type":"string"}}}}),
+                json!({"action":"cancel","content":null}),
+            ),
+            (
+                "item/tool/requestUserInput",
+                json!({"itemId":"mcp-1","questions":[{"id":"q","header":"Approve Messages access?","question":"private-fixture","options":[{"label":"Allow"},{"label":"Cancel"}]}]}),
+                json!({"answers":{}}),
+            ),
+        ] {
+            let mut session = session();
+            let mut params = json!({"threadId":"thread-1","turnId":"turn-1"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            assert!(session.approval(method, &params).is_none());
+            assert_eq!(session.unanswered(method, &params), Some(expected));
+            let reply = session.final_reply(REPLY).unwrap();
+            assert!(reply.text.starts_with("No text was sent."));
+            assert!(
+                reply
+                    .text
+                    .contains("Litecom could not answer an interactive prompt")
+            );
+            assert!(reply.text.contains("does not mean the owner declined"));
+            assert!(!reply.text.contains("private-fixture"));
+            assert!(reply.files.is_empty());
+        }
+    }
+
+    #[test]
+    fn unrelated_requests_do_not_add_a_notice_to_this_reply() {
+        let mut session = session();
+        for (thread, turn) in [("other", "turn-1"), ("thread-1", "other")] {
+            let params = json!({"threadId":thread,"turnId":turn,"mode":"form"});
+            assert!(
+                session
+                    .approval("mcpServer/elicitation/request", &params)
+                    .is_none()
+            );
+            assert_eq!(
+                session.unanswered("mcpServer/elicitation/request", &params),
+                Some(json!({"action":"cancel","content":null}))
+            );
+        }
+        assert!(
+            session
+                .unanswered(
+                    "unknown/method",
+                    &json!({"threadId":"thread-1","turnId":"turn-1"})
+                )
+                .is_none()
+        );
+        assert_eq!(
+            session.final_reply(REPLY).unwrap().text,
+            "No text was sent."
+        );
+    }
+
+    #[test]
+    fn unanswered_notice_is_once_only_and_preserves_attachments() {
+        let mut session = session();
+        for _ in 0..2 {
+            session.unanswered(
+                "item/tool/requestUserInput",
+                &json!({"threadId":"thread-1","turnId":"turn-1"}),
+            );
+        }
+        let reply = session
+            .final_reply(r#"{"text":"Partial result.","files":["/tmp/requested-file.txt"]}"#)
+            .unwrap();
+        assert_eq!(reply.text.matches("Litecom could not answer").count(), 1);
+        assert_eq!(
+            reply.files,
+            vec![std::path::PathBuf::from("/tmp/requested-file.txt")]
+        );
+        assert!(session.final_reply("not JSON").is_err());
     }
 }

@@ -624,16 +624,6 @@ async fn codex_approved_run_grants_native_and_connector_permissions_without_pers
             codex_read(&mut lines).await["result"],
             json!({"answers":{"q":{"answers":["Accept"]}}})
         );
-        // A new login and arbitrary questions are not permission confirmations.
-        for mode in ["url", "form"] {
-            codex_send(&mut write, json!({"id":23,"method":"mcpServer/elicitation/request","params":{"threadId":"thread-1","turnId":"turn-1","mode":mode,"requestedSchema":{"properties":{"password":{"type":"string"}}}}})).await;
-            assert_eq!(codex_read(&mut lines).await["result"]["action"], "cancel");
-        }
-        codex_send(&mut write, json!({"id":24,"method":"item/tool/requestUserInput","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"question","questions":[{"id":"q","header":"Choose a recipient","options":[{"label":"Accept"}]}]}})).await;
-        assert_eq!(
-            codex_read(&mut lines).await["result"],
-            json!({"answers":{}})
-        );
         // Neither a different session nor a different turn inherits authority.
         for (thread, turn) in [("other", "turn-1"), ("thread-1", "other")] {
             codex_send(&mut write, json!({"id":25,"method":"item/commandExecution/requestApproval","params":{"threadId":thread,"turnId":turn}})).await;
@@ -672,6 +662,86 @@ async fn codex_approved_run_grants_native_and_connector_permissions_without_pers
             .is_empty()
     );
     peer.await.unwrap();
+}
+
+#[tokio::test]
+async fn codex_reports_unanswered_prompts_without_granting_access_or_sharing_details() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    // Protocol fixtures: no real app, account, or Messages access is attempted.
+    for (method, extra, expected) in [
+        (
+            "mcpServer/elicitation/request",
+            json!({"mode":"form","message":"sensitive-fixture-marker: allow Messages access?","requestedSchema":{"properties":{"allow":{"type":"boolean"}}}}),
+            json!({"action":"cancel","content":null}),
+        ),
+        (
+            "mcpServer/elicitation/request",
+            json!({"mode":"url","url":"https://example.invalid/sensitive-fixture-marker","elicitationId":"login"}),
+            json!({"action":"cancel","content":null}),
+        ),
+        (
+            "mcpServer/elicitation/request",
+            json!({"turnId":null,"mode":"form","requestedSchema":{"properties":{"password":{"type":"string"}}}}),
+            json!({"action":"cancel","content":null}),
+        ),
+        (
+            "item/tool/requestUserInput",
+            json!({"itemId":"question","questions":[{"id":"q","header":"Choose a recipient","question":"sensitive-fixture-marker","options":[{"label":"Accept"}]}]}),
+            json!({"answers":{}}),
+        ),
+    ] {
+        let h = Harness::new().await;
+        let (local, peer) = tokio::io::duplex(65536);
+        let (input, output) = tokio::io::split(local);
+        let peer = tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(peer);
+            let mut lines = BufReader::new(read).lines();
+            codex_start(&mut lines, &mut write).await;
+            let mut params = json!({"threadId":"thread-1","turnId":"turn-1"});
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            codex_send(
+                &mut write,
+                json!({"id":"prompt","method":method,"params":params}),
+            )
+            .await;
+            assert_eq!(codex_read(&mut lines).await["result"], expected);
+            codex_send(&mut write, json!({"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"reply","text":"{\"text\":\"No text was sent.\",\"files\":[]}"}}})).await;
+            codex_send(&mut write, json!({"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}})).await;
+        });
+        let mut renewal = crate::client::WorkLease::new(&h.client, &h.work.task_id, &h.work.lease);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::codex::converse(
+                input,
+                output,
+                &h.settings,
+                &h.work,
+                h.temp.path(),
+                &mut renewal,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        peer.await.unwrap();
+        assert!(result.text.starts_with("No text was sent."));
+        assert!(
+            result
+                .text
+                .contains("Litecom could not answer an interactive prompt")
+        );
+        assert!(result.text.contains("does not mean the owner declined"));
+        assert!(!result.text.contains("sensitive-fixture-marker"));
+        assert!(result.files.is_empty());
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(h.temp.path().join("reply.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved["text"], result.text);
+        assert_eq!(saved["files"], json!([]));
+    }
 }
 
 #[tokio::test]

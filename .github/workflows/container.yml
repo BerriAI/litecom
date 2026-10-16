@@ -4,6 +4,7 @@ concurrency:
   cancel-in-progress: true
 on:
   push:
+    branches: ['**']
     paths-ignore:
       - '**/*.md'
       - 'docs/**'

@@ -30,3 +30,5 @@ Litecom starts a background CLI or ACP session. It uses the configuration availa
 Your request approval authorizes the agent’s tool calls for that run. Litecom answers Codex and ACP permission checks automatically; Claude Code runs with permission checks bypassed for that process. It does not change your global agent settings.
 
 On macOS, setup requests folder, screen-recording, and accessibility access from the background worker. Allow the system prompts and enable any access shown as missing in System Settings. Computer-control tools must already be available to your agent. Other applications may still require their own permissions or sign-in; setup cannot grant access on their behalf.
+
+If you skipped those prompts, run `litecom approve` to check your existing connections again.
