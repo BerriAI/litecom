@@ -336,6 +336,90 @@ impl Store {
         decision: Decision,
         read_only: bool,
     ) -> Result<ReplyOutcome> {
+        let (record, p, task) = self.channel_authority(actor, key)?;
+        let previous:Option<String>=match &record.target {
+            Target::Request {version,digest}=> self.db.query_row("SELECT decision FROM approvals WHERE task_id=? AND version=? AND digest=? AND user_id=?",params![task,version,digest,p.user_id],|r|r.get(0)).optional()?,
+            Target::Permission {id,..}=> self.db.query_row("SELECT decision FROM tool_permissions WHERE task_id=? AND id=?",params![task,id],|r|r.get(0)).optional()?.flatten(),
+        };
+        if let Some(previous) = previous {
+            let previous: Decision = serde_json::from_str(&previous)?;
+            return Ok(ReplyOutcome::AlreadyDecided(previous));
+        }
+        match record.target {
+            Target::Request { version, digest } => {
+                self.decide_access(&p, &task, version, &digest, decision.clone(), read_only)?;
+            }
+            Target::Permission { id, digest } => {
+                require(
+                    !read_only,
+                    "A tool permission cannot change the run's access. Send a new read-only request.",
+                )?;
+                self.decide_permission(&p, &task, &id, &digest, decision.clone())?;
+            }
+        }
+        Ok(ReplyOutcome::Decided(decision))
+    }
+
+    /// A shared Review button may reveal controls only to the currently linked
+    /// owner, for the exact still-pending proposal. Reviewing never decides it.
+    pub(crate) fn slack_review(&self, actor: &ChannelActor, key: &str) -> Result<ChannelAction> {
+        require(
+            matches!(actor, ChannelActor::Slack { .. }),
+            "Slack review required.",
+        )?;
+        let (record, p, task_id) = self.channel_authority(actor, key)?;
+        let task = self.task(&task_id)?;
+        require(
+            task.view.owner_id == p.user_id,
+            "Only the recipient can review this request.",
+        )?;
+        let Target::Request { version, digest } = record.target else {
+            return Err(Error::Forbidden(
+                "Open the private permission request.".into(),
+            ));
+        };
+        require(
+            task.view.status == Status::AwaitingApproval
+                && task
+                    .view
+                    .draft
+                    .as_ref()
+                    .is_some_and(|d| d.version == version && d.digest == digest),
+            "This request has changed or already been decided.",
+        )?;
+        let channel_id = p
+            .credential_id
+            .strip_prefix("channel:")
+            .ok_or(Error::Unauthorized)?;
+        let destination: Vec<u8> = self.db.query_row(
+            "SELECT destination FROM channels WHERE id=?",
+            [channel_id],
+            |r| r.get(0),
+        )?;
+        let destination: String = self
+            .vault
+            .open(&destination, &format!("channel:{channel_id}"))?;
+        self.channel_action_on(
+            &Delivery {
+                event_id: 0,
+                channel_id: channel_id.into(),
+                destination,
+                task_id,
+                kind: "awaiting_approval".into(),
+                attempts: 0,
+                channel_kind: "slack".into(),
+                previous: None,
+            },
+            record.slack_channel.as_deref(),
+        )?
+        .ok_or(Error::NotFound)
+    }
+
+    fn channel_authority(
+        &self,
+        actor: &ChannelActor,
+        key: &str,
+    ) -> Result<(Record, Principal, String)> {
         let (query, key) = if matches!(actor, ChannelActor::Phone(_)) {
             ("a.code=?", key.to_ascii_uppercase())
         } else {
@@ -369,27 +453,7 @@ impl Store {
             credential_id: format!("channel:{channel}"),
         };
         self.check_workspace(&p.user_id)?;
-        let previous:Option<String>=match &record.target {
-            Target::Request {version,digest}=> self.db.query_row("SELECT decision FROM approvals WHERE task_id=? AND version=? AND digest=? AND user_id=?",params![task,version,digest,p.user_id],|r|r.get(0)).optional()?,
-            Target::Permission {id,..}=> self.db.query_row("SELECT decision FROM tool_permissions WHERE task_id=? AND id=?",params![task,id],|r|r.get(0)).optional()?.flatten(),
-        };
-        if let Some(previous) = previous {
-            let previous: Decision = serde_json::from_str(&previous)?;
-            return Ok(ReplyOutcome::AlreadyDecided(previous));
-        }
-        match record.target {
-            Target::Request { version, digest } => {
-                self.decide_access(&p, &task, version, &digest, decision.clone(), read_only)?;
-            }
-            Target::Permission { id, digest } => {
-                require(
-                    !read_only,
-                    "A tool permission cannot change the run's access. Send a new read-only request.",
-                )?;
-                self.decide_permission(&p, &task, &id, &digest, decision.clone())?;
-            }
-        }
-        Ok(ReplyOutcome::Decided(decision))
+        Ok((record, p, task))
     }
 
     pub(crate) fn phone_notifications_enabled(&self, phone: &str) -> Result<bool> {

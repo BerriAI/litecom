@@ -72,6 +72,7 @@ async fn mock(
             }
             json!({"ok":true,"ts":value["ts"].as_str().unwrap_or("1001.000001")})
         }
+        "/chat.postEphemeral" => json!({"ok":true,"message_ts":"1002.000001"}),
         "/files.getUploadURLExternal" => {
             if m.fail_file.load(Ordering::SeqCst) {
                 json!({"ok":false,"error":"missing_scope"})
@@ -252,6 +253,32 @@ fn event() -> Value {
     json!({"type":"event_callback","team_id":"T1","event_id":"Ev1","event":{"type":"app_mention","user":"U1","channel":"C1","ts":"1000.000001","text":"ask Moe about this"}})
 }
 
+async fn click(state: &AppState, user: &str, action: &str, token: &str) -> Value {
+    use http_body_util::BodyExt;
+    let payload = json!({"type":"block_actions","user":{"id":user},"team":{"id":"T1"},"channel":{"id":"C1"},"message":{"thread_ts":"999.000001"},"actions":[{"action_id":action,"value":token}],"response_url":"http://127.0.0.1/never-follow-this"});
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("payload", &payload.to_string())
+        .finish();
+    let now = crate::store::now();
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(b"signing-secret").unwrap();
+    mac.update(format!("v0:{now}:{body}").as_bytes());
+    let response = router(state.clone())
+        .oneshot(
+            Request::post("/webhooks/slack")
+                .header("x-slack-request-timestamp", now.to_string())
+                .header(
+                    "x-slack-signature",
+                    format!("v0={}", hex::encode(mac.finalize().into_bytes())),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+
 #[tokio::test]
 async fn generated_manifest_keeps_approvals_and_adds_mentions_only_when_enabled() {
     use http_body_util::BodyExt;
@@ -409,6 +436,48 @@ async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_iden
                     .contains("&lt;@UOTHER&gt;")
             );
             let buttons = payload["blocks"][2]["elements"].as_array().unwrap();
+            assert!(buttons.iter().any(|b| b["action_id"] == "litecom_review"));
+            for action in ["litecom_read_only", "litecom_approve", "litecom_decline"] {
+                assert!(!buttons.iter().any(|b| b["action_id"] == action));
+            }
+        }
+        // Exercise real signed HTTP callbacks. Merely seeing/copying the shared
+        // token cannot reveal private controls or grant/decline another's work.
+        click(&t.state, "U1", "litecom_review", &action.token).await;
+        {
+            let calls = t.mock.calls.lock().unwrap();
+            let (method, payload) = calls.last().unwrap();
+            assert_eq!(method, "/chat.postEphemeral");
+            assert_eq!(payload["user"], "U1");
+            assert_eq!(payload["channel"], "C1");
+            assert_eq!(payload["thread_ts"], "999.000001");
+            assert!(
+                payload["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Only the recipient")
+            );
+            assert!(!payload.to_string().contains(&action.token));
+            assert!(!payload.to_string().contains("litecom_approve"));
+        }
+        for name in ["litecom_approve", "litecom_read_only", "litecom_decline"] {
+            let reply = click(&t.state, "U1", name, &action.token).await;
+            assert!(
+                reply["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("could not approve")
+            );
+            assert_eq!(t.count("approvals"), 0);
+        }
+        click(&t.state, "U2", "litecom_review", &action.token).await;
+        {
+            let calls = t.mock.calls.lock().unwrap();
+            let (method, payload) = calls.last().unwrap();
+            assert_eq!(method, "/chat.postEphemeral");
+            assert_eq!(payload["user"], "U2");
+            assert_eq!(payload["thread_ts"], "999.000001");
+            let buttons = payload["blocks"][1]["elements"].as_array().unwrap();
             assert!(
                 buttons
                     .iter()
@@ -419,6 +488,7 @@ async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_iden
                 !ask_only
             );
         }
+        assert_eq!(t.count("approvals"), 0);
         for (team, user, channel) in [
             ("T1", "U1", "C1"),
             ("TOTHER", "U2", "C1"),
@@ -437,6 +507,13 @@ async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_iden
                     .channel_decide_access(&actor, &action.token, Decision::Approve, read_only)
                     .is_err()
             );
+            assert!(
+                t.state
+                    .db()
+                    .unwrap()
+                    .slack_review(&actor, &action.token)
+                    .is_err()
+            );
         }
         let owner = ChannelActor::Slack {
             team: "T1".into(),
@@ -445,6 +522,13 @@ async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_iden
         };
         // A relink or revoked connection must invalidate a previously issued button.
         link(&t.state.db().unwrap(), &t.owner, "UOTHER", "T1");
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .slack_review(&owner, &action.token)
+                .is_err()
+        );
         assert!(
             t.state
                 .db()
@@ -515,6 +599,13 @@ async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_iden
             ReplyOutcome::AlreadyDecided(_)
         ));
         let task = t.state.db().unwrap().get_task(&t.owner, id).unwrap();
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .slack_review(&owner, &action.token)
+                .is_err()
+        );
         if decision == Decision::Approve {
             assert_eq!(
                 task.approved_access,

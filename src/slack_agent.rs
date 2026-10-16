@@ -560,8 +560,11 @@ async fn publish(
         None
     };
     let body = if let Some(card) = &card {
-        if let Some(action) = &card.action {
-            action.body.clone()
+        if card.action.is_some() {
+            format!(
+                "{}\n\nWaiting for the recipient's approval. Only they can open the approval controls.",
+                card.summary
+            )
         } else {
             format!("{}\n\n{body}", card.summary)
         }
@@ -579,10 +582,7 @@ async fn publish(
         })
         .unwrap_or_default();
     if let Some(action) = card.as_ref().and_then(|c| c.action.as_ref()) {
-        let mut approvals =
-            crate::slack::approval_buttons(&action.token, action.read_only, action.actions);
-        approvals.extend(buttons);
-        buttons = approvals;
+        buttons.insert(0, json!({"type":"button","text":{"type":"plain_text","text":"Review request"},"action_id":"litecom_review","value":action.token}));
     }
     if job.result_started {
         buttons.extend(crate::slack_files::download_buttons(s, job)?);

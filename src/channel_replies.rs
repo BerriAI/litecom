@@ -203,6 +203,8 @@ struct SlackPayload {
     team: SlackId,
     channel: SlackId,
     actions: Vec<SlackButton>,
+    #[serde(default)]
+    message: serde_json::Value,
 }
 pub(crate) async fn slack(
     State(s): State<AppState>,
@@ -223,6 +225,44 @@ pub(crate) async fn slack(
     )?;
     let button = &payload.actions[0];
     if button.action_id == "litecom_view" || button.action_id.starts_with("litecom_view_") {
+        return Ok(Json(json!({})));
+    }
+    if button.action_id == "litecom_review" {
+        let actor = ChannelActor::Slack {
+            team: payload.team.id.clone(),
+            user: payload.user.id.clone(),
+            channel: payload.channel.id.clone(),
+        };
+        let (message, buttons) = match s.db()?.slack_review(&actor, &button.value) {
+            Ok(action) => (action.body, crate::slack::approval_buttons(&action.token, action.read_only, action.actions)),
+            Err(Error::Internal(error)) => return Err(Error::Internal(error)),
+            Err(_) => ("Only the recipient can review and approve this request. If it is yours, check the latest message or your Litecom inbox. No approval was recorded.".into(), vec![]),
+        };
+        // Send through the trusted Slack API, never a callback-provided URL.
+        // The signed callback selects the viewer; the database gates the controls.
+        let link = s
+            .db()?
+            .slack_links(&payload.team.id)?
+            .into_iter()
+            .next()
+            .ok_or(Error::Unauthorized)?;
+        let slack = s.providers.slack.as_ref().ok_or(Error::Unauthorized)?;
+        let destination = slack.refresh(s.providers.http(), &link.destination).await?;
+        s.db()?.refresh_channel_destination(
+            &link.channel_id,
+            &serde_json::to_string(&link.destination)?,
+            &serde_json::to_string(&destination)?,
+        )?;
+        slack
+            .ephemeral(
+                &destination,
+                &payload.user.id,
+                &payload.channel.id,
+                payload.message["thread_ts"].as_str(),
+                &message,
+                buttons,
+            )
+            .await?;
         return Ok(Json(json!({})));
     }
     let decision = match button.action_id.as_str() {

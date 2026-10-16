@@ -413,6 +413,34 @@ impl Slack {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn ephemeral(
+        &self,
+        destination: &SlackDestination,
+        user: &str,
+        channel: &str,
+        thread: Option<&str>,
+        body: &str,
+        buttons: Vec<Value>,
+    ) -> Result<()> {
+        agentchat_slack::policy::ReplyDestination::validate(channel, thread).map_err(sdk_error)?;
+        let mut blocks = vec![json!({"type":"markdown","text":markdown(body)})];
+        if !buttons.is_empty() {
+            blocks.push(json!({"type":"actions","elements":buttons}));
+        }
+        let mut payload = rich_payload(body, blocks)?;
+        payload["channel"] = json!(channel);
+        payload["user"] = json!(user);
+        if let Some(thread) = thread {
+            payload["thread_ts"] = json!(thread);
+        }
+        self.api(&destination.token)?
+            .post("chat.postEphemeral", &payload)
+            .await
+            .map_err(sdk_error)?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn reply(
         &self,
         _http: &reqwest::Client,
