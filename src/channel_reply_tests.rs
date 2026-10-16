@@ -510,7 +510,9 @@ async fn phone_rejects_cross_agent_expired_group_voice_reactions_and_tampered_re
     );
     let app = router(state.clone());
     let original = phone_event(&format!("APPROVE {}", a.code), "+14155550102");
-    for age in [-301, 301] {
+    // Allow for the wall clock advancing between signing and verification.
+    // agentphone::tests pins the clock to cover the exact 300-second boundary.
+    for age in [-600, 600] {
         let response = app
             .clone()
             .oneshot(signed_phone_request(&original, crate::store::now() + age))
