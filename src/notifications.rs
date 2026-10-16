@@ -172,6 +172,14 @@ pub async fn run(state: AppState) {
                         state.providers.sms(&d.destination, &message).await
                     }
                 };
+                if d.channel_kind == "slack"
+                    && let Err(error) = &result
+                {
+                    // Slack transport errors contain only sanitized provider codes,
+                    // not request content, destinations, or credentials.
+                    tracing::warn!(%error, task_id=%d.task_id, event_id=d.event_id,
+                        attempt=d.attempts, "Slack notification failed; queued for retry");
+                }
                 if let Err(error) = state.db().and_then(|db| db.delivery_result(&d, &result)) {
                     tracing::error!(?error, "could not record notification delivery");
                 }

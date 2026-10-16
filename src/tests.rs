@@ -1743,6 +1743,9 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
                 json!({"ok":true,"access_token":"old-token","token_type":"bot","refresh_token":"old-refresh","expires_in":1,"authed_user":{"id":"U1"},"team":{"id":"T1"}})
             }
             "conversations.open" => json!({"ok":true,"channel":{"id":"D1"}}),
+            "chat.update" if payload["text"].as_str().unwrap().encode_utf16().count() > 4000 => {
+                json!({"ok":false,"error":"msg_too_long"})
+            }
             "chat.postMessage" | "chat.update" => json!({"ok":true,"ts":"123.456"}),
             _ => panic!("Unexpected Slack method"),
         })
@@ -1784,26 +1787,144 @@ async fn slack_transport_exchanges_refreshes_and_updates_the_original_message() 
         .await
         .unwrap();
     assert_eq!(remote, updated);
-    let calls = captured.lock().unwrap();
-    assert_eq!(calls.len(), 5);
-    assert_eq!(calls[0].1["code"], "code");
-    assert!(calls[0].2.starts_with("Basic "));
-    assert_eq!(calls[1].1["users"], "U1");
-    assert_eq!(calls[2].1["refresh_token"], "old-refresh");
-    assert_eq!(calls[3].0, "chat.postMessage");
-    assert_eq!(
-        calls[3].1["blocks"][1]["elements"][0]["value"],
-        "test-capability"
-    );
-    assert_eq!(calls[4].1["blocks"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        calls[4].1["blocks"][1]["elements"][0]["text"]["text"],
-        "View request"
-    );
-    assert_eq!(calls[3].2, "Bearer new-token");
-    assert_eq!(calls[4].0, "chat.update");
-    assert_eq!(calls[4].1["ts"], "123.456");
-    assert_eq!(calls[4].1["text"], "Approved");
+    {
+        let calls = captured.lock().unwrap();
+        assert_eq!(calls.len(), 5);
+        assert_eq!(calls[0].1["code"], "code");
+        assert!(calls[0].2.starts_with("Basic "));
+        assert_eq!(calls[1].1["users"], "U1");
+        assert_eq!(calls[2].1["refresh_token"], "old-refresh");
+        assert_eq!(calls[3].0, "chat.postMessage");
+        assert_eq!(
+            calls[3].1["blocks"][1]["elements"][0]["value"],
+            "test-capability"
+        );
+        assert_eq!(calls[4].1["blocks"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            calls[4].1["blocks"][1]["elements"][0]["text"]["text"],
+            "View request"
+        );
+        assert_eq!(calls[3].2, "Bearer new-token");
+        assert_eq!(calls[4].0, "chat.update");
+        assert_eq!(calls[4].1["ts"], "123.456");
+        assert_eq!(calls[4].1["text"], "Approved");
+    }
+
+    // Slack accepts a long initial card but rejects chat.update when its
+    // fallback text exceeds 4,000 characters, even with valid full blocks.
+    // Exercise the durable delivery path so an approval updates that same card.
+    for decision in [Decision::Approve, Decision::Decline] {
+        let f = Fixture::new();
+        let start = f.store.begin_slack(&f.b).unwrap();
+        f.store.take_slack_link(&start.state).unwrap();
+        f.store
+            .stage_slack_link(&start.state, destination.clone())
+            .unwrap();
+        f.store.finish_slack_link(&f.b, &start.state).unwrap();
+        let request = format!(
+            "Check these details: {}",
+            "🔎 detailed instructions. ".repeat(220)
+        );
+        let task = f
+            .store
+            .create_task(
+                &f.a,
+                NewTask {
+                    ask_only: false,
+                    owner_id: f.b.user_id.clone(),
+                    agent_id: None,
+                    request,
+                    idempotency_key: "long-slack-card".into(),
+                },
+            )
+            .unwrap();
+        let settings = crate::runner::RunnerConfig {
+            agent: crate::runner::NativeAgent::Codex,
+            executable: std::env::current_exe().unwrap(),
+            workspace: std::env::temp_dir(),
+            arguments: vec![],
+            mcp: None,
+        };
+        let task = f
+            .store
+            .prepare(
+                &f.b,
+                &task.id,
+                None,
+                DraftInput {
+                    action: Some(settings.action(&task.request)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let queued = f.store.next_delivery().unwrap().unwrap();
+        let card = f.store.channel_action(&queued).unwrap().unwrap();
+        let request_url = format!("https://litecom.example/request/{}", task.id);
+        let sent = slack
+            .notify(
+                &http,
+                &destination,
+                &card.body,
+                queued.previous.as_deref(),
+                Some((&card.token, card.read_only, card.actions)),
+                &request_url,
+            )
+            .await;
+        f.store.delivery_result(&queued, &sent).unwrap();
+        let original = sent.unwrap();
+        let draft = task.draft.unwrap();
+        f.store
+            .decide(
+                &f.b,
+                &task.id,
+                draft.version,
+                &draft.digest,
+                decision.clone(),
+            )
+            .unwrap();
+        if decision == Decision::Approve {
+            f.store.claim(&f.bw, &f.agent).unwrap().unwrap();
+        }
+        let update = f.store.next_delivery().unwrap().unwrap();
+        assert_eq!(update.previous.as_deref(), Some(original.as_str()));
+        assert!(f.store.channel_action(&update).unwrap().is_none());
+        let title = f.store.delivery_title(&update).unwrap();
+        assert_eq!(
+            title,
+            if decision == Decision::Approve {
+                "The approved agent is working."
+            } else {
+                "The request was declined."
+            }
+        );
+        let body = format!(
+            "{}\n\n{title}",
+            f.store.notification_summary(&update).unwrap()
+        );
+        assert!(body.encode_utf16().count() > 4000);
+        let sent = slack
+            .notify(
+                &http,
+                &destination,
+                &body,
+                update.previous.as_deref(),
+                None,
+                &request_url,
+            )
+            .await;
+        f.store.delivery_result(&update, &sent).unwrap();
+        assert_eq!(sent.unwrap(), original);
+        assert!(f.store.next_delivery().unwrap().is_none());
+        let calls = captured.lock().unwrap();
+        let (method, payload, _) = calls.last().unwrap();
+        assert_eq!(method, "chat.update");
+        assert_eq!(payload["ts"], "123.456");
+        assert!(payload["text"].as_str().unwrap().encode_utf16().count() <= 4000);
+        assert_eq!(payload["blocks"][0]["text"], crate::slack::markdown(&body));
+        let buttons = payload["blocks"][1]["elements"].as_array().unwrap();
+        assert_eq!(buttons.len(), 1);
+        assert_eq!(buttons[0]["text"]["text"], "View request");
+    }
     server.abort();
 }
 

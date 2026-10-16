@@ -177,7 +177,7 @@ fn sdk_error(error: agentchat_core::Error) -> Error {
     Error::Unavailable(error.to_string())
 }
 fn rich_payload(body: &str, blocks: Vec<Value>) -> Result<Value> {
-    agentchat_slack::rendering::rich_payload(&agentchat_core::RichReply {
+    let mut payload = agentchat_slack::rendering::rich_payload(&agentchat_core::RichReply {
         text: body.into(),
         blocks: blocks
             .into_iter()
@@ -185,7 +185,25 @@ fn rich_payload(body: &str, blocks: Vec<Value>) -> Result<Value> {
             .collect(),
         attachments: vec![],
     })
-    .map_err(sdk_error)
+    .map_err(sdk_error)?;
+    // chat.update rejects fallback text longer than 4,000 characters, even
+    // when the full content fits in blocks (and chat.postMessage accepted it).
+    // Keep the complete approval scope in blocks; shorten only the preview.
+    if body.encode_utf16().count() > 4000 {
+        let suffix = "\n\n… Open the message for the full details.";
+        let mut remaining = 4000 - suffix.encode_utf16().count();
+        let mut preview = String::new();
+        for ch in body.chars() {
+            if ch.len_utf16() > remaining {
+                break;
+            }
+            preview.push(ch);
+            remaining -= ch.len_utf16();
+        }
+        preview.push_str(suffix);
+        payload["text"] = json!(preview);
+    }
+    Ok(payload)
 }
 
 impl Slack {
