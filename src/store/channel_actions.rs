@@ -10,6 +10,8 @@ struct Record {
     token: String,
     actor: String,
     target: Target,
+    #[serde(default)]
+    slack_channel: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 enum Target {
@@ -17,7 +19,92 @@ enum Target {
     Permission { id: String, digest: String },
 }
 
+pub(crate) struct SlackThreadCard {
+    pub summary: String,
+    pub recipient: Option<String>,
+    pub action: Option<ChannelAction>,
+}
+
 impl Store {
+    pub(crate) fn slack_thread_card(
+        &self,
+        job: &crate::slack_agent::Job,
+    ) -> Result<SlackThreadCard> {
+        let task_id = job.task.as_deref().ok_or(Error::NotFound)?;
+        // Bind this surface to the durable signed event, never model arguments.
+        let data: Vec<u8> =
+            self.db
+                .query_row("SELECT data FROM slack_jobs WHERE id=?", [&job.id], |r| {
+                    r.get(0)
+                })?;
+        let saved: crate::slack_agent::Job =
+            self.vault.open(&data, &format!("slack-job:{}", job.id))?;
+        require(
+            saved.task.as_deref() == Some(task_id)
+                && saved.mention.team == job.mention.team
+                && saved.mention.channel == job.mention.channel
+                && saved.mention.thread_ts == job.mention.thread_ts,
+            "This request does not belong to this Slack thread.",
+        )?;
+        let task = self.task(task_id)?;
+        require(
+            saved.requester.as_deref() == Some(&task.view.requester_id),
+            "This request does not belong to this Slack sender.",
+        )?;
+        let source = task.source.as_ref().ok_or(Error::NotFound)?;
+        require(source.url == saved.source, "The request source changed.")?;
+        let requester = self.profile_by_id(&task.view.requester_id)?;
+        let mut card = SlackThreadCard {
+            summary: format!(
+                "Ask: {}\n\nFrom: {}\n\nWhere: [Slack thread]({})",
+                source.ask, requester.name, source.url
+            ),
+            recipient: None,
+            action: None,
+        };
+        let Some(link) = self
+            .slack_links(&saved.mention.team)?
+            .into_iter()
+            .find(|l| l.user_id == task.view.owner_id)
+        else {
+            return Ok(card);
+        };
+        require(
+            self.slack_principal(&link.destination.team, &link.destination.user)?
+                .is_some_and(|p| p.user_id == task.view.owner_id),
+            "The recipient's Slack connection changed.",
+        )?;
+        card.recipient = Some(link.destination.user.clone());
+        // Custom/changed proposals and tool permissions need their private
+        // review surface; do not expose their instructions in a public thread.
+        let standard = task
+            .view
+            .draft
+            .as_ref()
+            .and_then(|d| d.action.as_ref())
+            .is_some_and(|action| match action {
+                Action::Harness { instruction, .. }
+                | Action::Cloud { instruction, .. }
+                | Action::ReadOnly { instruction, .. } => instruction == &task.view.request,
+                _ => false,
+            });
+        if task.view.status == Status::AwaitingApproval && standard {
+            card.action = self.channel_action_on(
+                &Delivery {
+                    event_id: 0,
+                    channel_id: link.channel_id,
+                    destination: serde_json::to_string(&link.destination)?,
+                    task_id: task_id.into(),
+                    kind: "awaiting_approval".into(),
+                    attempts: 0,
+                    channel_kind: "slack".into(),
+                    previous: None,
+                },
+                Some(&saved.mention.channel),
+            )?;
+        }
+        Ok(card)
+    }
     pub(crate) fn notification_summary(&self, d: &Delivery) -> Result<String> {
         let task = self.task(&d.task_id)?;
         let requester = self.profile_by_id(&task.view.requester_id)?;
@@ -34,6 +121,14 @@ impl Store {
         })
     }
     pub(crate) fn channel_action(&self, d: &Delivery) -> Result<Option<ChannelAction>> {
+        self.channel_action_on(d, None)
+    }
+
+    fn channel_action_on(
+        &self,
+        d: &Delivery,
+        slack_channel: Option<&str>,
+    ) -> Result<Option<ChannelAction>> {
         let task = self.task(&d.task_id)?;
         let (owner, kind, destination, verified): (String, String, Vec<u8>, bool) =
             self.db.query_row(
@@ -110,15 +205,17 @@ impl Store {
                 Action::Command { .. } => serde_json::to_string_pretty(action)?,
             };
             let body = if read_only
-                && matches!(action,Action::Harness {instruction,..} if instruction==&task.view.request)
+                && matches!(action,Action::Harness {instruction,..} | Action::ReadOnly {instruction,..} if instruction==&task.view.request)
             {
                 let access = if task.view.ask_only {
                     "Read-only: read local files, GitHub and Slack. No actions."
                 } else {
                     "Choose read-only for an answer, or approve actions to allow changes to files and connected apps."
                 };
-                let delivery = if task.source.is_some() {
+                let delivery = if task.source.as_ref().is_some_and(|s| s.share_files) {
                     "The answer and requested files are shared with everyone in the source Slack channel."
+                } else if task.source.is_some() {
+                    "The answer is shared in the source Slack channel. File downloads stay restricted to you and the requester."
                 } else {
                     "The answer and requested files are sent to the requester."
                 };
@@ -172,7 +269,11 @@ impl Store {
         } else {
             return Ok(None);
         };
-        let target_key = hash(serde_json::to_vec(&target)?);
+        let target_key = if let Some(channel) = slack_channel {
+            hash(serde_json::to_vec(&(&target, channel))?)
+        } else {
+            hash(serde_json::to_vec(&target)?)
+        };
         let old: Option<(String,Vec<u8>)> = self.db.query_row(
             "SELECT code,data FROM channel_actions WHERE channel_id=? AND task_id=? AND target_key=?",
             params![d.channel_id,d.task_id,target_key],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -206,6 +307,7 @@ impl Store {
             token: token.clone(),
             actor,
             target,
+            slack_channel: slack_channel.map(str::to_owned),
         };
         self.db.execute("INSERT INTO channel_actions(token_hash,code,channel_id,task_id,target_key,data) VALUES(?,?,?,?,?,?)",
             params![hash(&token),code,d.channel_id,d.task_id,target_key,self.vault.seal(&record,&format!("channel-action:{}:{}:{target_key}",d.channel_id,d.task_id))?])?;
@@ -248,10 +350,16 @@ impl Store {
         let destination: String = self
             .vault
             .open(&destination, &format!("channel:{channel}"))?;
+        let mut expected = ChannelActor::from_destination(&kind, &destination)?;
+        let linked_actor = expected.key();
+        if let Some(source_channel) = &record.slack_channel {
+            match &mut expected {
+                ChannelActor::Slack { channel, .. } => *channel = source_channel.clone(),
+                _ => return Err(Error::Forbidden("This approval requires Slack.".into())),
+            }
+        }
         require(
-            verified
-                && actor.key() == record.actor
-                && actor.key() == ChannelActor::from_destination(&kind, &destination)?.key(),
+            verified && linked_actor == record.actor && actor.key() == expected.key(),
             "This approval is not for this sender.",
         )?;
         let p = Principal {

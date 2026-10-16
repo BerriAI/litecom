@@ -92,7 +92,7 @@ runpy.run_path({str(protocol)!r})['serve'](reply)
     (work/'reply.fixture').write_text(json.dumps({'text':'The requested notes are attached.', 'files':[str(attachment)]}))
     env = dict(os.environ, LITECOM_HOME=str(root/'config'), PATH=str(programs)+os.pathsep+os.environ['PATH'])
     prefix = [str(binary), '--connection', connection]
-    command = prefix+['setup', '--relay', args.url, '--no-mcp', '--no-browser', '--workspace', str(work)]
+    command = prefix+['setup', '--relay', args.url, '--no-mcp', '--no-browser', '--no-permission-check', '--workspace', str(work)]
     if not args.with_service:
         command.append('--no-background')
     terminal = worker = None

@@ -317,16 +317,9 @@ impl Slack {
         if !chunk.is_empty() {
             blocks.push(json!({"type":"section","text":{"type":"plain_text","text":chunk}}));
         }
-        let mut buttons = vec![];
-        if let Some((token, read_only, actions)) = action {
-            if read_only {
-                buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Approve read-only"},"style":"primary","action_id":"litecom_read_only","value":token}));
-            }
-            if actions || !read_only {
-                buttons.push(json!({"type":"button","text":{"type":"plain_text","text":if read_only {"Approve actions"} else {"Approve"}},"action_id":"litecom_approve","value":token}));
-            }
-            buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token}));
-        }
+        let mut buttons = action
+            .map(|(token, read_only, actions)| approval_buttons(token, read_only, actions))
+            .unwrap_or_default();
         buttons.push(view_button("View request", request_url));
         blocks.push(json!({"type":"actions","elements":buttons}));
         let safe = markdown(body);
@@ -430,8 +423,17 @@ impl Slack {
         previous: Option<&str>,
         message_id: &str,
         buttons: &[Value],
+        recipient: Option<&str>,
     ) -> Result<String> {
-        let mut blocks = vec![json!({"type":"markdown","text":body})];
+        let mut blocks = vec![];
+        if let Some(user) = recipient {
+            require(
+                !user.is_empty() && user.bytes().all(|c| c.is_ascii_alphanumeric()),
+                "Invalid Slack recipient.",
+            )?;
+            blocks.push(json!({"type":"section","text":{"type":"mrkdwn","text":format!("<@{user}> · Request for your agent")}}));
+        }
+        blocks.push(json!({"type":"markdown","text":body}));
         // Slack allows 25 elements in one actions block.
         for buttons in buttons.chunks(25) {
             blocks.push(json!({"type":"actions","elements":buttons}));
@@ -439,6 +441,9 @@ impl Slack {
         agentchat_slack::policy::ReplyDestination::validate(channel, Some(thread))
             .map_err(sdk_error)?;
         let mut payload = rich_payload(body, blocks)?;
+        if let Some(user) = recipient {
+            payload["text"] = json!(format!("<@{user}>\n{body}"));
+        }
         payload["channel"] = json!(channel);
         let method = if let Some(ts) = previous {
             payload["ts"] = json!(ts);
@@ -459,6 +464,18 @@ impl Slack {
 
 pub(crate) fn view_button(label: &str, url: &str) -> Value {
     json!({"type":"button","text":{"type":"plain_text","text":label},"action_id":format!("litecom_view_{}", &hash(label)[..12]),"url":url})
+}
+
+pub(crate) fn approval_buttons(token: &str, read_only: bool, actions: bool) -> Vec<Value> {
+    let mut buttons = vec![];
+    if read_only {
+        buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Approve read-only"},"style":"primary","action_id":"litecom_read_only","value":token}));
+    }
+    if actions || !read_only {
+        buttons.push(json!({"type":"button","text":{"type":"plain_text","text":if read_only {"Approve actions"} else {"Approve"}},"action_id":"litecom_approve","value":token}));
+    }
+    buttons.push(json!({"type":"button","text":{"type":"plain_text","text":"Decline"},"action_id":"litecom_decline","value":token}));
+    buttons
 }
 
 // Prevent output from turning quoted Slack IDs into pings. Slack's Markdown

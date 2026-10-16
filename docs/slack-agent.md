@@ -46,13 +46,13 @@ You can also ask your own agent or name a particular connected agent, such as Mo
 
 “Can you get this from Moe?” works when the conversation supplies enough context. The hosted agent can read that thread and preceding messages in the same channel. It asks for clarification when the reference is unclear. It cannot read other channels or fetch arbitrary links.
 
-The approval DM shows **Ask**, **From**, and **Where**, with **Approve read-only**, **Decline**, and **View request** buttons. Requests that need changes also offer **Approve actions**. The full request and conversation context are available under **View request**. The card keeps this context as its status changes.
+Litecom tags the recipient in the source thread and shows **Ask**, **From**, and **Where**, with **Approve read-only**, **Decline**, and **View request** buttons. Requests that need changes also offer **Approve actions**. The same controls arrive by DM. Only the recipient's linked Slack account can decide; other channel members cannot approve for them. The full request and conversation context are available under **View request**. The card keeps its summary as its status changes. Custom or changed agent proposals use the private review page.
 
 Read-only approval allows retrieval; action approval also allows the agent to make changes. Both share the reply and requested files in the source thread. Results use Slack formatting; files arrive as Slack attachments. Channel members can access those copies under their workspace’s policies. If Slack cannot accept a file, **Download files** opens the authenticated Litecom download. Older requests approved before native file sharing retain their original download permissions. Results do not go back through the hosted model.
 
 ## Check it
 
-Mention Litecom with a request for your own agent to reply “Connected.” Before approving, check that the request is waiting and no work has run. Approve in the Slack DM. One status message shows sent and approved; the final answer arrives as a new reply in the same thread. Then try a request referring to a previous message.
+Mention Litecom with a request for your own agent to reply “Connected.” Before approving, check that the request is waiting and no work has run. Approve in the source thread or Slack DM. One status message shows sent and approved; the final answer arrives as a new reply in the same thread. Then try a request referring to a previous message.
 
 If it does not respond, check that the app is in the channel, Event Subscriptions shows **Verified**, and you have reconnected Slack after adding scopes. A request to connect your account means the sender's Slack identity has not been linked. A model error means the host should check the configured URL, model, credentials, and provider quota.
 

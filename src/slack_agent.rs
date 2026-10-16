@@ -547,6 +547,27 @@ async fn publish(
     connection: &crate::slack::SlackDestination,
     body: &str,
 ) -> Result<()> {
+    let card = if job.task.is_some() && !job.result_started {
+        match principal(s, job)
+            .and_then(|p| s.db()?.get_task(&p, job.task.as_deref().unwrap()))
+            .and_then(|_| s.db()?.slack_thread_card(job))
+        {
+            Ok(card) => Some(card),
+            Err(Error::Internal(error)) => return Err(Error::Internal(error)),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    let body = if let Some(card) = &card {
+        if let Some(action) = &card.action {
+            action.body.clone()
+        } else {
+            format!("{}\n\n{body}", card.summary)
+        }
+    } else {
+        body.into()
+    };
     let mut buttons = job
         .task
         .as_ref()
@@ -557,14 +578,24 @@ async fn publish(
             )]
         })
         .unwrap_or_default();
+    if let Some(action) = card.as_ref().and_then(|c| c.action.as_ref()) {
+        let mut approvals =
+            crate::slack::approval_buttons(&action.token, action.read_only, action.actions);
+        approvals.extend(buttons);
+        buttons = approvals;
+    }
     if job.result_started {
         buttons.extend(crate::slack_files::download_buttons(s, job)?);
     }
-    let hash = crate::crypto::hash(format!("{body}{}", serde_json::to_string(&buttons)?));
+    let recipient = card.as_ref().and_then(|c| c.recipient.as_deref());
+    let hash = crate::crypto::hash(format!(
+        "{body}{recipient:?}{}",
+        serde_json::to_string(&buttons)?
+    ));
     if job.sent.as_ref() == Some(&hash) {
         return Ok(());
     }
-    for (index, chunk) in chunks(&crate::slack::markdown(body)).iter().enumerate() {
+    for (index, chunk) in chunks(&crate::slack::markdown(&body)).iter().enumerate() {
         let phase = if job.result_started {
             "result"
         } else {
@@ -588,6 +619,7 @@ async fn publish(
                 job.remote.get(index).map(String::as_str),
                 &id,
                 &buttons,
+                if index == 0 { recipient } else { None },
             )
             .await?;
         if index == job.remote.len() {

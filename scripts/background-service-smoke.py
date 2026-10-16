@@ -137,7 +137,7 @@ def main():
                 agent = next(a for a in api("/api/agents") if a["is_default"])
                 pairing = api("/api/connections/local", {"agent_id": agent["id"]})
                 setup = ["setup", "--relay", origin, "--connect-code", pairing["device_code"],
-                         "--agent", "codex", "--workspace", str(work), "--no-mcp", "--no-browser"]
+                         "--agent", "codex", "--workspace", str(work), "--no-mcp", "--no-browser", "--no-permission-check"]
                 installed = True  # Clean up even when installation partially succeeds.
                 result = cli(*setup)
                 assert "Listening for requests" in result.stdout

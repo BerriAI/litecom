@@ -50,6 +50,9 @@ pub struct Setup {
     /// Skip adding Litecom to the chosen agent's MCP configuration.
     #[arg(long)]
     pub no_mcp: bool,
+    /// Defer macOS permission prompts; run `litecom approve` when ready.
+    #[arg(long)]
+    pub no_permission_check: bool,
     /// Print the sign-in link without opening a browser on this computer.
     #[arg(long)]
     pub no_browser: bool,
@@ -71,6 +74,7 @@ impl Default for Setup {
             requester_only: false,
             no_background: false,
             no_mcp: false,
+            no_permission_check: false,
             no_browser: false,
             preview: false,
         }
@@ -384,7 +388,9 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         );
         let reused_worker = !restart_worker && service::status(connection).unwrap_or(false);
         if !reused_worker {
-            crate::folder_access::prepare(connection, &settings)?;
+            if !options.no_permission_check {
+                crate::folder_access::prepare(connection, &settings)?;
+            }
             service::install(connection)?;
         }
         // Check the actual queue heartbeat, not merely the service installation.
@@ -399,7 +405,7 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
             };
         let mut ready = false;
         let mut attempts = 0;
-        let mut checking_access = !reused_worker;
+        let mut checking_access = !reused_worker && !options.no_permission_check;
         while attempts < 10 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             if checking_access {

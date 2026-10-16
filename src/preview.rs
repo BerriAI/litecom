@@ -68,6 +68,7 @@ pub async fn run(no_browser: bool) -> Result<()> {
             requester_only: false,
             no_background: true,
             no_mcp: true,
+            no_permission_check: true,
             no_browser,
             preview: true,
         },

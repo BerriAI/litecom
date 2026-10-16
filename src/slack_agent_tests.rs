@@ -339,6 +339,220 @@ async fn signed_events_are_durable_deduplicated_and_optional() {
 }
 
 #[tokio::test]
+async fn source_thread_tags_owner_and_binds_each_approval_to_their_verified_identity() {
+    use crate::channel_replies::{ChannelActor, ReplyOutcome};
+    for (ask_only, read_only, decision) in [
+        (true, true, Decision::Approve),
+        (false, true, Decision::Approve),
+        (false, false, Decision::Approve),
+        (false, false, Decision::Decline),
+    ] {
+        let t = Test::new().await;
+        t.push(vec![tool("create_request", json!({"requires_action":!ask_only,"agent_id":t.agent,"request":"Find the launch notes.","summary":"Find the launch notes. <@UOTHER>"}))]);
+        t.state
+            .db()
+            .unwrap()
+            .enqueue_slack(mention("EvButtons"))
+            .unwrap();
+        t.tick().await;
+        t.tick().await;
+        let job = t.tick().await;
+        let id = job.task.as_ref().unwrap();
+        let request = t.state.db().unwrap().get_task(&t.owner, id).unwrap();
+        let settings = crate::runner::RunnerConfig {
+            agent: crate::runner::NativeAgent::Codex,
+            executable: std::env::current_exe().unwrap(),
+            workspace: std::env::temp_dir(),
+            arguments: vec![],
+            mcp: None,
+        };
+        t.state
+            .db()
+            .unwrap()
+            .prepare(
+                &t.owner,
+                id,
+                None,
+                DraftInput {
+                    action: Some(settings.action(&request.request)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let card = t.state.db().unwrap().slack_thread_card(&job).unwrap();
+        assert_eq!(card.recipient.as_deref(), Some("U2"));
+        let action = card.action.unwrap();
+        assert!(action.read_only);
+        assert_eq!(action.actions, !ask_only);
+        assert!(!action.body.contains("Quoted Slack context"));
+        let mut forged = job.clone();
+        forged.mention.channel = "COTHER".into();
+        assert!(t.state.db().unwrap().slack_thread_card(&forged).is_err());
+        t.tick().await;
+        {
+            let calls = t.mock.calls.lock().unwrap();
+            let payload = &calls
+                .iter()
+                .rev()
+                .find(|(p, _)| p == "/chat.postMessage")
+                .unwrap()
+                .1;
+            assert_eq!(
+                payload["blocks"][0]["text"]["text"],
+                "<@U2> · Request for your agent"
+            );
+            assert!(!payload["text"].as_str().unwrap().contains("<@UOTHER>"));
+            assert!(
+                payload["blocks"][1]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("&lt;@UOTHER&gt;")
+            );
+            let buttons = payload["blocks"][2]["elements"].as_array().unwrap();
+            assert!(
+                buttons
+                    .iter()
+                    .any(|b| b["action_id"] == "litecom_read_only")
+            );
+            assert_eq!(
+                buttons.iter().any(|b| b["action_id"] == "litecom_approve"),
+                !ask_only
+            );
+        }
+        for (team, user, channel) in [
+            ("T1", "U1", "C1"),
+            ("TOTHER", "U2", "C1"),
+            ("T1", "U2", "COTHER"),
+            ("T1", "U2", "DU2"),
+        ] {
+            let actor = ChannelActor::Slack {
+                team: team.into(),
+                user: user.into(),
+                channel: channel.into(),
+            };
+            assert!(
+                t.state
+                    .db()
+                    .unwrap()
+                    .channel_decide_access(&actor, &action.token, Decision::Approve, read_only)
+                    .is_err()
+            );
+        }
+        let owner = ChannelActor::Slack {
+            team: "T1".into(),
+            user: "U2".into(),
+            channel: "C1".into(),
+        };
+        // A relink or revoked connection must invalidate a previously issued button.
+        link(&t.state.db().unwrap(), &t.owner, "UOTHER", "T1");
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .channel_decide_access(&owner, &action.token, Decision::Approve, read_only)
+                .is_err()
+        );
+        link(&t.state.db().unwrap(), &t.owner, "U2", "T1");
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .channel_decide_access(&owner, &action.token, Decision::Approve, read_only)
+                .is_err()
+        );
+        let action = t
+            .state
+            .db()
+            .unwrap()
+            .slack_thread_card(&job)
+            .unwrap()
+            .action
+            .unwrap();
+        let link = t
+            .state
+            .db()
+            .unwrap()
+            .slack_links("T1")
+            .unwrap()
+            .into_iter()
+            .find(|l| l.user_id == t.owner.user_id)
+            .unwrap();
+        let direct = t
+            .state
+            .db()
+            .unwrap()
+            .channel_action(&crate::notifications::Delivery {
+                event_id: 0,
+                channel_id: link.channel_id,
+                destination: serde_json::to_string(&link.destination).unwrap(),
+                task_id: id.clone(),
+                kind: "awaiting_approval".into(),
+                attempts: 0,
+                channel_kind: "slack".into(),
+                previous: None,
+            })
+            .unwrap()
+            .unwrap();
+        assert_ne!(direct.token, action.token);
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .channel_decide_access(&owner, &direct.token, Decision::Approve, read_only)
+                .is_err()
+        );
+        t.state
+            .db()
+            .unwrap()
+            .channel_decide_access(&owner, &action.token, decision.clone(), read_only)
+            .unwrap();
+        assert!(matches!(
+            t.state
+                .db()
+                .unwrap()
+                .channel_decide_access(&owner, &action.token, Decision::Approve, false)
+                .unwrap(),
+            ReplyOutcome::AlreadyDecided(_)
+        ));
+        let task = t.state.db().unwrap().get_task(&t.owner, id).unwrap();
+        if decision == Decision::Approve {
+            assert_eq!(
+                task.approved_access,
+                Some(if read_only {
+                    RunAccess::ReadOnly
+                } else {
+                    RunAccess::Actions
+                })
+            );
+        } else {
+            assert_eq!(task.status, Status::Declined);
+        }
+        assert!(
+            t.state
+                .db()
+                .unwrap()
+                .slack_thread_card(&job)
+                .unwrap()
+                .action
+                .is_none()
+        );
+        t.clock.fetch_add(6, Ordering::SeqCst);
+        t.tick().await;
+        let calls = t.mock.calls.lock().unwrap();
+        let payload = &calls
+            .iter()
+            .rev()
+            .find(|(p, _)| p == "/chat.update")
+            .unwrap()
+            .1;
+        let body = payload["text"].as_str().unwrap();
+        assert!(body.contains("Ask:") && body.contains("From:") && body.contains("Where:"));
+        assert!(!payload["blocks"].to_string().contains("litecom_approve"));
+        assert_eq!(t.count("approvals"), 1);
+    }
+}
+
+#[tokio::test]
 async fn slack_context_becomes_one_request_and_only_owner_approval_releases_result() {
     let t = Test::new().await;
     t.mock

@@ -214,7 +214,7 @@ Regenerate the release workflow with `dist generate --mode ci` after changing `d
 
 Run `scripts/google-onboarding-smoke.py` and `scripts/slack-onboarding-smoke.py` with Python Playwright to check browser flow, refresh, and layout against provider fixtures. They do not contact Google or Slack.
 
-On macOS, `python scripts/web-connect-smoke.py --binary target/debug/litecom` checks the copied command using an installed binary, isolated native Codex MCP configuration, and a temporary LaunchAgent. It asks a contact and itself through the registered MCP command, then verifies one approval and exact downloaded bytes. Codex must be installed; model output is deterministic and no model call is made. The script removes its service and temporary data.
+On macOS, `python scripts/web-connect-smoke.py --binary target/debug/litecom` checks the copied command using an installed binary, isolated native Codex MCP configuration, and a temporary LaunchAgent. It asks a contact and itself through the registered MCP command, then verifies one approval and exact downloaded bytes. Codex must be installed; model output is deterministic and no model call is made. Setup fixtures pass a temporary `--workspace` and `--no-permission-check` so tests do not prompt for access to the developer's folders or screen. The script removes its service and temporary data.
 
 The Rust onboarding tests cover OIDC signature and claim validation, login-state binding/replay, account and channel ownership, directory privacy, per-connection readiness, and the v2 → v3 database migration. `scripts/fixtures/oidc-test-key.pem` is a generated, deliberately public test key; it is never loaded by the production application.
 

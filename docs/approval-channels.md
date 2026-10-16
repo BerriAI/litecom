@@ -6,6 +6,8 @@ Choose **Phone**, **Slack**, or **Email** during setup. Add another destination 
 - **Slack:** tap **Approve read-only** or, for an action request, **Approve actions**.
 - **Email:** reply with `Approve` on the first line.
 
+For Slack mentions, Litecom tags you and puts approval buttons in the source thread as well as your DM. Only your linked Slack account can use them.
+
 Use `DECLINE` with the text-message code, the Slack **Decline** button, or `Decline` in your email reply to refuse. Email replies must come from the address you connected. Reply to the original email so its request reference is preserved.
 
 One approval authorizes the requested work and sending its result. The agent starts after approval and delivers its final reply and requested files automatically. You do not return to Litecom to approve sharing.

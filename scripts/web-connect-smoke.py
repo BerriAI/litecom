@@ -2,7 +2,7 @@
 Local dev delivery and a deterministic agent reply; native Codex MCP configuration.
 Use --public-release to exercise anonymous GitHub downloads from a clean installation.
 """
-import argparse, hashlib, json, os, re, shutil, socket, subprocess, tempfile, time, select, tomllib
+import argparse, hashlib, json, os, re, shutil, socket, subprocess, tempfile, time, select, tomllib, shlex
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 from terminal_qa import run_terminal
@@ -78,6 +78,8 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             connection=re.search(r"--connection '([^']+)'",command).group(1)
             connections.append(connection)
             page.reload(); expect(page.get_by_label('Terminal command')).to_have_value(command)
+            # Fixture work must not read the user's home or request real macOS consent.
+            command += ' --no-permission-check --workspace ' + shlex.quote(str(work))
             page.screenshot(path=str(shots/'command-mobile.png'),full_page=True)
             result=run_terminal(command,env,work,answers=[('Which agent should handle your requests?',b'\r')],timeout=180)
             assert result.returncode==0,(result.stdout,result.stderr)
@@ -111,7 +113,8 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             mcp=subprocess.Popen([entry['command'],*entry['args']],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             def rpc(number,method,params):
                 mcp.stdin.write(json.dumps({'jsonrpc':'2.0','id':number,'method':method,'params':params})+'\n'); mcp.stdin.flush()
-                deadline=time.monotonic()+20
+                # litecom_ask waits up to 25 seconds before returning its next step.
+                deadline=time.monotonic()+35
                 while time.monotonic()<deadline:
                     if not select.select([mcp.stdout],[],[],.2)[0]: continue
                     message=json.loads(mcp.stdout.readline())
@@ -168,6 +171,7 @@ os.execv({real_curl!r},[{real_curl!r},*sys.argv[1:]])
             page.get_by_role('button',name='Create agent',exact=True).click()
             expect(page.get_by_role('heading',name='Connect Second computer',exact=True)).to_be_visible()
             second_command=page.get_by_label('Terminal command').input_value()
+            second_command += ' --no-permission-check --workspace ' + shlex.quote(str(work))
             second_connection=re.search(r"--connection '([^']+)'",second_command).group(1)
             connections.append(second_connection)
             second_agent=next(a for a in page.request.get(origin+'/api/agents').json() if a['name']=='Second computer')
