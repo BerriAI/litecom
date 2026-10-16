@@ -1355,7 +1355,7 @@ cat codex-events.fixture
 }
 
 #[tokio::test]
-async fn mcp_wait_returns_the_approved_result_without_another_user_prompt() {
+async fn mcp_returns_pending_approval_and_can_read_the_result_later() {
     use rmcp::{
         ServiceExt,
         model::{CallToolRequestParams, ClientConfig as McpConfig},
@@ -1404,30 +1404,128 @@ async fn mcp_wait_returns_the_approved_result_without_another_user_prompt() {
         .structured_content
         .unwrap();
     assert!(before["response"].is_null() && before["draft"].is_null());
-    let approval_state = state.clone();
-    let approval_task = task.clone();
-    let owner = f.b.clone();
-    let approve = tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        let draft = approval_task.draft.unwrap();
-        approval_state
-            .db()
-            .unwrap()
-            .decide(
-                &owner,
-                &approval_task.id,
-                draft.version,
-                &draft.digest,
-                Decision::Approve,
-            )
-            .unwrap();
-    });
-    let result = mcp.call_tool(call("litecom_ask",json!({"contact":"Moe","request":"Please send the document","request_id":"mcp-auto-wait","requires_action":true}))).await.unwrap().structured_content.unwrap();
-    approve.await.unwrap();
+    // A pending human decision must return control without polling for 25 seconds.
+    for name in ["litecom_ask", "litecom_wait"] {
+        let args = if name == "litecom_ask" {
+            json!({"contact":"Moe","request":"Please send the document","request_id":"mcp-auto-wait","requires_action":true})
+        } else {
+            json!({"task_id":task.id})
+        };
+        let pending = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            mcp.call_tool(call(name, args)),
+        )
+        .await
+        .expect("human approval should return immediately")
+        .unwrap()
+        .structured_content
+        .unwrap();
+        assert_eq!(pending["waiting"], true);
+        assert_eq!(pending["request"]["status"], "awaiting_approval");
+        assert!(pending["next"].is_null());
+        assert_eq!(pending["check_later"]["tool"], "litecom_status");
+        assert_eq!(pending["check_later"]["arguments"]["task_id"], task.id);
+        assert!(
+            pending["guidance"]
+                .as_str()
+                .unwrap()
+                .contains("end the turn")
+        );
+        assert!(pending["request"]["response"].is_null());
+        assert!(pending["request"]["draft"].is_null());
+    }
+    let draft = task.draft.as_ref().unwrap();
+    state
+        .db()
+        .unwrap()
+        .decide(
+            &f.b,
+            &task.id,
+            draft.version,
+            &draft.digest,
+            Decision::Approve,
+        )
+        .unwrap();
+    let result = mcp
+        .call_tool(call("litecom_wait", json!({"task_id":task.id})))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
     assert_eq!(result["waiting"], false);
     assert_eq!(result["request"]["response"]["text"], "A private draft");
     assert!(result["next"].is_null());
     assert!(result["request"]["draft"].is_null());
+    // Also stop when approval becomes necessary during a brief check. A later
+    // call still receives the completed response without sending another request.
+    let queued = state
+        .db()
+        .unwrap()
+        .create_task(
+            &f.a,
+            NewTask {
+                ask_only: false,
+                owner_id: f.b.user_id.clone(),
+                agent_id: None,
+                request: "Another document".into(),
+                idempotency_key: "mcp-pending-transition".into(),
+            },
+        )
+        .unwrap();
+    let preparing_state = state.clone();
+    let queued_id = queued.id.clone();
+    let owner = f.b.clone();
+    let prepare = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        preparing_state
+            .db()
+            .unwrap()
+            .prepare(
+                &owner,
+                &queued_id,
+                None,
+                DraftInput {
+                    text: "Later response".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+    });
+    let pending = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        mcp.call_tool(call("litecom_wait", json!({"task_id":queued.id}))),
+    )
+    .await
+    .expect("stop when human approval becomes necessary")
+    .unwrap()
+    .structured_content
+    .unwrap();
+    assert_eq!(pending["request"]["status"], "awaiting_approval");
+    assert_eq!(pending["waiting"], true);
+    assert!(pending["next"].is_null());
+    let prepared = prepare.await.unwrap();
+    let draft = prepared.draft.unwrap();
+    state
+        .db()
+        .unwrap()
+        .decide(
+            &f.b,
+            &queued.id,
+            draft.version,
+            &draft.digest,
+            Decision::Approve,
+        )
+        .unwrap();
+    let later = mcp
+        .call_tool(call("litecom_wait", json!({"task_id":queued.id})))
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(later["waiting"], false);
+    assert_eq!(later["request"]["response"]["text"], "Later response");
+    assert!(later["check_later"].is_null());
+    assert!(later["guidance"].is_null());
     // Cancellation and decline return immediately instead of instructing a retry.
     for decision in [Decision::Decline, Decision::Approve] {
         let id = crate::crypto::id();

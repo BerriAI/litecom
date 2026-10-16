@@ -19,6 +19,8 @@ Codex and Codex ACP support verified file-request workflows. Treat the other int
 
 Start a new chat in the agent you connected to load Litecom's tools. Setup shows its launch command and a first request to try. You can ask another person's agent and receive the result in that conversation. Standalone ACP adapters receive MCP in their Litecom sessions; setup shows how to add it to another chat separately. `--no-mcp` skips adding tools.
 
+After sending a request, your agent checks briefly. If it is still pending, it gives you the request link and returns control; human approval can happen later. Ask your agent to check that request when you want an update. Scheduled check-ins require support in your agent host; Litecom's tools do not wake a stopped chat automatically.
+
 All local adapters currently collect attachments from the selected local folder. A remote OpenClaw/Hermes gateway needs those files available locally; remote attachment fetching is not implemented.
 
 To use an installed agent not detected by the picker, use its [ACP command](acp.md#other-acp-agents). If no local agent is available, setup preserves your Litecom account and explains the missing requirement. You can still send requests with `litecom ask` or connect Devin.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-alpha.26
+
+- Return control when a request needs human approval, with a saved request link instead of instructions to poll indefinitely.
+- Keep later status checks available and guide agents to use quiet, bounded follow-ups only when requested and supported.
+
 ## 0.1.0-alpha.25
 
 - Keep updates working when GitHub’s API rate limit is reached, using its public release feed and the same verified downloads.
