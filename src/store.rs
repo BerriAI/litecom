@@ -17,6 +17,7 @@ mod files;
 mod identities;
 mod permissions;
 mod recovery;
+mod rooms;
 mod security;
 mod slack_agent;
 pub(crate) use cloud::CloudClaim;
@@ -67,7 +68,7 @@ impl Store {
         db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA secure_delete = ON;")?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         conflict(
-            version <= 4,
+            version <= 5,
             "This database was created by a newer Litecom version.",
         )?;
         db.execute_batch(include_str!("schema.sql"))?;
@@ -153,8 +154,9 @@ impl Store {
         // Upgrade live device connections without resurrecting expired or revoked
         // credentials. Browser sessions keep their normal lifetime.
         store.db.execute("UPDATE credentials SET expires_at=? WHERE role='agent' AND revoked=0 AND expires_at>? AND expires_at<?", params![i64::MAX,store.time(),i64::MAX])?;
-        // New read-only action variants cannot be decoded safely by older relays.
-        store.db.pragma_update(None, "user_version", 4)?;
+        // v4 introduced read-only actions; v5 adds shared channels and their restore quarantine.
+        // Older relays must not open data whose access rules they cannot enforce.
+        store.db.pragma_update(None, "user_version", 5)?;
         Ok(store)
     }
 

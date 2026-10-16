@@ -80,6 +80,10 @@ jobs:
       - name: Verify terminal agent selection
         if: runner.os == 'Linux'
         run: python scripts/agent-picker-smoke.py --binary target/release/litecom
+      - name: Verify shared channels across existing CLI and MCP chats
+        if: runner.os != 'macOS'
+        shell: bash
+        run: python scripts/channel-smoke.py --binary target/release/litecom${{ runner.os == 'Windows' && '.exe' || '' }}
       - name: Verify uninstall and retry without touching unrelated data
         if: runner.os != 'macOS'
         shell: bash

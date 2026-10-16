@@ -60,3 +60,5 @@ Using the terminal route, from the Litecom homepage through connecting your loca
 Every route also needs **one command pasted into a terminal, then Enter**, plus an agent selection if several are installed. With **Copy setup prompt**, copy once and paste into your agent instead; the agent handles installation and may ask which agent to use. These counts assume your coding agent is installed and signed in. Opening the terminal, provider sign-in/consent, workspace selection, administrator approval, and macOS permissions may add steps. Sending and approving the first request comes after setup.
 
 [Uninstall](local-agent.md#uninstall) · [Setup help and agent settings](local-agent.md) · [Approving requests](approval-channels.md) · [Supported agents](agents.md)
+
+To coordinate work already underway, [open a shared channel](shared-channels.md) from your existing agent chat.

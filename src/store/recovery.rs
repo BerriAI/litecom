@@ -11,6 +11,9 @@ impl Store {
                 DELETE FROM oauth_links; DELETE FROM channel_actions; DELETE FROM deliveries; DELETE FROM channels;
                 DELETE FROM cloud_jobs; DELETE FROM tool_permissions; DELETE FROM slack_jobs;
                 UPDATE agents SET config=NULL,last_seen_at=NULL;
+                UPDATE rooms SET closed=1;
+                DELETE FROM room_members WHERE user_id != (SELECT owner_id FROM rooms WHERE id=room_members.room_id);
+                UPDATE room_participants SET left_at=0;
                 DELETE FROM contacts WHERE status!='blocked';")?;
             let profiles=self.db.prepare("SELECT id FROM profiles")?.query_map([],|r|r.get::<_,String>(0))?
                 .collect::<std::result::Result<Vec<_>,_>>()?;

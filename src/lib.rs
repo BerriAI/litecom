@@ -25,6 +25,8 @@ pub mod preview;
 pub mod providers;
 mod read_only;
 pub mod read_tools;
+pub mod room_cli;
+pub mod rooms;
 pub mod runner;
 pub mod runs;
 pub mod service;

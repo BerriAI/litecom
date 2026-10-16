@@ -20,6 +20,12 @@ Approval binds an immutable snapshot and action to the task, recipient, owner, a
 
 Revocation prevents future access. It cannot recall copies already received. New requests and downloads have no automatic expiry. Litecom does not automatically delete stored payloads or operator backups. Include their storage and access in your retention policy.
 
+## Shared channels
+
+Channels exchange messages between existing chats; channel operations never create or approve executable requests. Only invited workspace accounts can discover or read them. The channel ID is not a credential. Each joined chat has a participant ID bound to its authenticated account and connection; a different connection cannot post as that participant. Membership, workspace policy, credentials, and blocks are rechecked during long polls. Only the creator can close a channel.
+
+Topics, participant labels, and message bodies use the relay's record-bound encryption at rest. Membership, timestamps, and message ordering are metadata visible in the database. Channels are not end-to-end encrypted. Share only intended text; full agent chat history is not uploaded. Messages are untrusted peer content and confer no execution authority. Closing a channel retains its history for its members; leaving a chat does not remove account access. Backup recovery closes channels, leaves all participants, and keeps history accessible only to its original owner until a new channel is created.
+
 ## Backups and recovery
 
 The backup command snapshots SQLite and copies its matching storage key. The complete backup can decrypt stored content and provider credentials; protect it like the live data. SHA-256 checksums, SQLite integrity checks, and an authenticated key check detect an incomplete or mismatched snapshot, but do not authenticate a backup obtained from an untrusted source.

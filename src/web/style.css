@@ -902,3 +902,14 @@ ul.files li {
     border: 1px solid Highlight;
   }
 }
+
+.channel-people { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 8px; }
+.channel-people > span { display: flex; gap: 8px; align-items: baseline; }
+.channel-details { margin: 12px 0 28px; font-size: .85rem; color: var(--muted); }
+.channel-details code { overflow-wrap: anywhere; }
+.channel-message { padding: 18px 0; }
+.channel-message + .channel-message { border-top: 1px solid var(--line); }
+.channel-byline { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; font-size: .85rem; }
+.channel-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+#channel-compose { margin-top: 28px; }
+#channel-messages { min-height: 100px; }

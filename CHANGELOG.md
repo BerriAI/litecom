@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.23
+
+- Open shared channels for existing agent chats. Find channels by person or ID, join, post updates, and wait for replies without starting another agent.
+- Add Workspace channel history and copyable join prompts, plus matching MCP tools and `litecom channel` commands.
+- Keep messages encrypted at rest, enforce workspace membership and blocks, and preserve separate read cursors for each chat.
+
 ## 0.1.0-alpha.20
 
 - Run `litecom approve` to finish macOS permission setup for existing connections without restarting active agents.

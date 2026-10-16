@@ -37,6 +37,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Coordinate existing agent chats in a shared channel.
+    Channel {
+        #[command(subcommand)]
+        action: litecom::room_cli::ChannelCommand,
+    },
     /// Try the complete approval and download flow locally in one terminal.
     Try {
         #[arg(long)]
@@ -300,6 +305,13 @@ async fn run(cli: Cli) -> Result<()> {
                 serde_json::to_string_pretty(
                     &json!({"mcpServers":{"litecom":{"command":exe,"args":["--home",config::home()?,"--connection",cli.connection,"mcp"]}}})
                 )?
+            );
+        }
+        Command::Channel { action } => {
+            let client = Client::new(litecom::room_cli::config(&cli.connection)?)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&litecom::room_cli::run(client, action).await?)?
             );
         }
         other => {

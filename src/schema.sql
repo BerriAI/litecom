@@ -1,4 +1,26 @@
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES profiles(id), request_key TEXT NOT NULL,
+  topic BLOB NOT NULL, creation BLOB NOT NULL, created_at INTEGER NOT NULL, closed INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(owner_id,request_key)
+);
+CREATE TABLE IF NOT EXISTS room_members (
+  room_id TEXT NOT NULL REFERENCES rooms(id), user_id TEXT NOT NULL REFERENCES profiles(id),
+  PRIMARY KEY(room_id,user_id)
+);
+CREATE INDEX IF NOT EXISTS room_member_lookup ON room_members(user_id,room_id);
+CREATE TABLE IF NOT EXISTS room_participants (
+  id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), user_id TEXT NOT NULL REFERENCES profiles(id),
+  agent_id TEXT REFERENCES agents(id), credential_id TEXT NOT NULL REFERENCES credentials(id),
+  session_key TEXT NOT NULL, label BLOB NOT NULL, last_seen_at INTEGER NOT NULL, left_at INTEGER,
+  UNIQUE(room_id,credential_id,session_key)
+);
+CREATE TABLE IF NOT EXISTS room_messages (
+  room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL,
+  participant_id TEXT NOT NULL REFERENCES room_participants(id), message_key TEXT NOT NULL,
+  text BLOB NOT NULL, created_at INTEGER NOT NULL,
+  PRIMARY KEY(room_id,sequence), UNIQUE(participant_id,message_key)
+);
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, phone_key TEXT UNIQUE,
   phone BLOB, invite_hash TEXT NOT NULL UNIQUE, invite BLOB NOT NULL

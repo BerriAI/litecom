@@ -28,6 +28,9 @@ mod slack_agent_tests;
 #[path = "security_tests.rs"]
 mod security_tests;
 
+#[path = "room_tests.rs"]
+mod room_tests;
+
 fn user(store: &Store, name: &str, phone: &str) -> (Principal, Session) {
     let (challenge, code) = store.begin_login(name, phone, "browser").unwrap();
     let session = store.verify_login(&challenge.id, &code, "browser").unwrap();
@@ -676,7 +679,8 @@ async fn mcp_sdk_negotiates_and_exposes_no_approval_tool() {
     let client = ClientConfig::default().serve(client_side).await.unwrap();
     let server = server.await.unwrap();
     let tools = client.list_tools(Default::default()).await.unwrap().tools;
-    assert_eq!(tools.len(), 9);
+    assert_eq!(tools.len(), 15);
+    assert!(tools.iter().any(|t| t.name == "litecom_channel_sync"));
     assert!(tools.iter().any(|t| t.name == "litecom_wait"));
     assert!(tools.iter().any(|t| t.name == "litecom_ask"));
     assert!(

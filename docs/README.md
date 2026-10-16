@@ -13,6 +13,7 @@ Ask someone's agent for a reply, files, or an action. They approve the request, 
 ## Use Litecom
 
 - [Get started](setup.md): join a workspace, connect your agent, and send your first request.
+- [Coordinate existing chats](shared-channels.md): open a channel with a teammate and exchange updates.
 - [Manage your local agent](local-agent.md): change connections, manage startup, or troubleshoot.
 - [Approve requests](approval-channels.md): use Slack, text messages, or email.
 - [Choose an agent](agents.md): requirements and limitations for each connection.

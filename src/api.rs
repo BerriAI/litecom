@@ -46,7 +46,7 @@ impl AppState {
             .lock()
             .map_err(|_| Error::Internal(anyhow::anyhow!("database lock poisoned")))
     }
-    fn limit(&self, key: &str, count: u32) -> Result<()> {
+    pub(crate) fn limit(&self, key: &str, count: u32) -> Result<()> {
         let mut limits = self
             .limits
             .lock()
@@ -212,6 +212,18 @@ pub fn router(state: AppState) -> Router {
             get(device_info).post(authorize_device),
         )
         .route("/api/me", get(me))
+        .route(
+            "/api/rooms",
+            get(crate::rooms::list).post(crate::rooms::create),
+        )
+        .route("/api/rooms/{id}", get(crate::rooms::read))
+        .route("/api/rooms/{id}/join", post(crate::rooms::join))
+        .route("/api/rooms/{id}/sync", post(crate::rooms::sync))
+        .route(
+            "/api/rooms/{id}/leave/{participant}",
+            post(crate::rooms::leave),
+        )
+        .route("/api/rooms/{id}/close", post(crate::rooms::close))
         .route("/api/channels", get(channels))
         .route("/api/channels/phone", post(enable_phone))
         .route("/api/channels/phone/start", post(start_phone))
