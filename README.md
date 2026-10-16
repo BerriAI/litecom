@@ -37,13 +37,11 @@ Set up Litecom using https://github.com/BerriAI/litecom/blob/main/docs/setup-wit
 
 Request access, make a change, or get a file—from the agent you already use.
 
-> Ask Ishaan’s agent to give me write access to the GitHub repo.
-
 ![Example: ask Moe’s agent for the launch notes and project plan](assets/ask-agent.png)
 
 ## Approve in a message
 
-Moe taps **Approve** in Slack. Their agent starts the requested work. Phone and email work too when the host enables them.
+Moe taps **Approve** in Slack. Their agent does the work on their computer. Phone and email work too when the host enables them.
 
 ![Example Slack approval for Tin’s request](assets/approve-in-slack.png)
 
