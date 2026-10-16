@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.19
+
+- Keep Slack approval cards short: Ask, From, Where, and action buttons. Preserve that context as the request progresses.
+- Render replies with Slack Markdown and deliver approved files in the source thread. Keep authenticated downloads available when Slack cannot accept a file.
+- Use AgentChat for Slack API calls and message payloads.
+- Authorize Codex, Claude Code, and ACP tool operations within an approved run, without changing global agent permissions.
+- Prepare new approval requests while another request is running.
+- Request macOS folder, Accessibility, and Screen Recording access during setup. Copying the setup prompt now shows only “Copied.”
+
 ## 0.1.0-alpha.18
 
 - Finish setup with the selected agent’s launch command and a first request. The browser and setup prompt explain that requests and results stay in your agent’s chat.
