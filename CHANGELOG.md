@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-alpha.25
+
+- Keep updates working when GitHub’s API rate limit is reached, using its public release feed and the same verified downloads.
+
 ## 0.1.0-alpha.24
 
 - Update existing installations with `litecom update` (`upgrade` also works), with verified downloads and no repeat pairing.

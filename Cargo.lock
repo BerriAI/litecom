@@ -1953,7 +1953,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litecom"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 dependencies = [
  "a2a-protocol-types",
  "aes-gcm",
@@ -1981,6 +1981,7 @@ dependencies = [
  "rand 0.8.8",
  "reqwest 0.12.28",
  "rmcp",
+ "roxmltree",
  "rusqlite",
  "semver",
  "serde",
@@ -2842,6 +2843,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2959,7 +2969,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

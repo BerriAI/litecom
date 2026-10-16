@@ -18,7 +18,7 @@ Use this route to run a server or install without a workspace connection command
 
 ```sh
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.24/litecom-installer.sh \
+  https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.25/litecom-installer.sh \
   -o /tmp/litecom-installer.sh
 sh /tmp/litecom-installer.sh
 ```
@@ -26,10 +26,10 @@ sh /tmp/litecom-installer.sh
 On Windows, run in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.24/litecom-installer.ps1)))
+& ([scriptblock]::Create((Invoke-RestMethod https://github.com/BerriAI/litecom/releases/download/v0.1.0-alpha.25/litecom-installer.ps1)))
 ```
 
-Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.24).
+Follow the installer's PATH instructions, then run `litecom --version`. You can also download an archive and its checksum from [Releases](https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.25).
 
 ## Update an existing installation
 
@@ -47,9 +47,9 @@ The server must support updates (alpha.24 or later). Self-hosters should upgrade
 
 Already-open chats can keep using CLI tools. Start a new Codex, Claude Code, or other agent chat when you want its refreshed MCP tool catalog. Updating does not grant additional operating-system permissions; run `litecom approve` if you previously skipped permission setup.
 
-### Upgrading from alpha.23 or earlier
+### Upgrading from alpha.24 or earlier
 
-Older builds do not have the update command. On macOS or Linux, run the following once, using your team's Litecom URL:
+For alpha.24 or earlier, run this once on macOS or Linux, using your team's Litecom URL. It also works if an older updater hits GitHub’s API rate limit:
 
 ```sh
 curl -fsSL https://YOUR-SERVER/install.sh | sh -s -- update

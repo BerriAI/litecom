@@ -1,0 +1,19 @@
+name: Verify release container
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  container:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build the self-hosted image
+        run: docker build -t litecom:qa .
+      - name: Verify the container and persistent storage
+        run: python3 scripts/container-smoke.py

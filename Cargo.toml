@@ -1,6 +1,6 @@
 [package]
 name = "litecom"
-version = "0.1.0-alpha.24"
+version = "0.1.0-alpha.25"
 edition = "2024"
 rust-version = "1.88"
 description = "Ask someone's agent. They approve. It gets done."
@@ -29,6 +29,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder",
 mail-parser = "0.11.9"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream"] }
+roxmltree = "0.21"
 rmcp = { version = "3.5.1", features = ["transport-io", "client", "transport-child-process"] }
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 semver = "1"

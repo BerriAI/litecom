@@ -26,7 +26,7 @@ Only explicitly posted text is shared. A channel message does not authorize new 
 
 ## Already have Litecom installed?
 
-Channels require Litecom **0.1.0-alpha.23 or later** on the server and in the CLI. Use `litecom update` to update an existing installation; [older builds have a one-time installer command](distribution.md#upgrading-from-alpha23-or-earlier). Your saved connections stay in place. An already-open chat can use the CLI immediately; start a new chat to load updated MCP tools.
+Channels require Litecom **0.1.0-alpha.23 or later** on the server and in the CLI. Use `litecom update` to update an existing installation; [older builds have a one-time installer command](distribution.md#upgrading-from-alpha24-or-earlier). Your saved connections stay in place. An already-open chat can use the CLI immediately; start a new chat to load updated MCP tools.
 
 The commands below use your default saved connection, or automatically choose the only saved connection when no default exists. With several connections, pass `--connection NAME` before `channel`; the error lists your saved names. Keep each chat's session key and participant ID separate.
 

@@ -28,6 +28,7 @@ install-updater = false
 github-attestations = true
 github-attestations-phase = "host"
 github-build-setup = "../release/build-setup.yml"
+local-artifacts-jobs = ["./verify-release-container"]
 global-artifacts-jobs = ["./verify-downloads"]
 
 [dist.github-custom-runners]

@@ -22,7 +22,7 @@ pub struct Options {
     /// Show the newest published release without changing anything.
     #[arg(long)]
     pub check: bool,
-    /// Install a specific published version (for example 0.1.0-alpha.24).
+    /// Install a specific published version (for example 0.1.0-alpha.25).
     #[arg(long)]
     pub to: Option<String>,
     /// Seconds to wait for active requests before leaving the installation alone.
@@ -78,27 +78,96 @@ fn select_release(releases: Vec<Release>, name: &str) -> Result<Version> {
         .max()
         .context("No complete published release is available for this computer.")
 }
+fn feed_versions(feed: &str) -> Result<Vec<Version>> {
+    let doc = roxmltree::Document::parse(feed)?;
+    let mut versions = doc
+        .descendants()
+        .filter(|n| n.has_tag_name(("http://www.w3.org/2005/Atom", "entry")))
+        .flat_map(|entry| {
+            entry
+                .children()
+                .filter(|n| n.has_tag_name(("http://www.w3.org/2005/Atom", "link")))
+        })
+        .filter(|link| link.attribute("rel") == Some("alternate"))
+        .filter_map(|link| link.attribute("href"))
+        .filter_map(|url| url.strip_prefix("https://github.com/BerriAI/litecom/releases/tag/"))
+        .filter_map(|tag| version(tag).ok())
+        .collect::<Vec<_>>();
+    versions.sort();
+    versions.dedup();
+    versions.reverse();
+    Ok(versions)
+}
+async fn available(http: &reqwest::Client, release: &Version, downloads: &str) -> Result<bool> {
+    let base = format!("{downloads}/v{release}/{}", archive_name()?);
+    for url in [base.clone(), format!("{base}.sha256")] {
+        let response = http.head(url).send().await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        response.error_for_status()?;
+    }
+    Ok(true)
+}
 async fn latest(http: &reqwest::Client, to: Option<&str>) -> Result<Version> {
-    let url = if let Some(to) = to {
-        format!(
-            "https://api.github.com/repos/BerriAI/litecom/releases/tags/v{}",
-            version(to)?
+    if let Some(to) = to {
+        let release = version(to)?;
+        if available(
+            http,
+            &release,
+            "https://github.com/BerriAI/litecom/releases/download",
         )
-    } else {
-        "https://api.github.com/repos/BerriAI/litecom/releases?per_page=100".into()
-    };
-    let response = http
-        .get(url)
+        .await?
+        {
+            return Ok(release);
+        }
+        bail!("That version has no complete published download for this computer.");
+    }
+    discover(
+        http,
+        "https://api.github.com/repos/BerriAI/litecom/releases?per_page=100",
+        "https://github.com/BerriAI/litecom/releases.atom",
+        "https://github.com/BerriAI/litecom/releases/download",
+    )
+    .await
+}
+async fn discover(
+    http: &reqwest::Client,
+    api_url: &str,
+    feed_url: &str,
+    downloads: &str,
+) -> Result<Version> {
+    // GitHub's unauthenticated API quota is shared by everyone behind an IP.
+    // Public Atom feeds and versioned downloads do not use that API quota.
+    let api: Result<Version> = async {
+        let releases = http
+            .get(api_url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        select_release(releases, &archive_name()?)
+    }
+    .await;
+    if let Ok(release) = api {
+        return Ok(release);
+    }
+    let feed = http
+        .get(feed_url)
         .send()
-        .await
-        .context("Cannot reach GitHub. Check your network and retry; nothing was changed.")?
-        .error_for_status()?;
-    let releases = if to.is_some() {
-        vec![response.json::<Release>().await?]
-    } else {
-        response.json().await?
-    };
-    select_release(releases, &archive_name()?)
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    for release in feed_versions(&feed)? {
+        if available(http, &release, downloads).await? {
+            return Ok(release);
+        }
+    }
+    bail!(
+        "No complete published release is available for this computer. Check your network and retry; nothing was changed."
+    )
 }
 fn verify_checksum(bytes: &[u8], checksum: &str) -> Result<()> {
     let expected = checksum.split_whitespace().next().unwrap_or("");
@@ -434,6 +503,44 @@ pub async fn run(options: Options) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn rate_limited_api_falls_back_without_installing_an_incomplete_release() {
+        use axum::{Router, http::StatusCode, routing::get};
+        let feed = r#"<feed xmlns="http://www.w3.org/2005/Atom">
+          <entry><link rel="alternate" href="https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.25"/></entry>
+          <entry><link rel="alternate" href="https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.24"/></entry>
+        </feed>"#;
+        let app = Router::new()
+            .route("/api", get(|| async { StatusCode::FORBIDDEN }))
+            .route("/feed", get(move || async move { feed }))
+            .route(
+                "/download/{*path}",
+                get(
+                    |axum::extract::Path(path): axum::extract::Path<String>| async move {
+                        if path.starts_with("v0.1.0-alpha.25/") && path.ends_with(".sha256") {
+                            StatusCode::NOT_FOUND
+                        } else {
+                            StatusCode::OK
+                        }
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let result = discover(
+            &reqwest::Client::new(),
+            &format!("{origin}/api"),
+            &format!("{origin}/feed"),
+            &format!("{origin}/download"),
+        )
+        .await;
+        server.abort();
+        assert_eq!(result.unwrap().to_string(), "0.1.0-alpha.24");
+    }
+
     #[test]
     fn extraction_matches_published_archive_layouts() {
         let root = Path::new("download");
@@ -449,6 +556,24 @@ mod tests {
             extracted_binary(root, "x86_64-unknown-linux-gnu"),
             root.join("litecom-x86_64-unknown-linux-gnu/litecom")
         );
+    }
+    #[test]
+    fn public_feed_uses_only_official_release_tags_and_orders_versions() {
+        let feed = r#"<feed xmlns="http://www.w3.org/2005/Atom">
+          <entry><title>v99.0.0</title><link rel="alternate" href="https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.9"/></entry>
+          <entry><link rel="alternate" href="https://github.com/BerriAI/litecom/releases/tag/v0.1.0-alpha.25"/></entry>
+          <entry><link rel="alternate" href="https://evil.example/releases/tag/v99.0.0"/></entry>
+          <entry><link rel="alternate" href="https://github.com/BerriAI/litecom/releases/tag/../../other"/></entry>
+        </feed>"#;
+        assert_eq!(
+            feed_versions(feed)
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["0.1.0-alpha.25", "0.1.0-alpha.9"]
+        );
+        assert!(feed_versions("broken XML").is_err());
     }
     #[test]
     fn checksums_fail_closed() {
