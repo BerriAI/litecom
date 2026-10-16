@@ -601,17 +601,23 @@ summary::marker {
 .connection-panel details p {
   color: var(--foreground);
 }
+.connection-panel textarea + button {
+  margin-top: 12px;
+}
 .connection-result {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 12px;
   padding: 16px 0;
   margin-bottom: 24px;
 }
 .connection-result p {
   margin: 0;
+}
+.connection-result blockquote {
+  margin: 0;
+  padding: 16px;
+  background: var(--tint);
+  border-radius: 6px;
 }
 .account-row,
 .account-row > div {

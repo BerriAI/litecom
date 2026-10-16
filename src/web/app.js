@@ -602,7 +602,13 @@ ${command}
 
 Run from any folder. New connections use the user’s home folder by default. Detect which supported coding agent you are using and pass ${windows ? "-Agent" : "--agent"} to select it without interactive prompts. Do not set ${windows ? "-Workspace" : "--workspace"} unless I specifically request a different folder. Preserve the saved folder when reconnecting. Use only the existing signed-in agent account; preserve other connections, MCP servers, skills, and hooks. Do not print or share the private connection code or credentials. If no supported signed-in coding agent is available, tell me what to install or sign in to. If this command has expired, ask me to copy a new prompt from the workspace.
 
-Verify with litecom --connection ${connection} doctor. Confirm the worker is connected and MCP is configured; tell me if this chat needs a restart to load the tools. Do not approve requests or send a test request unless I ask. Finish with the workspace URL and how to ask another person's agent.`;
+Verify with litecom --connection ${connection} doctor. Confirm the worker is connected and MCP is configured. Do not approve requests or send a test request unless I ask. Finish by naming the agent you connected and telling me to start a new chat in it to load Litecom. Show its interactive launch command and this first request: Use Litecom to ask my agent to reply with "Connected through Litecom." Explain that I approve in my chosen channel and the reply appears in the same chat. If setup only adds MCP to receiving ACP sessions, explain that limitation instead of claiming it is available in ordinary chats. Include the workspace URL.`;
+}
+function connectedAgentNextStep(agent) {
+  const harness = agent?.local?.harness;
+  if (!["Codex", "Claude Code", "OpenCode", "Cursor", "pi", "OpenClaw", "Hermes"].includes(harness))
+    return '<p>Follow the terminal’s next step to ask from your agent.</p><a href="/?ask=me">Ask from Litecom →</a>';
+  return `<p>Start a new chat in <strong>${esc(harness)}</strong> and ask:</p><blockquote>Use Litecom to ask my agent to reply with “Connected through Litecom.”</blockquote><p class="muted">Approve in your chosen channel. The reply appears in the same chat.</p><a href="/?ask=me">Or ask from Litecom →</a>`;
 }
 async function pollLocalConnection() {
   if (!localPairing || !document.getElementById("connect-status") || busy)
@@ -634,6 +640,9 @@ async function pollLocalConnection() {
     };
     target.textContent = messages[result.status] || "Checking connection…";
     if (["connected", "expired", "disconnected"].includes(result.status)) {
+      const agents = result.status === "connected" ? await api("/api/agents") : [];
+      if (localPairing !== current || !target.isConnected) return;
+      const connected = agents.find((agent) => agent.id === current.agent_id);
       document
         .querySelectorAll("[data-action=connect-local]")
         .forEach((button) => (button.hidden = false));
@@ -641,13 +650,11 @@ async function pollLocalConnection() {
       localPairing = null;
       const panel = document.getElementById("local-command");
       if (panel)
-        panel.innerHTML = `<div class="connection-result"><p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? '<a href="/?ask=me">Ask your agent →</a>' : ""}</div>`;
+        panel.innerHTML = `<section class="connection-result"><p id="connect-status" role="status">${esc(messages[result.status])}</p>${result.status === "connected" ? connectedAgentNextStep(connected) : ""}</section>`;
       if (result.status === "connected") {
         const row = [...document.querySelectorAll("[data-agent-status]")].find(
           (el) => el.dataset.agentStatus === current.agent_id,
         );
-        const agents = await api("/api/agents");
-        const connected = agents.find((agent) => agent.id === current.agent_id);
         if (row && connected) row.textContent = agentStatus(connected);
         const heading = document.querySelector(`[data-agent-name="${CSS.escape(current.agent_id)}"]`);
         if (heading && connected) heading.innerHTML = `${esc(agentLabel(connected))}${connected.is_default ? '<span class="inline-meta">Default</span>' : ""}`;

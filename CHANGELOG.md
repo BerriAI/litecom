@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.1.0-alpha.17
+## 0.1.0-alpha.18
+
+- Finish setup with the selected agent’s launch command and a first request. The browser and setup prompt explain that requests and results stay in your agent’s chat.
 
 - Start new local connections in your home folder. Setup can run from any terminal; retries and agent switches preserve the saved folder unless you pass `--workspace`.
 - Optionally enable a hosted Slack agent on the existing approval app. It reads channel context, resolves the recipient, and submits a request for owner approval.

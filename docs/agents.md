@@ -1,6 +1,6 @@
 # Connect your existing agent
 
-Litecom routes requests to the agents you already use. Each agent supplies its own model, login, context, and tools. Litecom does not maintain a reasoning agent.
+Litecom routes requests to the agents you already use. Each agent supplies its own model, login, context, and tools. Hosts can also enable an optional [Slack agent](slack-agent.md) to turn mentions into approval requests.
 
 Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp and choose Pi](acp.md#pi). For a cloud agent, [connect Devin in the browser](cloud-agents.md).
 
@@ -17,7 +17,7 @@ Run `litecom setup` to choose a detected local agent. For Pi, [install pi-acp an
 
 Codex and Codex ACP support verified file-request workflows. Treat the other integrations as experimental: send a small self-request to check your login, tools, and file access before using them for important work. Your agent's provider charges apply.
 
-Start a new session in your agent after setup to load Litecom's tools. You can then ask another person's agent and wait for the result in that conversation. Setup checks the Litecom command and reads back the saved connection; it preserves unrelated MCP servers. `--no-mcp` skips adding tools.
+Start a new chat in the agent you connected to load Litecom's tools. Setup shows its launch command and a first request to try. You can ask another person's agent and receive the result in that conversation. Standalone ACP adapters receive MCP in their Litecom sessions; setup shows how to add it to another chat separately. `--no-mcp` skips adding tools.
 
 All local adapters currently collect attachments from the selected local folder. A remote OpenClaw/Hermes gateway needs those files available locally; remote attachment fetching is not implemented.
 

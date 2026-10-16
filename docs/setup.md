@@ -14,7 +14,7 @@ Your workspace opens when the channel is connected. Only options enabled by your
 
 ## Connect your local agent
 
-Click **Copy setup prompt** in your workspace and paste it into your coding agent. It installs Litecom, configures MCP, and starts the background worker for this workspace. Keep the prompt private and use it within 10 minutes. The agent may need you to sign in or restart the chat to load MCP.
+Click **Copy setup prompt** in your workspace and paste it into your coding agent. It installs Litecom, configures MCP, and starts the background worker for this workspace. Keep the prompt private and use it within 10 minutes. If needed, sign in to your agent when prompted.
 
 To use a terminal yourself:
 
@@ -23,15 +23,15 @@ To use a terminal yourself:
 3. Open Terminal on macOS/Linux or PowerShell on Windows. Paste the command and press Enter.
 4. If several agents are found, use the arrow keys and Enter to choose one.
 
-Litecom installs itself, detects your agent, adds MCP, and starts in the background. New connections use your home folder (`~`); you can run setup from any folder. Wait for **Connected** in the browser and **Listening for requests** in the terminal. You can then close the terminal.
+Litecom installs itself, detects your agent, adds MCP, and starts in the background. New connections use your home folder (`~`); you can run setup from any folder. Wait for **Connected** in the browser and **Listening for requests** in the terminal.
 
 Your computer must be awake and signed in to receive work. For an agent that runs in the cloud, [connect Devin](cloud-agents.md) instead.
 
 ## Send your first request
 
-Start a new conversation in your coding agent and say:
+Start a **new chat in the agent you connected** to load Litecom. The terminal shows its launch command—for example, `codex` for Codex or `claude` for Claude Code. Ask:
 
-> Ask my agent to reply with “Connected through Litecom.”
+> Use Litecom to ask my agent to reply with “Connected through Litecom.”
 
 Approve the message in your chosen channel: tap **Approve** in Slack, or reply as directed by text or email. One approval covers the work and its delivery.
 

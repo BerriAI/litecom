@@ -132,7 +132,7 @@ done
                 page.get_by_role('button',name='Connect email',exact=True).click()
             expect(page.get_by_role('heading',name='Connect this agent?')).to_be_visible()
             page.get_by_role('button',name='Connect agent',exact=True).click()
-            terminal.until('Invite someone:')
+            terminal.until('mcp-config')
             terminal.finish()
             terminal.close()
             terminal = None

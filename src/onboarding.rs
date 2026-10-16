@@ -303,7 +303,7 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
             | NativeAgent::OpenClaw => {
                 let name = crate::agent_setup::install(&settings, &tools).await?;
                 println!(
-                    "Litecom tools checked and saved in {} as {name}. Start a new agent session to use them.",
+                    "Litecom tools checked and saved in {} as {name}.",
                     settings.agent.name()
                 );
             }
@@ -357,11 +357,52 @@ pub async fn setup(mut options: Setup, connection: &str) -> Result<()> {
         println!("Start listening: litecom --connection {connection} worker");
     }
     if !options.preview {
-        println!(
-            "\nTry: litecom --connection {connection} ask me \"Find my launch notes\"\nInvite someone: litecom --connection {connection} contacts --invite"
-        );
+        if let Some(command) = (!options.no_mcp).then(|| chat_command(&settings)).flatten() {
+            println!(
+                "\nReady in {}.\nStart a new chat: {command}\n\nThen ask:\n  Use Litecom to ask my agent to reply with \"Connected through Litecom.\"\n\nApprove the request in your approval channel. The reply appears in the same chat.",
+                settings.agent.name()
+            );
+        } else {
+            println!(
+                "\nSend a request: litecom --connection {connection} ask me \"Reply with Connected through Litecom.\"\nTo add Litecom to another chat, get its MCP configuration: litecom --connection {connection} mcp-config"
+            );
+        }
     }
     Ok(())
+}
+
+/// Show an interactive chat command, never an ACP protocol server. Prefer the
+/// familiar command when it is on PATH; bundled CLIs need their actual path.
+fn chat_command(settings: &RunnerConfig) -> Option<String> {
+    let executable = match settings.agent {
+        NativeAgent::CodexAcp | NativeAgent::ClaudeAcp | NativeAgent::Acp => return None,
+        NativeAgent::Pi => runner::find_executable("pi")?,
+        _ => settings.executable.clone(),
+    };
+    let filename = executable.file_name()?;
+    let on_path = std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| {
+            directory.join(filename).canonicalize().ok()
+                == executable
+                    .canonicalize()
+                    .ok()
+                    .filter(|_| executable.is_file())
+        })
+    });
+    let mut command = if on_path {
+        filename.to_string_lossy().into_owned()
+    } else if cfg!(windows) {
+        format!("& '{}'", executable.to_string_lossy().replace('\'', "''"))
+    } else {
+        format!(
+            "'{}'",
+            executable.to_string_lossy().replace('\'', "'\"'\"'")
+        )
+    };
+    if settings.agent == NativeAgent::OpenClaw {
+        command.push_str(" tui");
+    }
+    Some(command)
 }
 
 fn choose_runner(options: &Setup, connection: &str) -> Result<RunnerConfig> {
