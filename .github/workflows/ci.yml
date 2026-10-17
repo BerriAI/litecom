@@ -52,6 +52,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      - name: Verify slow final replies keep their execution lease
+        if: runner.os == 'Linux'
+        run: cargo test --locked slow_result_delivery_keeps_its_lease_without_relaunching -- --ignored
       - run: cargo build --release --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: runner.os == 'Linux'

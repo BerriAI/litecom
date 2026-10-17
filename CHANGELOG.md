@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-alpha.27
+
+- Keep final replies alive during slow delivery instead of cutting them off after 45 seconds.
+- Confirm already-delivered replies when an acknowledgment is lost, without rerunning the agent. Keep cancellation effective during delivery.
+- Share heartbeat state across file and reply delivery, and describe unconfirmed outcomes without assuming a lost connection.
+
 ## 0.1.0-alpha.26
 
 - Return control when a request needs human approval, with a saved request link instead of instructions to poll indefinitely.

@@ -508,7 +508,7 @@ async fn stage_native_reply(
             bail!("The request is no longer executing.");
         }
         let file = client
-            .upload(&work.task_id, Some(&work.lease), &path)
+            .upload_with_lease(&work.task_id, Some(&work.lease), &path, renewal)
             .await?;
         attachments.push(file.id);
     }

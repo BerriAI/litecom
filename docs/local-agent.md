@@ -89,7 +89,7 @@ litecom logs REQUEST_ID --follow
 
 Press Ctrl+C to stop watching; the agent keeps running. `litecom runs --active` shows only running requests. `litecom runs --json` gives paths and session IDs for scripts. `litecom logs REQUEST_ID --raw` shows the original events. No sign-in or connection selection is needed to inspect local runs.
 
-A brief relay outage retries the connection and delivery without rerunning the agent. If the outage outlasts the execution lease (two minutes since the last confirmed heartbeat), the agent stops and the request needs attention. Check its logs and any external effects before sending another request.
+A brief relay outage retries the connection and delivery without rerunning the agent. File and reply delivery keep the request's heartbeat running, so a slow transfer can finish while the relay remains reachable. If the outage outlasts the execution lease (two minutes since the last confirmed heartbeat), the agent stops and the request needs attention. Check its logs and any external effects before sending another request.
 
 ## Uninstall
 

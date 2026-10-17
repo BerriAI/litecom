@@ -18,7 +18,7 @@ pub struct ApiError {
 pub struct Client {
     pub config: ClientConfig,
     http: reqwest::Client,
-    uploads: reqwest::Client,
+    transfers: reqwest::Client,
 }
 impl Client {
     pub fn new(config: ClientConfig) -> Result<Self> {
@@ -31,8 +31,8 @@ impl Client {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
             // Reqwest's read timeout also runs while sending the request body.
-            // File uploads use their work heartbeat and cancellation instead.
-            uploads: reqwest::Client::builder()
+            // Files and final replies use their work heartbeat and cancellation instead.
+            transfers: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(20))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
@@ -67,6 +67,15 @@ impl Client {
         path: &str,
         body: Option<Value>,
     ) -> Result<T> {
+        self.call_with(&self.http, method, path, body).await
+    }
+    async fn call_with<T: DeserializeOwned>(
+        &self,
+        http: &reqwest::Client,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<T> {
         // Never interpret a tool-supplied identifier as an alternate API path.
         let parsed = url::Url::parse(&format!(
             "{}{}",
@@ -80,8 +89,7 @@ impl Client {
         {
             bail!("Invalid Litecom API path.");
         }
-        let mut request = self
-            .http
+        let mut request = http
             .request(
                 method,
                 format!("{}{}", self.config.relay.trim_end_matches('/'), path),
@@ -213,6 +221,16 @@ impl Client {
     }
     pub async fn upload(&self, task: &str, lease: Option<&str>, path: &Path) -> Result<Artifact> {
         let mut renewal = WorkLease::new(self, task, lease.unwrap_or(""));
+        self.upload_with_lease(task, lease, path, &mut renewal)
+            .await
+    }
+    pub(crate) async fn upload_with_lease(
+        &self,
+        task: &str,
+        lease: Option<&str>,
+        path: &Path,
+        renewal: &mut WorkLease<'_>,
+    ) -> Result<Artifact> {
         loop {
             if lease.is_some()
                 && !matches!(
@@ -222,7 +240,7 @@ impl Client {
             {
                 bail!("The upload was cancelled.");
             }
-            match self.upload_once(task, lease, path, &mut renewal).await {
+            match self.upload_once(task, lease, path, renewal).await {
                 Err(error) if lease.is_some() && transient(&error) => renewal.retry_delay().await?,
                 result => return result,
             }
@@ -256,7 +274,7 @@ impl Client {
                 reqwest::multipart::Part::stream(body).file_name(name),
             );
         let response = self
-            .uploads
+            .transfers
             .post(format!(
                 "{}/api/tasks/{task}/files",
                 self.config.relay.trim_end_matches('/')
@@ -434,32 +452,46 @@ impl<'a> WorkLease<'a> {
         }
         Ok(())
     }
+    async fn submit_result_once(&mut self, draft: &DraftInput) -> Result<TaskView> {
+        let client = self.client;
+        let path = format!("/api/tasks/{}/result", self.task);
+        let response = client.call_with(
+            &client.transfers,
+            Method::POST,
+            &path,
+            Some(json!({"lease":self.lease,"draft":draft})),
+        );
+        let keep_alive = async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                if self.renew().await? != Status::Executing {
+                    bail!("The request is no longer executing.");
+                }
+            }
+        };
+        tokio::select! {
+            // A completed result can clear its lease before the HTTP response
+            // arrives. Prefer the response; otherwise confirm it with a read.
+            biased;
+            result = response => result,
+            result = keep_alive => result,
+        }
+    }
     /// Retry delivery of the already produced result; never repeat agent execution.
     pub(crate) async fn submit_result(&mut self, draft: DraftInput) -> Result<TaskView> {
         let path = format!("/api/tasks/{}", self.task);
         loop {
-            let result = tokio::time::timeout_at(
-                self.deadline,
-                self.client.post::<TaskView>(
-                    &format!("{path}/result"),
-                    json!({"lease":self.lease,"draft":draft}),
-                ),
-            )
-            .await
-            .context("The result could not be confirmed before the execution lease expired.")?;
+            let result = self.submit_result_once(&draft).await;
             match result {
                 Ok(task) => return Ok(task),
                 Err(error) => {
                     // The POST may have committed even if its response was lost.
                     // A read with matching content confirms delivery without a new lease.
                     loop {
-                        match tokio::time::timeout_at(
-                            self.deadline,
-                            self.client.get::<TaskView>(&path),
-                        )
-                        .await
-                        {
-                            Ok(Ok(task)) => {
+                        // Reading an already committed reply needs no lease.
+                        // Allow one bounded read even if renewal just expired.
+                        match self.client.get::<TaskView>(&path).await {
+                            Ok(task) => {
                                 if matches!(
                                     task.status,
                                     Status::Completed | Status::AwaitingApproval
@@ -484,9 +516,7 @@ impl<'a> WorkLease<'a> {
                                 }
                                 break;
                             }
-                            Ok(Err(read_error)) if transient(&read_error) && transient(&error) => {
-                                self.retry_delay().await?
-                            }
+                            Err(read_error) if transient(&read_error) => self.retry_delay().await?,
                             _ => return Err(error),
                         }
                     }

@@ -1203,6 +1203,22 @@ async fn native_run_survives_a_temporary_relay_outage_without_relaunching() {
 }
 
 #[cfg(unix)]
+#[tokio::test]
+#[ignore = "exercises a real result response slower than the former 45-second timeout"]
+async fn slow_result_delivery_keeps_its_lease_without_relaunching() {
+    run_through_outage("slow_result").await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn result_delivery_handles_a_stalled_acknowledgment_and_cancellation() {
+    tokio::join!(
+        run_through_outage("slow_ack"),
+        run_through_outage("cancel_result")
+    );
+}
+
+#[cfg(unix)]
 async fn run_through_outage(failure: &'static str) {
     use crate::{
         client::Client,
@@ -1296,12 +1312,29 @@ cat codex-events.fixture
     let renewals = Arc::new(AtomicUsize::new(0));
     let counter = failures.clone();
     let heartbeat_count = renewals.clone();
+    let clock = f.clock.clone();
+    let result_state = state.clone();
+    let owner = f.b.clone();
+    let task_id = task.id.clone();
+    let status_reads = Arc::new(AtomicUsize::new(0));
     let router = crate::api::router(state.clone()).layer(axum::middleware::from_fn(
         move |req: Request<Body>, next: Next| {
             let counter = counter.clone();
             let heartbeat_count = heartbeat_count.clone();
+            let clock = clock.clone();
+            let result_state = result_state.clone();
+            let owner = owner.clone();
+            let task_id = task_id.clone();
+            let status_reads = status_reads.clone();
             async move {
                 let path = req.uri().path();
+                if failure == "slow_ack"
+                    && path == format!("/api/tasks/{task_id}")
+                    && req.method() == axum::http::Method::GET
+                    && status_reads.fetch_add(1, Ordering::SeqCst) == 0
+                {
+                    return StatusCode::SERVICE_UNAVAILABLE.into_response();
+                }
                 let heartbeat = path.ends_with("/heartbeat");
                 let n = if heartbeat {
                     heartbeat_count.fetch_add(1, Ordering::SeqCst)
@@ -1316,6 +1349,36 @@ cat codex-events.fixture
                     _ => path.ends_with("/result"),
                 };
                 if fail && counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                    if failure == "cancel_result" {
+                        result_state.db().unwrap().cancel(&owner, &task_id).unwrap();
+                        return axum::response::Response::new(Body::from_stream(
+                            futures_util::stream::pending::<
+                                Result<axum::body::Bytes, std::io::Error>,
+                            >(),
+                        ));
+                    }
+                    if failure == "slow_ack" {
+                        // The reply committed, but reading its HTTP body stalls.
+                        // Its lease is now cleared, so renewal fails and a status
+                        // read (itself briefly unavailable) must confirm delivery.
+                        let response = next.run(req).await;
+                        assert!(response.status().is_success());
+                        return response.map(|_| {
+                            Body::from_stream(futures_util::stream::pending::<
+                                Result<axum::body::Bytes, std::io::Error>,
+                            >())
+                        });
+                    }
+                    if failure == "slow_result" {
+                        // Move the server clock past the original lease while a
+                        // real HTTP response takes longer than the old timeout.
+                        // Only heartbeats during delivery can keep this run alive.
+                        for _ in 0..3 {
+                            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                            clock.fetch_add(60, Ordering::SeqCst);
+                        }
+                        return next.run(req).await;
+                    }
                     if failure == "lost_result" {
                         let response = next.run(req).await;
                         assert!(response.status().is_success());
@@ -1328,22 +1391,41 @@ cat codex-events.fixture
         },
     ));
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-    let outcome = handle_in(&client, &settings, &work, &dir.path().join("runs")).await;
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        handle_in(&client, &settings, &work, &dir.path().join("runs")),
+    )
+    .await
+    .unwrap();
     server.abort();
-    outcome.unwrap();
     assert!(
         failures.load(Ordering::SeqCst) >= 1,
         "{failure} did not run"
     );
+    if matches!(failure, "slow_result" | "slow_ack" | "cancel_result") {
+        assert_eq!(
+            failures.load(Ordering::SeqCst),
+            1,
+            "A slow response is not a failed delivery"
+        );
+    }
     let local = crate::runs::list_in(&dir.path().join("runs")).unwrap();
     assert_eq!(local.len(), 1);
-    assert_eq!(local[0].status, "completed");
     assert_eq!(local[0].session_id.as_deref(), Some("fixture-session"));
     assert_eq!(
         std::fs::read_to_string(dir.path().join("invoked")).unwrap(),
         "run\n"
     );
     let delivered = state.db().unwrap().get_task(&f.a, &task.id).unwrap();
+    if failure == "cancel_result" {
+        assert!(outcome.is_err());
+        assert_eq!(local[0].status, "needs attention");
+        assert_eq!(delivered.status, Status::CancelRequested);
+        assert!(delivered.response.is_none());
+        return;
+    }
+    outcome.unwrap();
+    assert_eq!(local[0].status, "completed");
     assert_eq!(delivered.status, Status::Completed);
     let response = delivered.response.unwrap();
     assert_eq!(response.text, "Still here after the restart.");

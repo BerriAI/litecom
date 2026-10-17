@@ -597,7 +597,7 @@ impl Store {
                     Outcome::Failed => "The approved action failed.",
                     Outcome::Cancelled => "The action was cancelled.",
                     Outcome::Uncertain => {
-                        "The connection was lost. The owner must check whether the action finished."
+                        "The outcome could not be confirmed. The owner must check whether the action finished."
                     }
                 }
                 .into();
